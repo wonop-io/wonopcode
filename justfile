@@ -125,7 +125,7 @@ run-release *ARGS:
 # === CI/Pre-commit ===
 
 # Full CI check (what CI would run)
-ci: fmt-check lint test
+ci: fmt-check lint-strict test
     @echo "CI checks passed!"
 
 # Pre-commit hook check
