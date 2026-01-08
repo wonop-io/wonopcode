@@ -233,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_make_sandbox_relative() {
         let mapper = test_mapper();
 

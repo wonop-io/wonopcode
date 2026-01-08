@@ -3498,6 +3498,7 @@ async fn run_web_server(
 }
 
 /// Get network IP addresses for display.
+#[allow(unused_mut)]
 fn get_network_ips() -> std::io::Result<Vec<String>> {
     let mut ips = Vec::new();
 
