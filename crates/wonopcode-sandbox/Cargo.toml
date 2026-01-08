@@ -29,7 +29,7 @@ thiserror = "1"
 # Utilities
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
-bytesize = "1"
+bytesize = "2"
 
 # Internal dependencies
 wonopcode-util = { path = "../wonopcode-util" }

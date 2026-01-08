@@ -115,7 +115,7 @@ arboard = "3"
 walkdir = "2"
 serde_yaml = "0.9"
 bollard = "0.18"
-bytesize = "1"
+bytesize = "2"
 
 [workspace.lints.clippy]
 # Note: unwrap_used/expect_used are intentionally not enabled as warnings
