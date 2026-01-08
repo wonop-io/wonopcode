@@ -2075,9 +2075,16 @@ async function fetchUserData(userId) {
                                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                     if let Ok(text) = clipboard.get_text() {
                                         let line_count = text.lines().count();
-                                        tracing::debug!("Ctrl+V paste: {} lines, {} bytes", line_count, text.len());
+                                        tracing::debug!(
+                                            "Ctrl+V paste: {} lines, {} bytes",
+                                            line_count,
+                                            text.len()
+                                        );
                                         if line_count >= 2 {
-                                            self.toasts.push(Toast::info(format!("Pasted {} lines", line_count)));
+                                            self.toasts.push(Toast::info(format!(
+                                                "Pasted {} lines",
+                                                line_count
+                                            )));
                                         }
                                         self.input.insert_paste(&text);
                                     }
@@ -2301,7 +2308,12 @@ async function fetchUserData(userId) {
                 // The input widget handles both single-line and multi-line pastes,
                 // including tracking for terminals that send paste line-by-line
                 let line_count = text.lines().count();
-                tracing::info!("Event::Paste received: {} lines, {} bytes, state={:?}", line_count, text.len(), self.state);
+                tracing::info!(
+                    "Event::Paste received: {} lines, {} bytes, state={:?}",
+                    line_count,
+                    text.len(),
+                    self.state
+                );
 
                 if self.state == AppState::Input || self.state == AppState::Scrolling {
                     self.autocomplete.hide();
@@ -2309,7 +2321,7 @@ async function fetchUserData(userId) {
 
                     // insert_paste handles both multi-line wrapping and single-line tracking
                     self.input.insert_paste(&text);
-                    
+
                     tracing::info!("After insert_paste: raw_len={}", self.input.content().len());
 
                     self.set_state(AppState::Input);
@@ -3057,7 +3069,11 @@ async function fetchUserData(userId) {
                 // Update pending count
                 self.footer.set_pending_permissions(1);
             }
-            AppUpdate::SessionLoaded { id, title, messages } => {
+            AppUpdate::SessionLoaded {
+                id,
+                title,
+                messages,
+            } => {
                 // Load a session with its messages (from remote server)
                 tracing::info!(session_id = %id, title = %title, message_count = messages.len(), "Loading session");
                 self.messages.set_messages(messages);

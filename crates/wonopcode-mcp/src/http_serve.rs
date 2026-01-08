@@ -94,7 +94,11 @@ impl McpHttpState {
     }
 
     /// Register a new session.
-    async fn register_session(&self, session_id: String, tx: mpsc::UnboundedSender<JsonRpcResponse>) {
+    async fn register_session(
+        &self,
+        session_id: String,
+        tx: mpsc::UnboundedSender<JsonRpcResponse>,
+    ) {
         let mut sessions = self.sessions.write().await;
         sessions.insert(
             session_id.clone(),
@@ -160,7 +164,9 @@ impl McpHttpState {
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION.to_string(),
             capabilities: ServerCapabilities {
-                tools: Some(ToolsCapability { list_changed: false }),
+                tools: Some(ToolsCapability {
+                    list_changed: false,
+                }),
                 resources: None,
                 prompts: None,
             },
@@ -228,7 +234,9 @@ impl McpHttpState {
         };
 
         // Execute tool
-        let args = params.arguments.unwrap_or(Value::Object(serde_json::Map::new()));
+        let args = params
+            .arguments
+            .unwrap_or(Value::Object(serde_json::Map::new()));
         let result = tool.executor.execute(args, &self.context).await;
 
         let tool_result = match result {
@@ -285,34 +293,32 @@ pub fn create_mcp_router(state: McpHttpState) -> Router {
         .with_state(state)
 }
 
-
-
 /// SSE connection handler.
 async fn mcp_sse(
     State(state): State<McpHttpState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // Generate unique session ID
     let session_id = uuid::Uuid::new_v4().to_string();
-    
+
     // Create channel for responses
     let (tx, mut rx) = mpsc::unbounded_channel::<JsonRpcResponse>();
-    
+
     // Register session
     state.register_session(session_id.clone(), tx).await;
-    
+
     // Build message URL with session ID
     let message_url = format!("{}?sessionId={}", state.message_url, session_id);
-    
+
     info!(session_id = %session_id, message_url = %message_url, "MCP SSE connection established");
-    
+
     let state_clone = state.clone();
     let session_id_clone = session_id.clone();
-    
+
     let stream = async_stream::stream! {
         // Send endpoint event first - just the URL string, not JSON
         // The old HTTP+SSE transport (2024-11-05) expects just the URL as the data
         yield Ok(Event::default().event("endpoint").data(message_url));
-        
+
         // Then stream responses
         loop {
             tokio::select! {
@@ -327,7 +333,7 @@ async fn mcp_sse(
                 }
             }
         }
-        
+
         // Cleanup on disconnect
         state_clone.unregister_session(&session_id_clone).await;
     };
@@ -361,7 +367,11 @@ async fn mcp_message(
     // Handle the request
     if let Some(response) = state.handle_request(request).await {
         // Send response via SSE
-        if state.send_response(&query.session_id, response.clone()).await.is_err() {
+        if state
+            .send_response(&query.session_id, response.clone())
+            .await
+            .is_err()
+        {
             warn!(session_id = %query.session_id, "Failed to send response - session not found");
             return (
                 StatusCode::NOT_FOUND,
@@ -370,7 +380,10 @@ async fn mcp_message(
         }
     }
 
-    (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "ok" })))
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "status": "ok" })),
+    )
 }
 
 #[cfg(test)]

@@ -196,10 +196,7 @@ impl RemoteBackend {
     }
 
     /// Convert AppAction to protocol Action and send via HTTP.
-    async fn send_protocol_action(
-        &self,
-        action: wonopcode_protocol::Action,
-    ) -> BackendResult<()> {
+    async fn send_protocol_action(&self, action: wonopcode_protocol::Action) -> BackendResult<()> {
         let endpoint = action.endpoint();
         let url = format!("{}{}", self.base_url, endpoint);
 

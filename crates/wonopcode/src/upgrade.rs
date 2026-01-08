@@ -58,9 +58,7 @@ const GITHUB_REPO: &str = "wonop-io/wonopcode";
 
 /// Fetch releases from GitHub API.
 pub async fn fetch_releases(channel: ReleaseChannel) -> Result<Vec<Release>> {
-    let client = reqwest::Client::builder()
-        .user_agent("wonopcode")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("wonopcode").build()?;
 
     let url = format!("https://api.github.com/repos/{}/releases", GITHUB_REPO);
     let response = client.get(&url).send().await?;
@@ -181,12 +179,14 @@ pub fn format_size(bytes: u64) -> String {
 pub async fn install_release(release: &Release) -> Result<()> {
     let asset = find_platform_asset(release)?;
 
-    println!("Downloading {} ({})...", release.tag, format_size(asset.size));
+    println!(
+        "Downloading {} ({})...",
+        release.tag,
+        format_size(asset.size)
+    );
 
     // Download
-    let client = reqwest::Client::builder()
-        .user_agent("wonopcode")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("wonopcode").build()?;
 
     let response = client.get(&asset.download_url).send().await?;
     if !response.status().is_success() {
@@ -410,8 +410,6 @@ pub async fn check_updates_on_startup(cwd: &Path) -> Option<String> {
         AutoUpdateMode::Disabled => None,
     }
 }
-
-
 
 /// Handle the check command.
 pub async fn handle_check(channel: Option<ReleaseChannel>, json: bool) -> Result<()> {

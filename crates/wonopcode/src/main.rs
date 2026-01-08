@@ -60,7 +60,6 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1:3000")]
     address: std::net::SocketAddr,
 
-
     /// Connect to a remote headless server
     #[arg(long)]
     connect: Option<String>,
@@ -1674,14 +1673,11 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     let mcp_configs = config_file.mcp.clone();
 
     // Check if update notification is ready (with timeout)
-    let update_msg = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        update_notification,
-    )
-    .await
-    .ok()
-    .and_then(|r| r.ok())
-    .flatten();
+    let update_msg = tokio::time::timeout(std::time::Duration::from_secs(2), update_notification)
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten();
 
     if cli.basic {
         // Basic mode: simple line-based input
@@ -1693,7 +1689,15 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         run_basic_mode(&instance, &config, cli.prompt, mcp_configs).await?;
     } else {
         // TUI mode - pass update notification to show as toast
-        run_tui_mode(&instance, config, cli.prompt, mcp_configs, &config_file, update_msg).await?;
+        run_tui_mode(
+            &instance,
+            config,
+            cli.prompt,
+            mcp_configs,
+            &config_file,
+            update_msg,
+        )
+        .await?;
     }
 
     // Cleanup
@@ -1966,7 +1970,7 @@ async fn run_headless(
         temperature: Some(0.7),
         doom_loop: wonopcode_core::permission::Decision::Ask,
         test_provider_settings: None,
-        allow_all: false, // Permissions flow from TUI via protocol
+        allow_all: false,           // Permissions flow from TUI via protocol
         mcp_url: Some(mcp_sse_url), // Use HTTP transport for MCP
     };
 
@@ -2000,12 +2004,13 @@ async fn run_headless(
 
         // Set config for settings dialog
         state.config = Some(wonopcode_protocol::ConfigState {
-            sandbox: config_file.sandbox.as_ref().map(|s| {
-                wonopcode_protocol::SandboxConfigState {
+            sandbox: config_file
+                .sandbox
+                .as_ref()
+                .map(|s| wonopcode_protocol::SandboxConfigState {
                     enabled: s.enabled.unwrap_or(false),
                     runtime: s.runtime.clone(),
-                }
-            }),
+                }),
             permission: config_file.permission.as_ref().map(|p| {
                 wonopcode_protocol::PermissionConfigState {
                     allow_all_in_sandbox: p.allow_all_in_sandbox,
@@ -2065,15 +2070,15 @@ async fn run_headless(
                                             wonopcode_core::message::ToolState::Completed {
                                                 output,
                                                 ..
-                                            } => {
-                                                ("completed".to_string(), Some(output.clone()), true)
-                                            }
+                                            } => (
+                                                "completed".to_string(),
+                                                Some(output.clone()),
+                                                true,
+                                            ),
                                             wonopcode_core::message::ToolState::Error {
                                                 error,
                                                 ..
-                                            } => {
-                                                ("failed".to_string(), Some(error.clone()), false)
-                                            }
+                                            } => ("failed".to_string(), Some(error.clone()), false),
                                         };
 
                                         let input = match &tool_part.state {
@@ -2092,9 +2097,7 @@ async fn run_headless(
                                             | wonopcode_core::message::ToolState::Error {
                                                 input,
                                                 ..
-                                            } => {
-                                                serde_json::to_string(input).unwrap_or_default()
-                                            }
+                                            } => serde_json::to_string(input).unwrap_or_default(),
                                         };
 
                                         tool_calls.push(wonopcode_protocol::ToolCall {
@@ -2107,9 +2110,11 @@ async fn run_headless(
                                         });
                                     }
                                     wonopcode_core::message::MessagePart::Reasoning(reasoning) => {
-                                        content.push(wonopcode_protocol::MessageSegment::Thinking {
-                                            text: reasoning.text,
-                                        });
+                                        content.push(
+                                            wonopcode_protocol::MessageSegment::Thinking {
+                                                text: reasoning.text,
+                                            },
+                                        );
                                     }
                                     _ => {}
                                 }
@@ -2232,9 +2237,7 @@ async fn run_headless(
                 }
                 Action::Undo => wonopcode_tui::AppAction::Undo,
                 Action::Redo => wonopcode_tui::AppAction::Redo,
-                Action::Revert { message_id } => {
-                    wonopcode_tui::AppAction::Revert { message_id }
-                }
+                Action::Revert { message_id } => wonopcode_tui::AppAction::Revert { message_id },
                 Action::Unrevert => wonopcode_tui::AppAction::Unrevert,
                 Action::Compact => wonopcode_tui::AppAction::Compact,
                 Action::SandboxStart => wonopcode_tui::AppAction::SandboxStart,
@@ -2367,7 +2370,9 @@ async fn run_headless(
                                 id: msg_id,
                                 role: "assistant".to_string(),
                                 content: current_message_segments.clone(),
-                                timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                                timestamp: chrono::Utc::now()
+                                    .format("%Y-%m-%d %H:%M:%S")
+                                    .to_string(),
                                 tool_calls: vec![], // Tools are now inline in content
                                 model,
                                 agent,
@@ -2452,11 +2457,13 @@ async fn run_headless(
                     let mut state = state_for_updates.write().await;
                     state.sessions = sessions
                         .iter()
-                        .map(|(id, title, timestamp)| wonopcode_protocol::SessionListItem {
-                            id: id.clone(),
-                            title: title.clone(),
-                            timestamp: timestamp.clone(),
-                        })
+                        .map(
+                            |(id, title, timestamp)| wonopcode_protocol::SessionListItem {
+                                id: id.clone(),
+                                title: title.clone(),
+                                timestamp: timestamp.clone(),
+                            },
+                        )
                         .collect();
                 }
                 _ => {}
@@ -3233,7 +3240,9 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
                 }
 
                 // For file-modifying tools, append metadata as JSON so the TUI can parse it
-                if !output.metadata.is_null() && matches!(tool_name, "edit" | "write" | "multiedit" | "patch") {
+                if !output.metadata.is_null()
+                    && matches!(tool_name, "edit" | "write" | "multiedit" | "patch")
+                {
                     text = format!("{}\n\n<!-- TOOL_METADATA: {} -->", text, output.metadata);
                 }
 
@@ -3285,10 +3294,11 @@ async fn create_mcp_http_state(
 
     // Initialize snapshot store
     let snapshot_dir = root_dir.join(".wonopcode").join("snapshots");
-    let snapshot_store = SnapshotStore::new(snapshot_dir, root_dir.clone(), SnapshotConfig::default())
-        .await
-        .ok()
-        .map(Arc::new);
+    let snapshot_store =
+        SnapshotStore::new(snapshot_dir, root_dir.clone(), SnapshotConfig::default())
+            .await
+            .ok()
+            .map(Arc::new);
 
     // Initialize file time tracker
     let file_time = Arc::new(FileTimeState::new());

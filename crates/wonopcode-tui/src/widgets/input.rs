@@ -324,10 +324,10 @@ impl InputWidget {
         // Normalize line endings: \r\n -> \n, then \r -> \n
         // Some terminals (like iTerm2) send \r instead of \n
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        
+
         // Strip trailing newline if present
         let text = text.strip_suffix('\n').unwrap_or(&text);
-        
+
         let line_count = text.lines().count().max(1);
         tracing::info!("insert_paste: {} lines, {} bytes", line_count, text.len());
 
@@ -349,7 +349,11 @@ impl InputWidget {
         if line_count >= PASTE_WRAP_MIN_LINES {
             self.paste_count += 1;
             let wrapped = format!("{}{}{}", PASTE_TAG_OPEN, text, PASTE_TAG_CLOSE);
-            tracing::info!("insert_paste: wrapping {} lines in tags (paste #{})", line_count, self.paste_count);
+            tracing::info!(
+                "insert_paste: wrapping {} lines in tags (paste #{})",
+                line_count,
+                self.paste_count
+            );
             self.textarea.insert_str(&wrapped);
             self.paste_tracker = None; // Complete paste, no tracking needed
         } else {
@@ -380,7 +384,7 @@ impl InputWidget {
                 // Need to wrap the pasted content retroactively
                 // Get all content and wrap the portion that was pasted
                 let raw_text = self.textarea.lines().join("\n");
-                
+
                 // For simplicity, if we detected multiple lines were pasted,
                 // wrap the entire current content (this works for empty-start pastes)
                 // A more sophisticated approach would track exact positions
@@ -569,7 +573,7 @@ impl InputWidget {
     fn move_to_offset(&mut self, offset: usize) {
         let raw_text = self.raw_text();
         let (row, col) = offset_to_cursor(&raw_text, offset);
-        
+
         // Move to target row
         self.textarea.move_cursor(tui_textarea::CursorMove::Top);
         for _ in 0..row {
@@ -593,7 +597,7 @@ impl InputWidget {
     fn move_cursor_right_skip_paste(&mut self) {
         let raw_text = self.raw_text();
         let current_offset = self.cursor_offset();
-        
+
         // Check if we're at or entering a paste region
         if let Some(end_offset) = skip_paste_region_right(&raw_text, current_offset) {
             self.move_to_offset(end_offset);
@@ -607,12 +611,12 @@ impl InputWidget {
     fn move_cursor_left_skip_paste(&mut self) {
         let raw_text = self.raw_text();
         let current_offset = self.cursor_offset();
-        
+
         // First do a normal move left
         if current_offset == 0 {
             return;
         }
-        
+
         // Check if we'd enter a paste region
         if let Some(start_offset) = skip_paste_region_left(&raw_text, current_offset - 1) {
             self.move_to_offset(start_offset);
@@ -857,13 +861,13 @@ impl InputWidget {
         let mode_name = if self.shell_mode {
             "Shell"
         } else if has_paste_tags {
-            "Paste"  // Show "Paste" mode when paste tags are present
+            "Paste" // Show "Paste" mode when paste tags are present
         } else {
             self.agent.name()
         };
 
         let mode_color = if has_paste_tags {
-            theme.secondary  // Different color for paste mode
+            theme.secondary // Different color for paste mode
         } else {
             agent_color
         };
@@ -895,7 +899,10 @@ impl InputWidget {
                     paste_regions.len()
                 )
             } else if display_line_count > 1 {
-                format!("{} chars | {} lines", display_char_count, display_line_count)
+                format!(
+                    "{} chars | {} lines",
+                    display_char_count, display_line_count
+                )
             } else {
                 format!("{} chars", display_char_count)
             };
@@ -1227,11 +1234,11 @@ fn offset_to_cursor(text: &str, offset: usize) -> (usize, usize) {
 fn find_paste_regions(text: &str) -> Vec<(usize, usize)> {
     let mut regions = Vec::new();
     let mut search_start = 0;
-    
+
     while let Some(open_pos) = text[search_start..].find(PASTE_TAG_OPEN) {
         let abs_open = search_start + open_pos;
         let after_open = abs_open + PASTE_TAG_OPEN.len();
-        
+
         if let Some(close_pos) = text[after_open..].find(PASTE_TAG_CLOSE) {
             let abs_close = after_open + close_pos + PASTE_TAG_CLOSE.len();
             regions.push((abs_open, abs_close));
@@ -1240,7 +1247,7 @@ fn find_paste_regions(text: &str) -> Vec<(usize, usize)> {
             break;
         }
     }
-    
+
     regions
 }
 
@@ -1356,7 +1363,8 @@ mod tests {
         assert_eq!(strip_paste_tags(text), "before paste after");
 
         // Multiple pastes
-        let text = "<wonopcode__paste>p1</wonopcode__paste> mid <wonopcode__paste>p2</wonopcode__paste>";
+        let text =
+            "<wonopcode__paste>p1</wonopcode__paste> mid <wonopcode__paste>p2</wonopcode__paste>";
         assert_eq!(strip_paste_tags(text), "p1 mid p2");
 
         // No tags
@@ -1471,7 +1479,12 @@ mod tests {
         input.insert_paste(paste_content);
 
         // Simulate what render_wrapped_text does
-        let raw_lines: Vec<String> = input.textarea.lines().iter().map(|s| s.to_string()).collect();
+        let raw_lines: Vec<String> = input
+            .textarea
+            .lines()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let raw_text = raw_lines.join("\n");
         let (display_text, paste_regions) = transform_for_display(&raw_text);
         let display_lines: Vec<&str> = display_text.split('\n').collect();

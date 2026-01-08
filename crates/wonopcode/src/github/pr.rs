@@ -249,7 +249,8 @@ mod tests {
 
     #[test]
     fn test_parse_github_remote_https() {
-        let (owner, repo) = parse_github_remote("https://github.com/wonop-io/wonopcode.git").unwrap();
+        let (owner, repo) =
+            parse_github_remote("https://github.com/wonop-io/wonopcode.git").unwrap();
         assert_eq!(owner, "wonop-io");
         assert_eq!(repo, "wonopcode");
     }

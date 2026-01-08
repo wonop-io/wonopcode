@@ -3299,7 +3299,9 @@ impl SettingsDialog {
                                     let value = match mode {
                                         wonopcode_core::config::AutoUpdateMode::Auto => "auto",
                                         wonopcode_core::config::AutoUpdateMode::Notify => "notify",
-                                        wonopcode_core::config::AutoUpdateMode::Disabled => "disabled",
+                                        wonopcode_core::config::AutoUpdateMode::Disabled => {
+                                            "disabled"
+                                        }
                                     };
                                     update_item(
                                         item,
@@ -3335,7 +3337,9 @@ impl SettingsDialog {
                                     let value = match channel {
                                         wonopcode_core::version::ReleaseChannel::Stable => "stable",
                                         wonopcode_core::version::ReleaseChannel::Beta => "beta",
-                                        wonopcode_core::version::ReleaseChannel::Nightly => "nightly",
+                                        wonopcode_core::version::ReleaseChannel::Nightly => {
+                                            "nightly"
+                                        }
                                     };
                                     update_item(
                                         item,

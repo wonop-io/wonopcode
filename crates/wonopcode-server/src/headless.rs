@@ -128,34 +128,32 @@ pub fn create_headless_router_with_mcp(
         info!("MCP HTTP endpoints enabled at /mcp/sse and /mcp/message");
     }
 
-    router
-        .layer(cors)
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &axum::http::Request<_>| {
-                    tracing::info_span!(
-                        "request",
-                        method = %request.method(),
-                        uri = %request.uri(),
-                    )
-                })
-                .on_request(|request: &axum::http::Request<_>, _span: &Span| {
+    router.layer(cors).layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|request: &axum::http::Request<_>| {
+                tracing::info_span!(
+                    "request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                )
+            })
+            .on_request(|request: &axum::http::Request<_>, _span: &Span| {
+                info!(
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                    "request"
+                );
+            })
+            .on_response(
+                |response: &axum::http::Response<_>, latency: Duration, _span: &Span| {
                     info!(
-                        method = %request.method(),
-                        path = %request.uri().path(),
-                        "request"
+                        status = %response.status(),
+                        latency = ?latency,
+                        "response"
                     );
-                })
-                .on_response(
-                    |response: &axum::http::Response<_>, latency: Duration, _span: &Span| {
-                        info!(
-                            status = %response.status(),
-                            latency = ?latency,
-                            "response"
-                        );
-                    },
-                ),
-        )
+                },
+            ),
+    )
 }
 
 // ============================================================================
@@ -220,7 +218,10 @@ async fn action_prompt(
     Json(req): Json<PromptRequest>,
 ) -> impl IntoResponse {
     debug!(prompt = %req.prompt, "Received prompt action");
-    match state.action_tx.send(Action::SendPrompt { prompt: req.prompt }) {
+    match state
+        .action_tx
+        .send(Action::SendPrompt { prompt: req.prompt })
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -244,7 +245,10 @@ async fn action_model(
     Json(req): Json<ModelRequest>,
 ) -> impl IntoResponse {
     debug!(model = %req.model, "Received model change action");
-    match state.action_tx.send(Action::ChangeModel { model: req.model }) {
+    match state
+        .action_tx
+        .send(Action::ChangeModel { model: req.model })
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -260,7 +264,10 @@ async fn action_agent(
     Json(req): Json<AgentRequest>,
 ) -> impl IntoResponse {
     debug!(agent = %req.agent, "Received agent change action");
-    match state.action_tx.send(Action::ChangeAgent { agent: req.agent }) {
+    match state
+        .action_tx
+        .send(Action::ChangeAgent { agent: req.agent })
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -302,7 +309,10 @@ async fn action_session_rename(
     Json(req): Json<SessionRenameRequest>,
 ) -> impl IntoResponse {
     debug!(title = %req.title, "Received session rename action");
-    match state.action_tx.send(Action::RenameSession { title: req.title }) {
+    match state
+        .action_tx
+        .send(Action::RenameSession { title: req.title })
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -442,7 +452,10 @@ async fn action_mcp_reconnect(
     Json(req): Json<McpReconnectRequest>,
 ) -> impl IntoResponse {
     debug!(name = %req.name, "Received MCP reconnect action");
-    match state.action_tx.send(Action::McpReconnect { name: req.name }) {
+    match state
+        .action_tx
+        .send(Action::McpReconnect { name: req.name })
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }

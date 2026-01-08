@@ -1030,7 +1030,14 @@ pub fn with_custom_tools(
     sandbox_enabled: Option<bool>,
     allow_all: bool,
 ) -> ProviderResult<ClaudeCliProvider> {
-    with_custom_tools_and_env(model, cwd, session_id, sandbox_enabled, allow_all, HashMap::new())
+    with_custom_tools_and_env(
+        model,
+        cwd,
+        session_id,
+        sandbox_enabled,
+        allow_all,
+        HashMap::new(),
+    )
 }
 
 /// Create a ClaudeCliProvider with custom tools and additional environment variables.

@@ -8,7 +8,9 @@ use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
-use wonopcode_core::bus::{Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged};
+use wonopcode_core::bus::{
+    Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
+};
 use wonopcode_core::config::{McpConfig, McpLocalConfig, SandboxConfig as CoreSandboxConfig};
 use wonopcode_core::permission::{Decision, PermissionCheck, PermissionManager};
 use wonopcode_core::system_prompt;
@@ -354,7 +356,9 @@ impl Runner {
                 runner.permission_manager.apply_sandbox_rules().await;
                 info!("Applied sandbox permission rules (allow_all_in_sandbox=true)");
             } else {
-                info!("Sandbox enabled but allow_all_in_sandbox=false, write operations will prompt");
+                info!(
+                    "Sandbox enabled but allow_all_in_sandbox=false, write operations will prompt"
+                );
             }
         }
 
@@ -1319,7 +1323,10 @@ impl Runner {
 
     /// Handle sandbox start action.
     async fn handle_sandbox_start(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
-        info!(sandbox_manager_present = self.sandbox_manager.is_some(), "Handling sandbox start");
+        info!(
+            sandbox_manager_present = self.sandbox_manager.is_some(),
+            "Handling sandbox start"
+        );
         if let Some(ref manager) = self.sandbox_manager {
             // Send starting status
             let _ = update_tx.send(AppUpdate::SandboxUpdated(
@@ -2004,9 +2011,9 @@ impl Runner {
 
                         if success {
                             if let Some((ref tool_name, ref input)) = tool_info {
-                                if let Some(update) =
-                                    extract_modified_file_from_observed_tool(tool_name, input, &output)
-                                {
+                                if let Some(update) = extract_modified_file_from_observed_tool(
+                                    tool_name, input, &output,
+                                ) {
                                     debug!(path = %update.path, added = update.added, removed = update.removed, "Sending ModifiedFilesUpdated for observed tool");
                                     let _ = update_tx
                                         .send(AppUpdate::ModifiedFilesUpdated(vec![update]));
@@ -2150,8 +2157,7 @@ impl Runner {
 
                     // Check tool permissions
                     // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__read"
-                    let normalized_tool_name =
-                        tool_name.rsplit("__").next().unwrap_or(&tool_name);
+                    let normalized_tool_name = tool_name.rsplit("__").next().unwrap_or(&tool_name);
                     let path = extract_path_from_input(&input);
                     let action = determine_tool_action(normalized_tool_name, &input);
                     let description = format_tool_description(normalized_tool_name, &input);
@@ -3482,14 +3488,8 @@ fn extract_modified_file_from_observed_tool(
                             .collect()
                     })
                     .unwrap_or_default();
-                let added = meta
-                    .get("additions")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let removed = meta
-                    .get("deletions")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+                let added = meta.get("additions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let removed = meta.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 (paths, added, removed)
             } else {
                 // Fallback to parsing input
@@ -3534,14 +3534,8 @@ fn extract_modified_file_from_observed_tool(
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 let total_files = files_modified + files_added;
-                let added = meta
-                    .get("additions")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let removed = meta
-                    .get("deletions")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+                let added = meta.get("additions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let removed = meta.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 (total_files as usize, added, removed)
             } else {
                 // Fallback: try to parse patch_text from input

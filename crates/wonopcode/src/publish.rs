@@ -78,9 +78,7 @@ async fn create_github_release(
     notes: &str,
     channel: ReleaseChannel,
 ) -> Result<serde_json::Value> {
-    let client = reqwest::Client::builder()
-        .user_agent("wonopcode")
-        .build()?;
+    let client = reqwest::Client::builder().user_agent("wonopcode").build()?;
 
     let prerelease = channel != ReleaseChannel::Stable;
     let name = match channel {
@@ -150,7 +148,10 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
         println!();
         println!("  Tag:        {}", tag);
         println!("  Channel:    {:?}", options.channel);
-        println!("  Pre-release: {}", options.channel != ReleaseChannel::Stable);
+        println!(
+            "  Pre-release: {}",
+            options.channel != ReleaseChannel::Stable
+        );
         println!();
         println!("Release notes:");
         println!("---");
@@ -180,9 +181,7 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
 
     let result = create_github_release(&token, &tag, &notes, options.channel).await?;
 
-    let html_url = result["html_url"]
-        .as_str()
-        .unwrap_or("(unknown)");
+    let html_url = result["html_url"].as_str().unwrap_or("(unknown)");
 
     println!();
     println!("Release created successfully!");
@@ -190,10 +189,7 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
     println!("URL: {}", html_url);
     println!();
     println!("GitHub Actions will build and attach binaries.");
-    println!(
-        "Check: https://github.com/{}/actions",
-        GITHUB_REPO
-    );
+    println!("Check: https://github.com/{}/actions", GITHUB_REPO);
 
     Ok(())
 }
