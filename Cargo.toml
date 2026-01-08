@@ -100,7 +100,7 @@ pulldown-cmark = "0.12"
 syntect = "5"
 
 # Testing
-mockall = "0.13"
+mockall = "0.14"
 tempfile = "3"
 wiremock = "0.5"
 
