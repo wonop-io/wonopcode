@@ -31,10 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@1.86
+      - uses: dtolnay/rust-toolchain@1.88
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny@0.18.3 --locked
+        run: cargo install cargo-deny --locked
 
       - name: Run cargo-deny
         run: cargo deny check
