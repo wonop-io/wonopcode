@@ -1,0 +1,44 @@
+[package]
+name = "wonopcode-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Model Context Protocol (MCP) client for wonopcode"
+
+[dependencies]
+thiserror.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync", "net", "time"] }
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+# For SSE/HTTP transport (client)
+reqwest = { workspace = true, features = ["json", "stream"] }
+
+# For HTTP MCP server
+axum.workspace = true
+tower-http = { workspace = true, features = ["cors"] }
+async-stream.workspace = true
+
+# For OAuth PKCE
+base64.workspace = true
+sha2.workspace = true
+rand.workspace = true
+urlencoding = "2.1"
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

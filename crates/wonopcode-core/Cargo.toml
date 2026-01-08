@@ -1,0 +1,42 @@
+[package]
+name = "wonopcode-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Core business logic for wonopcode"
+
+[dependencies]
+wonopcode-util.workspace = true
+wonopcode-storage.workspace = true
+wonopcode-provider.workspace = true
+wonopcode-tools.workspace = true
+wonopcode-snapshot.workspace = true
+
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+reqwest.workspace = true
+regex.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+mockall.workspace = true
+
+[lints]
+workspace = true

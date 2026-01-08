@@ -1,0 +1,45 @@
+[package]
+name = "wonopcode-provider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "AI provider abstraction for wonopcode"
+
+[dependencies]
+wonopcode-util.workspace = true
+
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+url.workspace = true
+base64.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+dirs.workspace = true
+hmac = "0.12"
+hex = "0.4"
+urlencoding = "2.1"
+
+# Claude CLI SDK for subscription-based access
+claude-sdk-rs = "1.0"
+
+[dev-dependencies]
+tempfile.workspace = true
+mockall.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

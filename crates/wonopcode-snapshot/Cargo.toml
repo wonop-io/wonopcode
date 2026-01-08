@@ -1,0 +1,29 @@
+[package]
+name = "wonopcode-snapshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "File snapshot system for wonopcode - enables undo/redo of file changes"
+
+[dependencies]
+thiserror.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+similar.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

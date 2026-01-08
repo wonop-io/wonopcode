@@ -1,0 +1,31 @@
+[package]
+name = "wonopcode-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Language Server Protocol (LSP) client for wonopcode"
+
+[dependencies]
+thiserror.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "sync"] }
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+# LSP types
+lsp-types = "0.97"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
