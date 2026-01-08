@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Permission decision for a bash command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BashPermission {
     /// Allow the command without asking.
@@ -15,13 +15,8 @@ pub enum BashPermission {
     /// Deny the command.
     Deny,
     /// Ask the user before executing.
+    #[default]
     Ask,
-}
-
-impl Default for BashPermission {
-    fn default() -> Self {
-        Self::Ask
-    }
 }
 
 /// Bash permission configuration.
