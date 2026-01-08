@@ -451,12 +451,9 @@ impl InputWidget {
                     }
                 } else if key.modifiers.contains(KeyModifiers::SUPER) {
                     // Handle Cmd+key on macOS
-                    match c {
-                        'v' => {
-                            // Cmd+V paste on macOS
-                            return InputAction::Paste;
-                        }
-                        _ => {}
+                    if c == 'v' {
+                        // Cmd+V paste on macOS
+                        return InputAction::Paste;
                     }
                 } else {
                     if c == '!' && self.is_empty() {
@@ -955,7 +952,7 @@ impl InputWidget {
         }
 
         // Map cursor position from raw to display coordinates
-        let raw_cursor_offset = cursor_to_offset(&raw_lines, cursor_row, cursor_col);
+        let raw_cursor_offset = cursor_to_offset(raw_lines, cursor_row, cursor_col);
         let display_cursor_offset = map_cursor_to_display(raw_cursor_offset, &paste_regions);
         let (display_cursor_row, display_cursor_col) =
             offset_to_cursor(&display_text, display_cursor_offset);
@@ -1211,9 +1208,8 @@ fn cursor_to_offset(lines: &[impl AsRef<str>], row: usize, col: usize) -> usize 
 fn offset_to_cursor(text: &str, offset: usize) -> (usize, usize) {
     let mut row = 0;
     let mut col = 0;
-    let mut current_offset = 0;
 
-    for ch in text.chars() {
+    for (current_offset, ch) in text.chars().enumerate() {
         if current_offset >= offset {
             break;
         }
@@ -1223,7 +1219,6 @@ fn offset_to_cursor(text: &str, offset: usize) -> (usize, usize) {
         } else {
             col += 1;
         }
-        current_offset += 1;
     }
 
     (row, col)
