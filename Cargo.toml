@@ -102,7 +102,7 @@ syntect = "5"
 # Testing
 mockall = "0.13"
 tempfile = "3"
-wiremock = "0.5"
+wiremock = "0.6"
 
 # Misc
 regex = "1"
