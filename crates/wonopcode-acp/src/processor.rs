@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use wonopcode_core::Instance;
 use wonopcode_provider::{
     model::ModelInfo, stream::StreamChunk, BoxedLanguageModel, GenerateOptions,
@@ -374,6 +374,21 @@ impl Processor {
         model_id: &str,
         api_key: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get the current CLI session ID before recreating the provider
+        // This preserves Claude CLI session persistence when changing models within same provider
+        let old_provider_id = {
+            let provider = self.provider.read().await;
+            provider.provider_id().to_string()
+        };
+        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic" {
+            // Staying with Claude CLI provider - preserve session
+            let provider = self.provider.read().await;
+            provider.get_cli_session_id().await
+        } else {
+            // Changing providers - start fresh session
+            None
+        };
+
         let new_config = ProcessorConfig {
             provider: provider_name.to_string(),
             model_id: model_id.to_string(),
@@ -383,10 +398,18 @@ impl Processor {
 
         let new_provider = create_provider(&new_config)?;
 
+        // Restore CLI session ID if we preserved it
+        if cli_session_id.is_some() {
+            new_provider
+                .set_cli_session_id(cli_session_id.clone())
+                .await;
+            debug!(cli_session_id = ?cli_session_id, "Restored CLI session ID after model change");
+        }
+
         let mut provider = self.provider.write().await;
         *provider = new_provider;
 
-        info!(provider = %provider_name, model = %model_id, "Model changed");
+        info!(provider = %provider_name, model = %model_id, cli_session_id = ?cli_session_id, "Model changed");
         Ok(())
     }
 

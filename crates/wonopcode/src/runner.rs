@@ -38,6 +38,10 @@ use wonopcode_util::FileTimeState;
 
 use crate::compaction::{self, CompactionConfig, CompactionResult};
 
+/// Wrapper to store `Arc<dyn SandboxRuntime>` as `Arc<dyn Any + Send + Sync>`.
+/// This allows sharing sandbox runtime through permission manager without circular deps.
+pub struct SandboxRuntimeWrapper(pub Arc<dyn SandboxRuntime>);
+
 /// Doom loop detection threshold - number of consecutive identical tool calls to trigger detection.
 const DOOM_LOOP_THRESHOLD: usize = 3;
 
@@ -135,6 +139,9 @@ pub struct RunnerConfig {
     /// Force allow all tool executions without permission prompts.
     /// Used in headless mode where there's no UI to prompt.
     pub allow_all: bool,
+    /// Allow all tool executions when running inside a sandbox.
+    /// Default is true - sandbox isolation makes unrestricted execution safe.
+    pub allow_all_in_sandbox: bool,
     /// MCP HTTP URL for headless mode.
     /// When set, the Claude CLI provider will connect to this URL instead of
     /// spawning a child process for MCP tools.
@@ -153,6 +160,7 @@ impl Default for RunnerConfig {
             doom_loop: Decision::Ask,
             test_provider_settings: None,
             allow_all: false,
+            allow_all_in_sandbox: true,
             mcp_url: None,
         }
     }
@@ -192,9 +200,21 @@ pub struct Runner {
 
 impl Runner {
     /// Create a new runner.
+    #[allow(dead_code)]
     pub fn new(
         config: RunnerConfig,
         instance: Instance,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_bus(config, instance, None, None)
+    }
+
+    /// Create a new runner with optional shared Bus and PermissionManager.
+    /// If not provided, creates new ones.
+    pub fn new_with_bus(
+        config: RunnerConfig,
+        instance: Instance,
+        shared_bus: Option<Bus>,
+        shared_permission_manager: Option<Arc<PermissionManager>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create provider (sandbox state not known yet, will be determined by MCP server config)
         // For initial creation, use allow_all=false since we don't know sandbox state yet.
@@ -224,9 +244,10 @@ impl Runner {
         tools.register(Arc::new(wonopcode_tools::plan_mode::ExitPlanModeTool::new()));
         // Note: skill and batch tools require async initialization, done in new_with_features
 
-        // Create event bus and permission manager
-        let bus = Bus::new();
-        let permission_manager = Arc::new(PermissionManager::new(bus.clone()));
+        // Use shared bus/permission_manager or create new ones
+        let bus = shared_bus.unwrap_or_default();
+        let permission_manager = shared_permission_manager
+            .unwrap_or_else(|| Arc::new(PermissionManager::new(bus.clone())));
 
         // Create file time tracker
         let file_time = Arc::new(FileTimeState::new());
@@ -252,6 +273,7 @@ impl Runner {
     }
 
     /// Create a new runner with snapshot support.
+    #[allow(dead_code)]
     pub async fn new_with_snapshots(
         config: RunnerConfig,
         instance: Instance,
@@ -260,18 +282,54 @@ impl Runner {
     }
 
     /// Create a new runner with full feature support (snapshots, MCP, skills).
+    #[allow(dead_code)]
     pub async fn new_with_features(
         config: RunnerConfig,
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let mut runner = Self::new(config, instance)?;
+        Self::new_with_shared(config, instance, mcp_configs, None, None).await
+    }
 
-        // Initialize default permission rules
-        for rule in PermissionManager::default_rules() {
-            runner.permission_manager.add_rule(rule).await;
+    /// Create a new runner with optional shared Bus and PermissionManager.
+    /// This allows sharing permission state with external components like MCP servers.
+    ///
+    /// When using a shared PermissionManager, the caller is responsible for initializing
+    /// permission rules before calling this function. The runner will skip rule initialization.
+    pub async fn new_with_shared(
+        config: RunnerConfig,
+        instance: Instance,
+        mcp_configs: Option<HashMap<String, McpConfig>>,
+        shared_bus: Option<Bus>,
+        shared_permission_manager: Option<Arc<PermissionManager>>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Track whether we're using a shared permission manager
+        let using_shared_pm = shared_permission_manager.is_some();
+
+        let mut runner =
+            Self::new_with_bus(config, instance, shared_bus, shared_permission_manager)?;
+
+        // Load core config for permission and sandbox initialization
+        let core_config = runner.instance.config().await;
+
+        // Only initialize permission rules if NOT using a shared permission manager.
+        // When shared, the caller is responsible for initializing rules.
+        if !using_shared_pm {
+            // Initialize default permission rules
+            for rule in PermissionManager::default_rules() {
+                runner.permission_manager.add_rule(rule).await;
+            }
+
+            // Load permission rules from config (these take precedence over defaults)
+            if let Some(perm_config) = &core_config.permission {
+                for rule in PermissionManager::rules_from_config(perm_config) {
+                    runner.permission_manager.add_rule(rule).await;
+                }
+                info!("Permission manager initialized with default rules and config-based rules");
+            } else {
+                info!("Permission manager initialized with default rules");
+            }
         }
-        info!("Permission manager initialized with default rules");
 
         // Initialize snapshot store with proper directory
         let cwd = runner.instance.directory();
@@ -288,7 +346,6 @@ impl Runner {
         }
 
         // Initialize sandbox manager if configured (using lazy detection for faster startup)
-        let core_config = runner.instance.config().await;
         info!(sandbox_config = ?core_config.sandbox, "Checking sandbox configuration");
         if let Some(sandbox_cfg) = &core_config.sandbox {
             info!(enabled = ?sandbox_cfg.enabled, runtime = ?sandbox_cfg.runtime, "Sandbox config found");
@@ -344,20 +401,21 @@ impl Runner {
             debug!("No sandbox configuration found in config");
         }
 
-        // Apply sandbox permission rules if sandbox is enabled and allow_all_in_sandbox is true
+        // Note: Sandbox permission rules are now checked dynamically at permission-check time,
+        // based on whether the sandbox is actually running (not just configured).
+        // See check_with_sandbox() in PermissionManager.
         if runner.sandbox_manager.is_some() {
             let allow_all = core_config
                 .permission
                 .as_ref()
                 .and_then(|p| p.allow_all_in_sandbox)
-                .unwrap_or(true); // Default to true for sandbox
+                .unwrap_or(true);
 
             if allow_all {
-                runner.permission_manager.apply_sandbox_rules().await;
-                info!("Applied sandbox permission rules (allow_all_in_sandbox=true)");
+                info!("Sandbox configured with allow_all_in_sandbox=true (rules applied when sandbox is running)");
             } else {
                 info!(
-                    "Sandbox enabled but allow_all_in_sandbox=false, write operations will prompt"
+                    "Sandbox configured but allow_all_in_sandbox=false, write operations will prompt"
                 );
             }
         }
@@ -609,6 +667,7 @@ impl Runner {
                 doom_loop: old_config.doom_loop,
                 test_provider_settings: old_config.test_provider_settings.clone(),
                 allow_all: old_config.allow_all,
+                allow_all_in_sandbox: old_config.allow_all_in_sandbox,
                 mcp_url: old_config.mcp_url.clone(),
             }
         };
@@ -630,7 +689,30 @@ impl Runner {
             false
         };
 
+        // Get the current CLI session ID before recreating the provider
+        // This preserves Claude CLI session persistence when changing models within same provider
+        let old_provider_id = {
+            let provider = self.provider.read().await;
+            provider.provider_id().to_string()
+        };
+        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic" {
+            // Staying with Claude CLI provider - preserve session
+            let provider = self.provider.read().await;
+            provider.get_cli_session_id().await
+        } else {
+            // Changing providers - start fresh session
+            None
+        };
+
         let new_provider = create_provider(&new_config, sandbox_enabled, allow_all_for_mcp)?;
+
+        // Restore CLI session ID if we preserved it
+        if cli_session_id.is_some() {
+            new_provider
+                .set_cli_session_id(cli_session_id.clone())
+                .await;
+            debug!(cli_session_id = ?cli_session_id, "Restored CLI session ID after model change");
+        }
 
         // Update config and provider
         {
@@ -642,7 +724,7 @@ impl Runner {
             *provider = new_provider;
         }
 
-        info!(provider = %provider_name, model = %model_id, "Model changed successfully");
+        info!(provider = %provider_name, model = %model_id, cli_session_id = ?cli_session_id, "Model changed successfully");
         Ok(())
     }
 
@@ -664,8 +746,8 @@ impl Runner {
                         id: req.id,
                         tool: req.tool,
                         action: req.action,
-                        description: format!("{:?}", req.details),
-                        path: None, // Could extract from details if needed
+                        description: req.description,
+                        path: req.path,
                     },
                 ));
             }
@@ -708,6 +790,16 @@ impl Runner {
                 let runtime_type = manager.runtime_type_display();
                 let runtime_lower = runtime_type.to_lowercase();
                 if manager.is_ready().await {
+                    // Sandbox is already running, update permission manager state
+                    self.permission_manager.set_sandbox_running(true);
+                    // Share sandbox runtime with permission manager for MCP tools
+                    if let Ok(runtime) = manager.runtime().await {
+                        let wrapper: Arc<dyn std::any::Any + Send + Sync> =
+                            Arc::new(SandboxRuntimeWrapper(runtime));
+                        self.permission_manager
+                            .set_sandbox_runtime_any(Some(wrapper))
+                            .await;
+                    }
                     (
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "running".to_string(),
@@ -782,6 +874,23 @@ impl Runner {
                                         info!("Quit requested during prompt");
                                         cancel_token.cancel();
                                         // Return after prompt finishes
+                                    }
+                                    AppAction::PermissionResponse {
+                                        request_id,
+                                        allow,
+                                        remember,
+                                    } => {
+                                        // Permission responses must be handled even during prompt execution
+                                        // because MCP tools wait for them
+                                        info!(
+                                            request_id = %request_id,
+                                            allow = allow,
+                                            remember = remember,
+                                            "Received permission response during prompt execution"
+                                        );
+                                        self.permission_manager
+                                            .respond(&request_id, allow, remember)
+                                            .await;
                                     }
                                     _ => {
                                         // Ignore other actions during prompt execution
@@ -1211,6 +1320,14 @@ impl Runner {
                             let _ = update_tx.send(AppUpdate::SystemMessage(format!(
                                 "Settings saved to {location}"
                             )));
+
+                            // Reload permission rules if permission config changed
+                            if let Some(perm_config) = &config.permission {
+                                self.permission_manager
+                                    .reload_from_config(perm_config)
+                                    .await;
+                                info!("Permission rules reloaded after settings change");
+                            }
                         }
                         Err(e) => {
                             error!("Failed to save settings: {}", e);
@@ -1323,6 +1440,20 @@ impl Runner {
             match manager.start().await {
                 Ok(()) => {
                     info!("Sandbox started successfully");
+
+                    // Update shared sandbox state in permission manager
+                    // This allows MCP tools to know sandbox is running
+                    self.permission_manager.set_sandbox_running(true);
+
+                    // Share sandbox runtime with permission manager for MCP tools
+                    if let Ok(runtime) = manager.runtime().await {
+                        let wrapper: Arc<dyn std::any::Any + Send + Sync> =
+                            Arc::new(SandboxRuntimeWrapper(runtime));
+                        self.permission_manager
+                            .set_sandbox_runtime_any(Some(wrapper))
+                            .await;
+                    }
+
                     self.bus
                         .publish(SandboxStatusChanged {
                             state: SandboxState::Running,
@@ -1395,21 +1526,38 @@ impl Runner {
                 false
             };
 
+            // Get the current CLI session ID before recreating the provider
+            // This preserves Claude CLI session persistence across provider recreations
+            let cli_session_id = {
+                let provider = self.provider.read().await;
+                provider.get_cli_session_id().await
+            };
+
             // Using Claude CLI - recreate provider with new sandbox state
             debug!(
                 sandbox_enabled = sandbox_enabled,
                 allow_all_for_mcp = allow_all_for_mcp,
+                cli_session_id = ?cli_session_id,
                 "Recreating Claude CLI provider after sandbox state change"
             );
 
             match create_provider(&config, Some(sandbox_enabled), allow_all_for_mcp) {
                 Ok(new_provider) => {
+                    // Restore the CLI session ID to the new provider
+                    if cli_session_id.is_some() {
+                        new_provider
+                            .set_cli_session_id(cli_session_id.clone())
+                            .await;
+                        debug!(cli_session_id = ?cli_session_id, "Restored CLI session ID to new provider");
+                    }
+
                     drop(config); // Release read lock before acquiring write lock
                     let mut provider = self.provider.write().await;
                     *provider = new_provider;
                     info!(
                         sandbox_enabled = sandbox_enabled,
                         allow_all_for_mcp = allow_all_for_mcp,
+                        cli_session_id = ?cli_session_id,
                         "Recreated Claude CLI provider after sandbox state change"
                     );
                 }
@@ -1426,6 +1574,11 @@ impl Runner {
             match manager.stop().await {
                 Ok(()) => {
                     info!("Sandbox stopped successfully");
+
+                    // Update shared sandbox state in permission manager
+                    self.permission_manager.set_sandbox_running(false);
+                    self.permission_manager.set_sandbox_runtime_any(None).await;
+
                     self.bus
                         .publish(SandboxStatusChanged {
                             state: SandboxState::Stopped,
@@ -2147,7 +2300,18 @@ impl Runner {
                         details: input.clone(),
                     };
 
-                    let allowed = self.permission_manager.check("default", check).await;
+                    // Check if sandbox is actually running and allow_all_in_sandbox is enabled
+                    let sandbox_running = if let Some(ref manager) = self.sandbox_manager {
+                        let config = self.config.read().await;
+                        config.allow_all_in_sandbox && manager.is_ready().await
+                    } else {
+                        false
+                    };
+
+                    let allowed = self
+                        .permission_manager
+                        .check_with_sandbox("default", check, sandbox_running)
+                        .await;
 
                     if allowed {
                         allowed_calls.push((call_id, tool_name, args_str));

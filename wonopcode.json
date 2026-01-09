@@ -1,5 +1,5 @@
 {
-  "theme": "wonopcode",
+  "theme": "troelsim",
   "tui": {
     "markdown": true,
     "syntax_highlighting": true,
@@ -12,17 +12,20 @@
     "test_model_enabled": true,
     "test_emulate_tool_observed": true
   },
+  "permission": {
+    "edit": "ask"
+  },
   "tools": {
-    "read": false,
+    "grep": false,
+    "list": false,
+    "patch": false,
+    "write": false,
     "task": false,
     "webfetch": false,
+    "read": false,
     "websearch": false,
-    "write": false,
-    "grep": false,
-    "patch": false,
-    "glob": false,
-    "list": false,
-    "edit": false
+    "edit": false,
+    "glob": false
   },
   "compaction": {
     "auto": true

@@ -4,7 +4,13 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+# Ignore unmaintained transitive dependencies from syntect/ratatui
+# These are indirect dependencies and we can't easily replace them
+ignore = [
+    "RUSTSEC-2025-0141", # bincode - unmaintained (via syntect)
+    "RUSTSEC-2024-0436", # paste - unmaintained (via ratatui)
+    "RUSTSEC-2024-0320", # yaml-rust - unmaintained (via syntect)
+]
 
 [licenses]
 allow = [
@@ -17,8 +23,10 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
     "CC0-1.0",
     "BSL-1.0",
+    "OpenSSL",
 ]
 confidence-threshold = 0.8
 
@@ -29,7 +37,22 @@ highlight = "all"
 
 # Specific crate bans or allows
 deny = []
-skip = []
+
+# Skip duplicate version checks for windows-* crates
+# These are transitive dependencies from different crates (dirs, crossterm, etc.)
+# that require different versions of the windows-sys ecosystem
+skip = [
+    { crate = "windows-sys", reason = "transitive dependency version mismatch" },
+    { crate = "windows-targets", reason = "transitive dependency version mismatch" },
+    { crate = "windows_aarch64_gnullvm", reason = "transitive dependency version mismatch" },
+    { crate = "windows_aarch64_msvc", reason = "transitive dependency version mismatch" },
+    { crate = "windows_i686_gnu", reason = "transitive dependency version mismatch" },
+    { crate = "windows_i686_gnullvm", reason = "transitive dependency version mismatch" },
+    { crate = "windows_i686_msvc", reason = "transitive dependency version mismatch" },
+    { crate = "windows_x86_64_gnu", reason = "transitive dependency version mismatch" },
+    { crate = "windows_x86_64_gnullvm", reason = "transitive dependency version mismatch" },
+    { crate = "windows_x86_64_msvc", reason = "transitive dependency version mismatch" },
+]
 skip-tree = []
 
 [sources]

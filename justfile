@@ -73,6 +73,10 @@ udeps:
     @echo "Running cargo-udeps (requires nightly)..."
     cargo +nightly udeps --all-targets
 
+# Check dependencies for issues (requires cargo-deny)
+deny:
+    cargo deny check
+
 # Check for outdated dependencies
 outdated:
     cargo outdated -R
@@ -125,7 +129,7 @@ run-release *ARGS:
 # === CI/Pre-commit ===
 
 # Full CI check (what CI would run)
-ci: fmt-check lint-strict test
+ci: fmt-check lint-strict test deny udeps
     @echo "CI checks passed!"
 
 # Pre-commit hook check
@@ -141,6 +145,7 @@ install-tools:
     cargo install cargo-udeps
     cargo install cargo-outdated
     cargo install cargo-audit
+    cargo install cargo-deny
     @echo "Tools installed!"
 
 # Install the application locally
