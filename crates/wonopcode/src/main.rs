@@ -70,6 +70,18 @@ struct Cli {
     #[arg(long)]
     secret: Option<String>,
 
+    /// Advertise the server via mDNS for local network discovery (headless mode only).
+    #[arg(long)]
+    advertise: bool,
+
+    /// Custom name for mDNS advertisement (default: hostname).
+    #[arg(long)]
+    name: Option<String>,
+
+    /// Discover servers on the local network via mDNS instead of specifying an address.
+    #[arg(long, conflicts_with = "connect")]
+    discover: bool,
+
     /// Subcommand
     #[command(subcommand)]
     command: Option<Commands>,
@@ -421,9 +433,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Agent { command }) => handle_agent(command, &cwd).await,
         None => {
-            // Check for headless or connect mode
+            // Check for headless, discover, or connect mode
             if cli.headless {
                 run_headless(&cwd, cli.address, &cli).await
+            } else if cli.discover {
+                run_discover(&cli).await
             } else if let Some(ref address) = cli.connect {
                 run_connect(address, &cli).await
             } else {
@@ -2791,7 +2805,7 @@ async fn run_headless(
 
     // Create router with MCP support and secret authentication
     // The secret is passed separately so it can be applied to all endpoints
-    let app = create_headless_router_with_options(headless_state, mcp_state, secret);
+    let app = create_headless_router_with_options(headless_state, mcp_state, secret.clone());
 
     // Start server
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -2802,6 +2816,52 @@ async fn run_headless(
     if has_mcp {
         println!("MCP endpoint: http://{address}/mcp/sse");
     }
+
+    // Start mDNS advertisement if enabled
+    let _advertiser = if cli.advertise {
+        use wonopcode_discover::{AdvertiseConfig, Advertiser};
+
+        match Advertiser::new() {
+            Ok(mut advertiser) => {
+                // Determine the display name
+                let name = cli.name.clone().unwrap_or_else(|| {
+                    hostname::get()
+                        .ok()
+                        .and_then(|h| h.into_string().ok())
+                        .unwrap_or_else(|| "wonopcode".to_string())
+                });
+
+                // Build advertise config with metadata
+                let mut config = AdvertiseConfig::new(&name, address.port(), env!("CARGO_PKG_VERSION"))
+                    .with_model(&model_id)
+                    .with_cwd(cwd.display().to_string())
+                    .with_auth(secret.is_some());
+
+                // Add project name from the worktree directory name
+                if let Some(project_name) = cwd.file_name().and_then(|n| n.to_str()) {
+                    config = config.with_project(project_name);
+                }
+
+                match advertiser.advertise(config) {
+                    Ok(_) => {
+                        println!("mDNS: advertising as '{}'", name);
+                        Some(advertiser)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to advertise via mDNS");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to create mDNS advertiser");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     println!("Press Ctrl+C to stop");
 
     // Run server until shutdown
@@ -2810,8 +2870,79 @@ async fn run_headless(
     // Wait for runner to complete
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), runner_handle).await;
 
+    // Advertiser will be dropped here, stopping the mDNS advertisement
+
     instance.dispose().await;
     Ok(())
+}
+
+/// Discover and connect to a server on the local network via mDNS.
+async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::time::Duration;
+    use wonopcode_discover::{Browser, ServerInfo};
+
+    println!("Discovering wonopcode servers on the local network...\n");
+
+    let browser = Browser::new().map_err(|e| anyhow::anyhow!("Failed to create mDNS browser: {}", e))?;
+    let servers = browser
+        .browse(Duration::from_secs(3))
+        .map_err(|e| anyhow::anyhow!("Failed to browse for servers: {}", e))?;
+
+    if servers.is_empty() {
+        println!("No servers found.");
+        println!("\nMake sure a server is running with:");
+        println!("  wonopcode --headless --advertise");
+        return Ok(());
+    }
+
+    println!("Found {} server(s):\n", servers.len());
+
+    for (i, server) in servers.iter().enumerate() {
+        println!("  {}. {}", i + 1, server.name);
+        println!("     Address: {}", server.address);
+        if let Some(ref project) = server.project {
+            println!("     Project: {}", project);
+        }
+        if let Some(ref model) = server.model {
+            println!("     Model: {}", model);
+        }
+        if server.auth_required {
+            println!("     Auth: required");
+        }
+        println!();
+    }
+
+    // Select a server
+    let selected: &ServerInfo = if servers.len() == 1 {
+        println!("Connecting to the only available server...\n");
+        &servers[0]
+    } else {
+        print!("Select server (1-{}): ", servers.len());
+        std::io::stdout().flush()?;
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        let idx: usize = input
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid selection"))?;
+
+        if idx < 1 || idx > servers.len() {
+            return Err(anyhow::anyhow!("Selection out of range"));
+        }
+
+        &servers[idx - 1]
+    };
+
+    // Check if auth is required but no secret provided
+    if selected.auth_required && cli.secret.is_none() {
+        println!("Warning: Server requires authentication. Use --secret to provide credentials.\n");
+    }
+
+    // Connect to the selected server
+    run_connect(&selected.address.to_string(), cli).await
 }
 
 /// Connect to a remote headless server.
