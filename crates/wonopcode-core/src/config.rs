@@ -311,6 +311,15 @@ pub struct ServerConfig {
     /// Server port.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+
+    /// API key for MCP endpoint authentication.
+    ///
+    /// If set, clients must provide this key in the `X-API-Key` header
+    /// or `Authorization: Bearer <key>` header when connecting to MCP endpoints.
+    ///
+    /// Supports variable substitution: `{env:WONOPCODE_API_KEY}`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 /// Keybind configuration.

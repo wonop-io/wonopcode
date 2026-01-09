@@ -64,6 +64,12 @@ struct Cli {
     #[arg(long)]
     connect: Option<String>,
 
+    /// Secret key for server authentication.
+    /// When set, clients must provide this key via X-API-Key header or Authorization: Bearer header.
+    /// Can also be set via WONOPCODE_SECRET environment variable.
+    #[arg(long)]
+    secret: Option<String>,
+
     /// Subcommand
     #[command(subcommand)]
     command: Option<Commands>,
@@ -346,6 +352,7 @@ async fn main() -> anyhow::Result<()> {
                 session,
                 &format,
                 cli.provider.clone(),
+                cli.secret.clone(),
             )
             .await
         }
@@ -560,6 +567,7 @@ async fn run_command(
     _session: Option<String>,
     format: &str,
     default_provider: String,
+    cli_secret: Option<String>,
 ) -> anyhow::Result<()> {
     use std::io::{self, Write};
 
@@ -634,10 +642,22 @@ async fn run_command(
     let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
     info!(path = %todo_path.display(), "Initialized shared todo storage");
 
+    // Get API key for MCP server authentication
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli_secret
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| {
+            core_config
+                .server
+                .as_ref()
+                .and_then(|s| s.api_key.clone())
+        });
+
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
         shared_permission_manager.clone(),
+        secret.clone(),
     )
     .await
     {
@@ -666,6 +686,7 @@ async fn run_command(
         allow_all: false,
         allow_all_in_sandbox,
         mcp_url, // Use background MCP server for custom tools
+        mcp_secret: secret,
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)
@@ -1705,10 +1726,24 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
     info!(path = %todo_path.display(), "Initialized shared todo storage");
 
+    // Get secret for server authentication
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| {
+            config_file
+                .server
+                .as_ref()
+                .and_then(|s| s.api_key.clone())
+        });
+
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
         shared_permission_manager.clone(),
+        secret.clone(),
     )
     .await
     {
@@ -1737,6 +1772,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         allow_all: false,
         allow_all_in_sandbox,
         mcp_url, // Use background MCP server for custom tools
+        mcp_secret: secret,
     };
 
     // Get MCP config from config file
@@ -2038,7 +2074,7 @@ async fn run_headless(
 ) -> anyhow::Result<()> {
     use tokio::sync::mpsc;
     use wonopcode_protocol::{Action, Update};
-    use wonopcode_server::{create_headless_router_with_mcp, HeadlessState};
+    use wonopcode_server::{create_headless_router_with_options, HeadlessState};
 
     info!("Starting headless server on {}", address);
     println!("Wonopcode headless server v{}", env!("CARGO_PKG_VERSION"));
@@ -2069,6 +2105,14 @@ async fn run_headless(
     // Load API key
     let api_key = runner::load_api_key(&provider).unwrap_or_default();
 
+    // Get secret for server authentication (needed early for runner config)
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| config_file.server.as_ref().and_then(|s| s.api_key.clone()));
+
     // Build MCP HTTP URL for headless mode
     let mcp_sse_url = format!("http://{address}/mcp/sse");
 
@@ -2090,6 +2134,7 @@ async fn run_headless(
         allow_all: false, // Permissions flow from TUI via protocol
         allow_all_in_sandbox,
         mcp_url: Some(mcp_sse_url), // Use HTTP transport for MCP
+        mcp_secret: secret.clone(),
     };
 
     // Get MCP config
@@ -2736,17 +2781,24 @@ async fn run_headless(
     // Create MCP HTTP state for tool serving with shared permission manager.
     // This ensures MCP tools use the same sandbox state as the Runner.
     let mcp_message_url = format!("http://{address}/mcp/message");
+
+    let has_auth = secret.is_some();
+
     let mcp_state = create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager))
         .await
         .ok();
     let has_mcp = mcp_state.is_some();
 
-    // Create router with MCP support
-    let app = create_headless_router_with_mcp(headless_state, mcp_state);
+    // Create router with MCP support and secret authentication
+    // The secret is passed separately so it can be applied to all endpoints
+    let app = create_headless_router_with_options(headless_state, mcp_state, secret);
 
     // Start server
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("Server running on http://{address}");
+    if has_auth {
+        println!("API key authentication: enabled");
+    }
     if has_mcp {
         println!("MCP endpoint: http://{address}/mcp/sse");
     }
@@ -2763,7 +2815,7 @@ async fn run_headless(
 }
 
 /// Connect to a remote headless server.
-async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
+async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     use wonopcode_tui::{App, Backend, RemoteBackend, SandboxStatusUpdate};
 
     // Parse address
@@ -2775,8 +2827,15 @@ async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
 
     println!("Connecting to {address}...");
 
-    // Create remote backend
-    let backend = RemoteBackend::new(&address)?;
+    // Get secret for authentication
+    // Priority: CLI arg > environment variable
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok());
+
+    // Create remote backend with optional secret
+    let backend = RemoteBackend::with_api_key(&address, secret)?;
 
     // Check connection
     backend.connect().await?;
@@ -3171,6 +3230,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
 async fn start_mcp_server(
     cwd: &std::path::Path,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
+    api_key: Option<String>,
 ) -> anyhow::Result<(String, tokio::task::JoinHandle<()>)> {
     use axum::Router;
     use wonopcode_mcp::create_mcp_router;
@@ -3185,8 +3245,14 @@ async fn start_mcp_server(
     let mcp_message_url = format!("http://{local_addr}/mcp/message");
 
     // Create MCP state with shared permission manager
-    let mcp_state =
+    let mut mcp_state =
         create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager)).await?;
+
+    // Add API key authentication if configured
+    if let Some(key) = api_key {
+        info!("MCP server API key authentication enabled");
+        mcp_state = mcp_state.with_api_key(key);
+    }
 
     // Create router with just MCP endpoints (no CORS needed for localhost)
     let mcp_router = create_mcp_router(mcp_state);

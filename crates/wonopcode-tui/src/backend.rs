@@ -78,12 +78,18 @@ impl Backend for LocalBackend {
 pub struct RemoteBackend {
     client: reqwest::Client,
     base_url: String,
+    api_key: Option<String>,
     connected: std::sync::atomic::AtomicBool,
 }
 
 impl RemoteBackend {
     /// Create a new remote backend connecting to the given address.
     pub fn new(address: &str) -> BackendResult<Self> {
+        Self::with_api_key(address, None)
+    }
+
+    /// Create a new remote backend with optional API key authentication.
+    pub fn with_api_key(address: &str, api_key: Option<String>) -> BackendResult<Self> {
         let base_url = if address.starts_with("http://") || address.starts_with("https://") {
             address.to_string()
         } else {
@@ -98,6 +104,7 @@ impl RemoteBackend {
         Ok(Self {
             client,
             base_url,
+            api_key,
             connected: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -105,6 +112,15 @@ impl RemoteBackend {
     /// Get the base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Add API key header to a request if configured.
+    fn add_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(ref key) = self.api_key {
+            request.header("X-API-Key", key)
+        } else {
+            request
+        }
     }
 
     /// Check server health and mark as connected.
@@ -127,8 +143,7 @@ impl RemoteBackend {
     pub async fn get_state(&self) -> BackendResult<wonopcode_protocol::State> {
         let url = format!("{}/state", self.base_url);
         let resp = self
-            .client
-            .get(&url)
+            .add_auth(self.client.get(&url))
             .send()
             .await
             .map_err(|e| BackendError::RequestFailed(e.to_string()))?
@@ -150,12 +165,18 @@ impl RemoteBackend {
     ) -> tokio::task::JoinHandle<()> {
         let url = format!("{}/events", self.base_url);
         let client = self.client.clone();
+        let api_key = self.api_key.clone();
 
         tokio::spawn(async move {
             use futures::StreamExt;
 
             loop {
-                match client.get(&url).send().await {
+                let mut request = client.get(&url);
+                if let Some(ref key) = api_key {
+                    request = request.header("X-API-Key", key);
+                }
+
+                match request.send().await {
                     Ok(response) => {
                         let mut stream = response.bytes_stream();
                         let mut buffer = String::new();
@@ -200,8 +221,7 @@ impl RemoteBackend {
         let endpoint = action.endpoint();
         let url = format!("{}{}", self.base_url, endpoint);
 
-        self.client
-            .post(&url)
+        self.add_auth(self.client.post(&url))
             .json(&action)
             .send()
             .await

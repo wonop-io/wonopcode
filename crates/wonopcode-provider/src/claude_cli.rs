@@ -66,6 +66,8 @@ use tracing::{debug, info, warn};
 pub struct McpTransport {
     /// URL for the MCP SSE endpoint (e.g., "http://localhost:3000/mcp/sse").
     pub url: String,
+    /// Optional headers to include in requests (e.g., for authentication).
+    pub headers: HashMap<String, String>,
 }
 
 /// Configuration for MCP (Model Context Protocol) integration.
@@ -84,7 +86,24 @@ impl McpCliConfig {
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             use_custom_tools: true,
-            transport: McpTransport { url: url.into() },
+            transport: McpTransport {
+                url: url.into(),
+                headers: HashMap::new(),
+            },
+            external_servers: HashMap::new(),
+        }
+    }
+
+    /// Create a new MCP config with HTTP transport and authentication.
+    pub fn with_secret(url: impl Into<String>, secret: impl Into<String>) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("X-API-Key".to_string(), secret.into());
+        Self {
+            use_custom_tools: true,
+            transport: McpTransport {
+                url: url.into(),
+                headers,
+            },
             external_servers: HashMap::new(),
         }
     }
@@ -343,16 +362,27 @@ impl ClaudeCliProvider {
         let mut mcp_servers = serde_json::Map::new();
 
         // Add our tools server via HTTP/SSE
-        mcp_servers.insert(
-            "wonopcode-tools".to_string(),
-            serde_json::json!({
-                "type": "sse",
-                "url": mcp_config.transport.url
-            }),
-        );
+        let mut server_config = serde_json::json!({
+            "type": "sse",
+            "url": mcp_config.transport.url
+        });
+
+        // Add headers if configured (e.g., for authentication)
+        if !mcp_config.transport.headers.is_empty() {
+            let headers: serde_json::Map<String, serde_json::Value> = mcp_config
+                .transport
+                .headers
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            server_config["headers"] = serde_json::Value::Object(headers);
+        }
+
+        mcp_servers.insert("wonopcode-tools".to_string(), server_config);
 
         info!(
             url = %mcp_config.transport.url,
+            has_auth = !mcp_config.transport.headers.is_empty(),
             "Generated MCP HTTP config"
         );
 
@@ -983,7 +1013,12 @@ pub fn with_subscription_pricing(model: ModelInfo) -> ProviderResult<ClaudeCliPr
 /// # Arguments
 /// * `model` - Model information
 /// * `mcp_url` - URL for the MCP SSE endpoint (e.g., "http://localhost:3000/mcp/sse")
-pub fn with_custom_tools(model: ModelInfo, mcp_url: String) -> ProviderResult<ClaudeCliProvider> {
+/// * `secret` - Optional secret for authentication
+pub fn with_custom_tools(
+    model: ModelInfo,
+    mcp_url: String,
+    secret: Option<String>,
+) -> ProviderResult<ClaudeCliProvider> {
     let mut model = model;
     // Zero out all costs since subscription covers usage
     model.cost = ModelCost {
@@ -993,7 +1028,11 @@ pub fn with_custom_tools(model: ModelInfo, mcp_url: String) -> ProviderResult<Cl
         cache_write: 0.0,
     };
 
-    let mcp_config = McpCliConfig::new(mcp_url);
+    let mcp_config = if let Some(secret) = secret {
+        McpCliConfig::with_secret(mcp_url, secret)
+    } else {
+        McpCliConfig::new(mcp_url)
+    };
 
     ClaudeCliProvider::with_mcp_config(model, mcp_config)
 }

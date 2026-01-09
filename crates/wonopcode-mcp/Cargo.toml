@@ -36,6 +36,9 @@ rand.workspace = true
 urlencoding = "2.1"
 url.workspace = true
 
+# For secure API key comparison
+subtle = "2.5"
+
 [dev-dependencies]
 tempfile.workspace = true
 
