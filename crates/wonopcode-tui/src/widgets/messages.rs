@@ -2,7 +2,7 @@
 
 use crate::metrics;
 use crate::theme::{AgentMode, RenderSettings, Theme};
-use crate::widgets::markdown::render_markdown_with_settings;
+use crate::widgets::markdown::{render_markdown_with_settings, wrap_line};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -1120,6 +1120,78 @@ impl MessagesWidget {
         (text, tools)
     }
 
+    /// End streaming and immediately add the message in one atomic operation.
+    /// This avoids the flicker that can occur when end_streaming() and add_message()
+    /// are called separately with a render in between.
+    pub fn end_streaming_and_add_message(&mut self, mut message: DisplayMessage) {
+        // Convert stream segments to message segments
+        let segments: Vec<MessageSegment> = self
+            .stream_segments
+            .drain(..)
+            .filter_map(|seg| match seg {
+                StreamSegment::Text(text) if !text.is_empty() => Some(MessageSegment::Text(text)),
+                StreamSegment::Text(_) => None,
+                StreamSegment::Tool(idx) => self
+                    .active_tools
+                    .get(idx)
+                    .cloned()
+                    .map(MessageSegment::Tool),
+            })
+            .collect();
+
+        // Update the message with the segments
+        message.segments = segments.clone();
+        message.content = segments
+            .iter()
+            .filter_map(|s| match s {
+                MessageSegment::Text(t) => Some(t.as_str()),
+                MessageSegment::Tool(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        message.tool_calls = segments
+            .iter()
+            .filter_map(|s| match s {
+                MessageSegment::Tool(t) => Some(t.clone()),
+                MessageSegment::Text(_) => None,
+            })
+            .collect();
+
+        // Clear streaming state
+        self.streaming = false;
+        self.streaming_text.clear();
+        self.active_tools.clear();
+        self.streaming_cache.clear();
+
+        // Add the message - but use a lighter cache invalidation
+        // We only need to mark the cache as needing an update for the new message,
+        // not invalidate all existing cached renders
+        self.messages.push(message);
+
+        // Extend rendered cache arrays to accommodate the new message
+        // without clearing existing cached renders
+        let new_count = self.messages.len();
+        if self.rendered_cache.message_lines.len() < new_count {
+            self.rendered_cache.message_lines.push(Vec::new());
+            self.rendered_cache.cumulative_lines.push(0);
+            self.rendered_cache.message_count = new_count;
+        }
+
+        // Mark that cumulative counts need recalculating
+        self.rendered_cache.valid = false;
+        self.line_count_cache = None;
+        self.dirty = true;
+
+        // Ensure we stay at bottom
+        self.scroll = usize::MAX;
+        self.auto_scroll = true;
+
+        // Prune old messages if we exceed the limit
+        if self.messages.len() > MAX_MESSAGES_IN_MEMORY {
+            self.prune_old_messages();
+        }
+    }
+
     pub fn is_streaming(&self) -> bool {
         self.streaming
     }
@@ -1835,13 +1907,22 @@ impl MessagesWidget {
                     Span::styled("You", text_style.add_modifier(Modifier::BOLD)),
                 ]));
 
-                // Content with left border continuation
+                // Calculate available width for content (accounting for prefix)
+                let prefix_len = if is_selected { 4 } else { 2 }; // "  ┃ " or "┃ "
+                let content_width = self.render_width.saturating_sub(prefix_len);
+
+                // Content with left border continuation and wrapping
                 for line in msg.content.lines() {
-                    lines.push(Line::from(vec![
-                        Span::styled(if is_selected { "  " } else { "" }, theme.text_style()),
-                        Span::styled("┃ ", Style::default().fg(agent_color)),
-                        Span::styled(line.to_string(), text_style),
-                    ]));
+                    let content_line = Line::from(Span::styled(line.to_string(), text_style));
+                    let wrapped = wrap_line(content_line, content_width);
+                    for wrapped_line in wrapped {
+                        let mut new_line = vec![
+                            Span::styled(if is_selected { "  " } else { "" }, theme.text_style()),
+                            Span::styled("┃ ", Style::default().fg(agent_color)),
+                        ];
+                        new_line.extend(wrapped_line.spans);
+                        lines.push(Line::from(new_line));
+                    }
                 }
             }
             MessageRole::Assistant => {

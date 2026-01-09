@@ -12,17 +12,20 @@
     "test_model_enabled": true,
     "test_emulate_tool_observed": true
   },
+  "permission": {
+    "edit": "ask"
+  },
   "tools": {
-    "webfetch": false,
-    "list": false,
-    "grep": false,
-    "write": false,
     "patch": false,
+    "write": false,
+    "webfetch": false,
+    "grep": false,
     "websearch": false,
-    "read": false,
+    "list": false,
     "task": false,
     "glob": false,
-    "edit": false
+    "edit": false,
+    "read": false
   },
   "compaction": {
     "auto": true
