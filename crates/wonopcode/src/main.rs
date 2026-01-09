@@ -2045,6 +2045,25 @@ async fn run_headless(
     // Get MCP config
     let mcp_configs = config_file.mcp.clone();
 
+    // Create shared permission manager for both Runner and MCP HTTP server.
+    // This ensures sandbox state is shared between them - when sandbox is started
+    // via Runner, MCP tools will see the updated sandbox state and runtime.
+    let shared_bus = wonopcode_core::bus::Bus::new();
+    let shared_permission_manager = std::sync::Arc::new(
+        wonopcode_core::permission::PermissionManager::new(shared_bus.clone()),
+    );
+
+    // Initialize permission rules
+    for rule in wonopcode_core::permission::PermissionManager::default_rules() {
+        shared_permission_manager.add_rule(rule).await;
+    }
+    if let Some(perm_config) = &config_file.permission {
+        for rule in wonopcode_core::permission::PermissionManager::rules_from_config(perm_config) {
+            shared_permission_manager.add_rule(rule).await;
+        }
+    }
+    info!("Shared permission manager initialized for headless mode");
+
     // Create channels for action/update communication
     let (protocol_action_tx, mut protocol_action_rx) = mpsc::unbounded_channel::<Action>();
     let (app_action_tx, app_action_rx) = mpsc::unbounded_channel::<wonopcode_tui::AppAction>();
@@ -2243,8 +2262,16 @@ async fn run_headless(
         }
     }
 
-    // Create runner
-    let runner = match Runner::new_with_features(config, instance.clone(), mcp_configs).await {
+    // Create runner with shared bus and permission manager
+    let runner = match Runner::new_with_shared(
+        config,
+        instance.clone(),
+        mcp_configs,
+        Some(shared_bus),
+        Some(shared_permission_manager.clone()),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error creating runner: {e}");
@@ -2656,11 +2683,10 @@ async fn run_headless(
         }
     });
 
-    // Create MCP HTTP state for tool serving
-    // In headless mode, we use None for permission_manager which creates a standalone
-    // allow-all manager (no TUI to prompt users)
+    // Create MCP HTTP state for tool serving with shared permission manager.
+    // This ensures MCP tools use the same sandbox state as the Runner.
     let mcp_message_url = format!("http://{address}/mcp/message");
-    let mcp_state = create_mcp_http_state(cwd, &mcp_message_url, None)
+    let mcp_state = create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager))
         .await
         .ok();
     let has_mcp = mcp_state.is_some();
