@@ -80,7 +80,7 @@ impl AnthropicProvider {
                     match system {
                         None => system = Some(msg.text()),
                         Some(ref existing) => {
-                            system = Some(format!("{}\n\n{}", existing, msg.text()));
+                            system = Some(format!("{existing}\n\n{}", msg.text()));
                         }
                     }
                 }
@@ -417,8 +417,7 @@ impl LanguageModel for AnthropicProvider {
             }
 
             return Err(ProviderError::invalid_response(format!(
-                "HTTP {}: {}",
-                status, body
+                "HTTP {status}: {body}"
             )));
         }
 

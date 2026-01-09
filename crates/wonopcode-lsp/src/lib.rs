@@ -43,7 +43,7 @@
 //! use wonopcode_lsp::{LspClient, LspConfig};
 //! use std::path::PathBuf;
 //!
-//! # async fn example() -> anyhow::Result<()> {
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create client with defaults
 //! let client = LspClient::with_defaults();
 //!

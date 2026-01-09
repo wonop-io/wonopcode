@@ -170,7 +170,7 @@ Usage notes:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: TaskArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Check if we have an executor
         let executor = self.executor.read().await;
@@ -185,8 +185,7 @@ Usage notes:
             "general" | "explore" => {}
             other => {
                 return Err(ToolError::validation(format!(
-                    "Unknown agent type: '{}'. Available types: general, explore",
-                    other
+                    "Unknown agent type: '{other}'. Available types: general, explore"
                 )));
             }
         }
@@ -212,7 +211,7 @@ Usage notes:
 
         if result.success {
             Ok(ToolOutput::new(
-                format!("Task completed: {}", description),
+                format!("Task completed: {description}"),
                 result.response,
             ))
         } else {

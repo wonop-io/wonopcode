@@ -136,7 +136,7 @@ impl FileAutocomplete {
 
             // Add directory marker
             let display = if path.is_dir() {
-                format!("{}/", rel_path)
+                format!("{rel_path}/")
             } else {
                 rel_path
             };

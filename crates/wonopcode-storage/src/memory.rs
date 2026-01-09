@@ -94,7 +94,7 @@ impl Storage for MemoryStorage {
         let prefix_with_sep = if prefix_str.is_empty() {
             String::new()
         } else {
-            format!("{}/", prefix_str)
+            format!("{prefix_str}/")
         };
 
         let data = self

@@ -71,7 +71,7 @@ Usage:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: EditArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Resolve file path
         let file_path = resolve_path(&args.file_path, &ctx.cwd, &ctx.root_dir, ctx).await?;
@@ -121,12 +121,12 @@ Usage:
             let bytes = sandbox
                 .read_file(&sandbox_path)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Failed to read file: {}", e)))?;
+                .map_err(|e| ToolError::execution_failed(format!("Failed to read file: {e}")))?;
             String::from_utf8_lossy(&bytes).to_string()
         } else {
             fs::read_to_string(&file_path)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Failed to read file: {}", e)))?
+                .map_err(|e| ToolError::execution_failed(format!("Failed to read file: {e}")))?
         };
 
         // Validate oldString != newString
@@ -183,8 +183,7 @@ Usage:
                     (content.replace(&args.old_string, &args.new_string), false)
                 } else {
                     return Err(ToolError::execution_failed(format!(
-                        "oldString found {} times. Use replaceAll to replace all occurrences, or provide more context to make the match unique.",
-                        count
+                        "oldString found {count} times. Use replaceAll to replace all occurrences, or provide more context to make the match unique."
                     )));
                 }
             }
@@ -199,7 +198,7 @@ Usage:
             sandbox
                 .write_file(&sandbox_path, new_content.as_bytes())
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Failed to write file: {}", e)))?;
+                .map_err(|e| ToolError::execution_failed(format!("Failed to write file: {e}")))?;
         } else {
             // Write atomically (write to temp, then rename)
             // Use random temp file name to avoid collisions and predictable names
@@ -222,7 +221,7 @@ Usage:
                 .unwrap_or_else(|| PathBuf::from(&temp_name));
 
             fs::write(&temp_path, &new_content).await.map_err(|e| {
-                ToolError::execution_failed(format!("Failed to write temp file: {}", e))
+                ToolError::execution_failed(format!("Failed to write temp file: {e}"))
             })?;
 
             // Ensure temp file is cleaned up on failure
@@ -231,9 +230,8 @@ Usage:
                 // Try to clean up the temp file
                 let _ = fs::remove_file(&temp_path).await;
             }
-            rename_result.map_err(|e| {
-                ToolError::execution_failed(format!("Failed to rename file: {}", e))
-            })?;
+            rename_result
+                .map_err(|e| ToolError::execution_failed(format!("Failed to rename file: {e}")))?;
         }
 
         // Update file read time after successful write

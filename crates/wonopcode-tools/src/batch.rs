@@ -111,7 +111,7 @@ Example:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: BatchArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         if args.tool_calls.is_empty() {
             return Err(ToolError::validation("tool_calls array cannot be empty"));
@@ -236,13 +236,12 @@ Example:
 
         // Add any validation errors
         for error in &errors {
-            output_parts.push(format!("=== Validation Error ===\n{}", error));
+            output_parts.push(format!("=== Validation Error ===\n{error}"));
         }
 
         let summary = if failed.is_empty() && errors.is_empty() {
             format!(
-                "All {} tools executed successfully.\n\nKeep using the batch tool when you need to run multiple independent operations.",
-                total
+                "All {total} tools executed successfully.\n\nKeep using the batch tool when you need to run multiple independent operations."
             )
         } else {
             format!(

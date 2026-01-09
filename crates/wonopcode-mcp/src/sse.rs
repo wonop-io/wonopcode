@@ -50,7 +50,7 @@ impl SseTransport {
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .build()
             .map_err(|e| {
-                McpError::connection_failed(format!("Failed to create HTTP client: {}", e))
+                McpError::connection_failed(format!("Failed to create HTTP client: {e}"))
             })?;
 
         Ok(Self {
@@ -76,7 +76,7 @@ impl SseTransport {
             .body(body.to_string());
 
         if let Some(ref token) = self.config.auth_token {
-            req = req.header("Authorization", format!("Bearer {}", token));
+            req = req.header("Authorization", format!("Bearer {token}"));
         }
 
         req
@@ -93,8 +93,7 @@ impl SseTransport {
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             return Err(McpError::protocol_error(format!(
-                "Server returned {}: {}",
-                status, text
+                "Server returned {status}: {text}"
             )));
         }
 
@@ -113,10 +112,10 @@ impl SseTransport {
             let text = response
                 .text()
                 .await
-                .map_err(|e| McpError::protocol_error(format!("Failed to read response: {}", e)))?;
+                .map_err(|e| McpError::protocol_error(format!("Failed to read response: {e}")))?;
 
             serde_json::from_str(&text)
-                .map_err(|e| McpError::protocol_error(format!("Invalid JSON response: {}", e)))
+                .map_err(|e| McpError::protocol_error(format!("Invalid JSON response: {e}")))
         }
     }
 
@@ -128,8 +127,8 @@ impl SseTransport {
         let mut buffer = String::new();
 
         while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result
-                .map_err(|e| McpError::protocol_error(format!("Stream error: {}", e)))?;
+            let chunk =
+                chunk_result.map_err(|e| McpError::protocol_error(format!("Stream error: {e}")))?;
 
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -170,9 +169,9 @@ impl Transport for SseTransport {
                 if e.is_timeout() {
                     McpError::Timeout
                 } else if e.is_connect() {
-                    McpError::connection_failed(format!("Connection failed: {}", e))
+                    McpError::connection_failed(format!("Connection failed: {e}"))
                 } else {
-                    McpError::protocol_error(format!("Request failed: {}", e))
+                    McpError::protocol_error(format!("Request failed: {e}"))
                 }
             })?;
 
@@ -196,7 +195,7 @@ impl Transport for SseTransport {
             .build_request(&notification_json)
             .send()
             .await
-            .map_err(|e| McpError::protocol_error(format!("Notification failed: {}", e)))?;
+            .map_err(|e| McpError::protocol_error(format!("Notification failed: {e}")))?;
 
         if !response.status().is_success() {
             warn!(status = %response.status(), "Notification returned non-success status");

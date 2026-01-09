@@ -497,8 +497,7 @@ async fn session_prompt(
             AgentConfig::from(agent)
         } else {
             return Err(ApiError::bad_request(format!(
-                "Agent '{}' not found",
-                agent_name
+                "Agent '{agent_name}' not found"
             )));
         }
     } else {
@@ -617,8 +616,7 @@ async fn session_prompt_async(
             AgentConfig::from(agent)
         } else {
             return Err(ApiError::bad_request(format!(
-                "Agent '{}' not found",
-                agent_name
+                "Agent '{agent_name}' not found"
             )));
         }
     } else {
@@ -886,8 +884,7 @@ async fn session_summarize(
             Some(idx) => all_messages.into_iter().skip(idx).collect(),
             None => {
                 return Err(ApiError::not_found(format!(
-                    "Message with id '{}' not found",
-                    from_id
+                    "Message with id '{from_id}' not found"
                 )));
             }
         }
@@ -1174,10 +1171,7 @@ async fn session_command(
     let command = match registry.get(&cmd_name) {
         Some(c) => c,
         None => {
-            return Err(ApiError::not_found(format!(
-                "Unknown command: /{}",
-                cmd_name
-            )));
+            return Err(ApiError::not_found(format!("Unknown command: /{cmd_name}")));
         }
     };
 
@@ -1309,7 +1303,7 @@ async fn file_read(
                 "limit": limit
             })))
         }
-        Err(e) => Err(ApiError::not_found(format!("File not found: {}", e))),
+        Err(e) => Err(ApiError::not_found(format!("File not found: {e}"))),
     }
 }
 
@@ -1349,7 +1343,7 @@ async fn file_list(
             }
             Ok(Json(serde_json::json!({ "files": files })))
         }
-        Err(e) => Err(ApiError::not_found(format!("Directory not found: {}", e))),
+        Err(e) => Err(ApiError::not_found(format!("Directory not found: {e}"))),
     }
 }
 
@@ -1687,8 +1681,7 @@ async fn provider_auth(
         Ok(s) => s,
         Err(e) => {
             return Err(ApiError::internal(format!(
-                "Failed to access auth storage: {}",
-                e
+                "Failed to access auth storage: {e}"
             )))
         }
     };
@@ -1715,7 +1708,7 @@ async fn provider_auth(
                 "env_var": env_key
             })))
         }
-        Err(e) => Err(ApiError::internal(format!("Failed to get auth: {}", e))),
+        Err(e) => Err(ApiError::internal(format!("Failed to get auth: {e}"))),
     }
 }
 
@@ -1756,7 +1749,7 @@ async fn provider_oauth_callback(
             "code_received": true
         })))
     } else if let Some(error) = params.get("error") {
-        Err(ApiError::bad_request(format!("OAuth error: {}", error)))
+        Err(ApiError::bad_request(format!("OAuth error: {error}")))
     } else {
         Err(ApiError::bad_request(
             "Missing code parameter in callback".to_string(),
@@ -1878,8 +1871,7 @@ async fn auth_set(
         Ok(s) => s,
         Err(e) => {
             return Err(ApiError::internal(format!(
-                "Failed to access auth storage: {}",
-                e
+                "Failed to access auth storage: {e}"
             )))
         }
     };
@@ -1892,7 +1884,7 @@ async fn auth_set(
             "provider": req.provider,
             "message": "API key stored successfully"
         }))),
-        Err(e) => Err(ApiError::internal(format!("Failed to store auth: {}", e))),
+        Err(e) => Err(ApiError::internal(format!("Failed to store auth: {e}"))),
     }
 }
 
@@ -2068,8 +2060,7 @@ async fn mcp_connect(
         Some(c) => c,
         None => {
             return Err(ApiError::not_found(format!(
-                "MCP server '{}' not found in config",
-                name
+                "MCP server '{name}' not found in config"
             )));
         }
     };

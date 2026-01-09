@@ -105,7 +105,7 @@ impl SkillRegistry {
     async fn load_skill(path: &Path) -> Result<Skill, String> {
         let content = fs::read_to_string(path)
             .await
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+            .map_err(|e| format!("Failed to read file: {e}"))?;
 
         let (frontmatter, body) = parse_frontmatter(&content)?;
 
@@ -204,7 +204,7 @@ fn parse_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), String
 
     // Parse YAML frontmatter
     let frontmatter: SkillFrontmatter = serde_yaml::from_str(frontmatter_str)
-        .map_err(|e| format!("Invalid frontmatter YAML: {}", e))?;
+        .map_err(|e| format!("Invalid frontmatter YAML: {e}"))?;
 
     Ok((frontmatter, body.to_string()))
 }
@@ -293,12 +293,12 @@ Available skills will be listed in the tool parameters."#
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: SkillArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // First, get the skill info from the registry (sync operation)
         let skill_info = {
             let registry = self.registry.read().map_err(|e| {
-                ToolError::execution_failed(format!("Failed to access skill registry: {}", e))
+                ToolError::execution_failed(format!("Failed to access skill registry: {e}"))
             })?;
             registry.get(&args.name).cloned()
         };
@@ -316,10 +316,7 @@ Available skills will be listed in the tool parameters."#
             None => {
                 let available = {
                     let registry = self.registry.read().map_err(|e| {
-                        ToolError::execution_failed(format!(
-                            "Failed to access skill registry: {}",
-                            e
-                        ))
+                        ToolError::execution_failed(format!("Failed to access skill registry: {e}"))
                     })?;
                     registry.names().join(", ")
                 };
@@ -372,9 +369,8 @@ pub fn skill_description_with_available(registry: &SkillRegistry) -> String {
 Skills provide specialized knowledge and step-by-step guidance for complex tasks.
 Use this when a task matches an available skill's description.
 
-{}
-"#,
-        available
+{available}
+"#
     )
 }
 

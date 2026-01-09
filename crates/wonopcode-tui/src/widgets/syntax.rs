@@ -668,7 +668,7 @@ fn highlight_diff_line_content(
     let mut highlighter = HighlightLines::new(syntax, syntect_theme);
 
     // Highlight the single line (add newline for syntect)
-    let line_with_newline = format!("{}\n", content);
+    let line_with_newline = format!("{content}\n");
     let ranges = highlighter.highlight_line(&line_with_newline, &SYNTAX_SET);
 
     match ranges {
@@ -846,8 +846,7 @@ mod tests {
             .collect();
         assert!(
             removed_content.contains("    let"),
-            "Should preserve 4 spaces: {}",
-            removed_content
+            "Should preserve 4 spaces: {removed_content}"
         );
 
         // Get the content of the added line (index 4)
@@ -858,8 +857,7 @@ mod tests {
             .collect();
         assert!(
             added_content.contains("    let"),
-            "Should preserve 4 spaces: {}",
-            added_content
+            "Should preserve 4 spaces: {added_content}"
         );
     }
 

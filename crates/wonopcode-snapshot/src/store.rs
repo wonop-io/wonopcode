@@ -283,8 +283,7 @@ impl SnapshotStore {
 
         if !snapshot.files.contains(&normalized) {
             return Err(SnapshotError::operation_failed(format!(
-                "File {:?} not in snapshot {}",
-                file, snapshot_id
+                "File {file:?} not in snapshot {snapshot_id}"
             )));
         }
 

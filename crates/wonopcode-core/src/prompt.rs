@@ -227,7 +227,7 @@ impl PromptLoop {
                     error!("Provider error: {}", e);
                     return Err(crate::error::CoreError::from(
                         crate::error::SessionError::Locked {
-                            id: format!("Provider error: {}", e),
+                            id: format!("Provider error: {e}"),
                         },
                     ));
                 }
@@ -360,7 +360,7 @@ impl PromptLoop {
 
                     let (output, success) = match result {
                         Ok(out) => (out.output, true),
-                        Err(e) => (format!("Error: {}", e), false),
+                        Err(e) => (format!("Error: {e}"), false),
                     };
 
                     all_tool_calls.push(ToolCallResult {
@@ -410,7 +410,7 @@ impl PromptLoop {
         input: Value,
     ) -> Result<ToolOutput, wonopcode_tools::ToolError> {
         let tool = self.tools.get(tool_name).ok_or_else(|| {
-            wonopcode_tools::ToolError::validation(format!("Unknown tool: {}", tool_name))
+            wonopcode_tools::ToolError::validation(format!("Unknown tool: {tool_name}"))
         })?;
 
         let ctx = ToolContext {
@@ -462,7 +462,7 @@ pub async fn prompt_once(
 
     let stream = provider.generate(messages, options).await.map_err(|e| {
         crate::error::CoreError::from(crate::error::SessionError::Locked {
-            id: format!("Provider error: {}", e),
+            id: format!("Provider error: {e}"),
         })
     })?;
 

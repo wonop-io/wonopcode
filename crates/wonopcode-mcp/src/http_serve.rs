@@ -215,7 +215,7 @@ impl McpHttpState {
             Some(p) => match serde_json::from_value(p) {
                 Ok(params) => params,
                 Err(e) => {
-                    return self.error_response(id, -32602, &format!("Invalid params: {}", e));
+                    return self.error_response(id, -32602, &format!("Invalid params: {e}"));
                 }
             },
             None => {

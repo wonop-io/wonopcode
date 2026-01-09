@@ -190,8 +190,7 @@ impl ClaudeCliProvider {
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
                 Err(ProviderError::internal(format!(
-                    "Claude CLI returned error: {}",
-                    stderr
+                    "Claude CLI returned error: {stderr}"
                 )))
             }
             Err(_) => Err(ProviderError::internal(
@@ -298,7 +297,7 @@ impl ClaudeCliProvider {
 
             let content = msg.text();
             if !content.is_empty() {
-                parts.push(format!("{}: {}", role, content));
+                parts.push(format!("{role}: {content}"));
             }
         }
 
@@ -381,7 +380,7 @@ impl ClaudeCliProvider {
         ));
 
         std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
-            .map_err(|e| ProviderError::internal(format!("Failed to write MCP config: {}", e)))?;
+            .map_err(|e| ProviderError::internal(format!("Failed to write MCP config: {e}")))?;
 
         debug!(path = %config_path.display(), "Generated MCP config");
 
@@ -395,7 +394,7 @@ impl ClaudeCliProvider {
         // Add patterns for external servers
         if let Some(mcp_config) = &self.mcp_config {
             for name in mcp_config.external_servers.keys() {
-                patterns.push(format!("mcp__{}__*", name));
+                patterns.push(format!("mcp__{name}__*"));
             }
         }
 
@@ -676,7 +675,7 @@ impl LanguageModel for ClaudeCliProvider {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| ProviderError::internal(format!("Failed to spawn Claude CLI: {}", e)))?;
+            .map_err(|e| ProviderError::internal(format!("Failed to spawn Claude CLI: {e}")))?;
 
         let stdout = child
             .stdout
@@ -891,7 +890,7 @@ impl LanguageModel for ClaudeCliProvider {
 
             // Wait for the process to complete
             let status = child.wait().await
-                .map_err(|e| ProviderError::internal(format!("Failed to wait for Claude CLI: {}", e)))?;
+                .map_err(|e| ProviderError::internal(format!("Failed to wait for Claude CLI: {e}")))?;
 
             if !status.success() {
                 warn!(code = ?status.code(), "Claude CLI exited with error");

@@ -285,7 +285,7 @@ impl LspClient {
         // Initialize
         let root_uri: Uri = format!("file://{}", root.display())
             .parse()
-            .map_err(|e| LspError::InvalidUri(format!("{}", e)))?;
+            .map_err(|e| LspError::InvalidUri(format!("{e}")))?;
 
         // Use workspace_folders (modern LSP) instead of deprecated root_uri
         let workspace_folder = WorkspaceFolder {

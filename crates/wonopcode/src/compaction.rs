@@ -410,8 +410,7 @@ pub async fn compact_with_summary(
     let summary_messages = vec![ProviderMessage {
         role: Role::User,
         content: vec![ContentPart::text(format!(
-            "Here is a conversation to summarize:\n\n{}\n\n{}",
-            conversation_text, COMPACTION_USER_PROMPT
+            "Here is a conversation to summarize:\n\n{conversation_text}\n\n{COMPACTION_USER_PROMPT}"
         ))],
     }];
 
@@ -466,7 +465,7 @@ async fn generate_summary(
     let stream = provider
         .generate(messages, options)
         .await
-        .map_err(|e| format!("Failed to start summary generation: {}", e))?;
+        .map_err(|e| format!("Failed to start summary generation: {e}"))?;
 
     let mut stream = Box::pin(stream);
     let mut summary = String::new();
@@ -478,11 +477,11 @@ async fn generate_summary(
             }
             Ok(StreamChunk::Error(e)) => {
                 warn!("Error generating summary: {}", e);
-                return Err(format!("Summary generation error: {}", e));
+                return Err(format!("Summary generation error: {e}"));
             }
             Err(e) => {
                 warn!("Stream error: {}", e);
-                return Err(format!("Stream error: {}", e));
+                return Err(format!("Stream error: {e}"));
             }
             _ => {}
         }
@@ -503,7 +502,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
             Role::Tool => "Tool",
         };
 
-        output.push_str(&format!("--- {} ---\n", role_label));
+        output.push_str(&format!("--- {role_label} ---\n"));
 
         for part in &msg.content {
             match part {
@@ -518,7 +517,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                     }
                 }
                 ContentPart::ToolUse { name, input, .. } => {
-                    output.push_str(&format!("[Tool: {} with input: {:?}]\n", name, input));
+                    output.push_str(&format!("[Tool: {name} with input: {input:?}]\n"));
                 }
                 ContentPart::ToolResult { content, .. } => {
                     // Skip compacted results
@@ -530,7 +529,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                             &content[..500]
                         ));
                     } else {
-                        output.push_str(&format!("[Tool result: {}]\n", content));
+                        output.push_str(&format!("[Tool result: {content}]\n"));
                     }
                 }
                 ContentPart::Image { .. } => {
@@ -540,7 +539,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                     if text.len() > 500 {
                         output.push_str(&format!("[Thinking: {}... [truncated]]\n", &text[..500]));
                     } else {
-                        output.push_str(&format!("[Thinking: {}]\n", text));
+                        output.push_str(&format!("[Thinking: {text}]\n"));
                     }
                 }
             }

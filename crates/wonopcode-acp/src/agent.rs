@@ -356,7 +356,7 @@ impl Agent {
                     .session_update(SessionUpdateNotification {
                         session_id: session.id.clone(),
                         update: SessionUpdate::AgentMessageChunk {
-                            content: TextContent::new(format!("Error: {}", e)),
+                            content: TextContent::new(format!("Error: {e}")),
                         },
                     })
                     .await;
@@ -629,7 +629,7 @@ impl Agent {
                     .session_update(SessionUpdateNotification {
                         session_id: session_id.to_string(),
                         update: SessionUpdate::AgentMessageChunk {
-                            content: TextContent::new(format!("Unknown command: /{}", command)),
+                            content: TextContent::new(format!("Unknown command: /{command}")),
                         },
                     })
                     .await;

@@ -95,7 +95,7 @@ impl PromptHistory {
                     .append(true)
                     .open(path)
                 {
-                    let _ = writeln!(file, "{}", line);
+                    let _ = writeln!(file, "{line}");
                 }
             }
         }
@@ -348,7 +348,7 @@ impl InputWidget {
         // Wrap multi-line pastes in tags
         if line_count >= PASTE_WRAP_MIN_LINES {
             self.paste_count += 1;
-            let wrapped = format!("{}{}{}", PASTE_TAG_OPEN, text, PASTE_TAG_CLOSE);
+            let wrapped = format!("{PASTE_TAG_OPEN}{text}{PASTE_TAG_CLOSE}");
             tracing::info!(
                 "insert_paste: wrapping {} lines in tags (paste #{})",
                 line_count,
@@ -390,7 +390,7 @@ impl InputWidget {
                 // A more sophisticated approach would track exact positions
                 if !raw_text.is_empty() && !raw_text.contains(PASTE_TAG_OPEN) {
                     self.paste_count += 1;
-                    let wrapped = format!("{}{}{}", PASTE_TAG_OPEN, raw_text, PASTE_TAG_CLOSE);
+                    let wrapped = format!("{PASTE_TAG_OPEN}{raw_text}{PASTE_TAG_CLOSE}");
                     self.textarea.select_all();
                     self.textarea.delete_char();
                     self.textarea.insert_str(&wrapped);
@@ -896,12 +896,9 @@ impl InputWidget {
                     paste_regions.len()
                 )
             } else if display_line_count > 1 {
-                format!(
-                    "{} chars | {} lines",
-                    display_char_count, display_line_count
-                )
+                format!("{display_char_count} chars | {display_line_count} lines")
             } else {
-                format!("{} chars", display_char_count)
+                format!("{display_char_count} chars")
             };
 
             let available_width = mode_area.width as usize;
@@ -1140,7 +1137,7 @@ fn transform_for_display(text: &str) -> (String, Vec<PasteRegion>) {
             let line_count = paste_content.lines().count().max(1);
 
             // Add placeholder
-            let placeholder = format!("[Paste #{} - {} lines]", paste_num, line_count);
+            let placeholder = format!("[Paste #{paste_num} - {line_count} lines]");
             result.push_str(&placeholder);
             paste_num += 1;
 
@@ -1446,21 +1443,18 @@ mod tests {
         // The raw text should have the full tags
         assert!(
             raw.starts_with("<wonopcode__paste>"),
-            "raw should start with open tag: {:?}",
-            raw
+            "raw should start with open tag: {raw:?}"
         );
         assert!(
             raw.ends_with("</wonopcode__paste>"),
-            "raw should end with close tag: {:?}",
-            raw
+            "raw should end with close tag: {raw:?}"
         );
 
         // Transform should produce the placeholder
         let (display, _) = transform_for_display(&raw);
         assert_eq!(
             display, "[Paste #1 - 3 lines]",
-            "display should be placeholder, got: {:?}",
-            display
+            "display should be placeholder, got: {display:?}"
         );
     }
 

@@ -92,13 +92,13 @@ impl Drop for TimingGuard {
 
         // Format duration nicely
         let duration_str = if duration_ms < 1000 {
-            format!("{}ms", duration_ms)
+            format!("{duration_ms}ms")
         } else if duration_ms < 60_000 {
             format!("{:.2}s", duration_ms as f64 / 1000.0)
         } else {
             let mins = duration_ms / 60_000;
             let secs = (duration_ms % 60_000) as f64 / 1000.0;
-            format!("{}m {:.1}s", mins, secs)
+            format!("{mins}m {secs:.1}s")
         };
 
         if duration_ms >= self.warn_threshold_ms as u128 {

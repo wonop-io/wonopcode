@@ -282,7 +282,7 @@ Try any of the keywords above to see different response types!
                         \"story\", \"lorem\", or \"markdown\" to see different response types!";
 
                     for word in response.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 30).await;
                     }
 
@@ -1005,7 +1005,7 @@ Use backslashes to escape: \*not italic\* and \`not code\`
                         Would you like me to elaborate on any of these steps?";
 
                     for word in response.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1049,7 +1049,7 @@ fn main() {
 ```"#;
 
                     for line in code.lines() {
-                        yield StreamChunk::TextDelta(format!("{}\n", line));
+                        yield StreamChunk::TextDelta(format!("{line}\n"));
                         maybe_sleep(&settings, 50).await;
                     }
 
@@ -1058,7 +1058,7 @@ fn main() {
                         For better performance, consider using memoization or an iterative approach.";
 
                     for word in explanation.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1074,7 +1074,7 @@ fn main() {
 
                     let intro = "I'll help you with that. Let me examine the relevant files.\n\n";
                     for word in intro.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1118,7 +1118,7 @@ fn main() {
 
                     let intro = "I'll help you with that. Let me examine the relevant files.\n\n";
                     for word in intro.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1160,7 +1160,7 @@ fn main() {
                         The file contains a hello world example with some comments.";
 
                     for word in analysis.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1176,7 +1176,7 @@ fn main() {
 
                     let intro = "I'll search through multiple files to find what you need.\n\n";
                     for word in intro.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1260,7 +1260,7 @@ fn main() {
 
                     let intro = "I'll search through multiple files to find what you need.\n\n";
                     for word in intro.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 25).await;
                     }
 
@@ -1318,7 +1318,7 @@ fn main() {
                         The project is named \"test-project\" version 0.1.0.";
 
                     for word in summary.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 20).await;
                     }
 
@@ -1344,7 +1344,7 @@ fn main() {
                         Would you like me to make any modifications or explore further?";
 
                     for word in response.split(' ') {
-                        yield StreamChunk::TextDelta(format!("{} ", word));
+                        yield StreamChunk::TextDelta(format!("{word} "));
                         maybe_sleep(&settings, 20).await;
                     }
 

@@ -26,7 +26,7 @@ pub async fn checkout_pr(pr_number: u64) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to checkout PR: {}", stderr);
+        anyhow::bail!("Failed to checkout PR: {stderr}");
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -44,7 +44,7 @@ pub fn current_branch() -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to get current branch: {}", stderr);
+        anyhow::bail!("Failed to get current branch: {stderr}");
     }
 
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -72,7 +72,7 @@ pub fn create_branch(branch: &str, from: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to create branch: {}", stderr);
+        anyhow::bail!("Failed to create branch: {stderr}");
     }
 
     Ok(())
@@ -84,7 +84,7 @@ pub fn checkout_branch(branch: &str) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to checkout branch: {}", stderr);
+        anyhow::bail!("Failed to checkout branch: {stderr}");
     }
 
     Ok(())
@@ -96,7 +96,7 @@ pub fn stage_all() -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to stage changes: {}", stderr);
+        anyhow::bail!("Failed to stage changes: {stderr}");
     }
 
     Ok(())
@@ -107,7 +107,7 @@ pub fn commit(message: &str, coauthor: Option<&str>) -> Result<()> {
     let mut full_message = message.to_string();
 
     if let Some(author) = coauthor {
-        full_message.push_str(&format!("\n\nCo-authored-by: {}", author));
+        full_message.push_str(&format!("\n\nCo-authored-by: {author}"));
     }
 
     let output = Command::new("git")
@@ -120,7 +120,7 @@ pub fn commit(message: &str, coauthor: Option<&str>) -> Result<()> {
         if stderr.contains("nothing to commit") {
             return Ok(());
         }
-        anyhow::bail!("Failed to commit: {}", stderr);
+        anyhow::bail!("Failed to commit: {stderr}");
     }
 
     Ok(())
@@ -137,7 +137,7 @@ pub fn push(branch: &str, force: bool) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to push: {}", stderr);
+        anyhow::bail!("Failed to push: {stderr}");
     }
 
     Ok(())
@@ -151,7 +151,7 @@ pub fn has_changes() -> Result<bool> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to check git status: {}", stderr);
+        anyhow::bail!("Failed to check git status: {stderr}");
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -228,7 +228,7 @@ pub fn get_origin_url() -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to get origin URL: {}", stderr);
+        anyhow::bail!("Failed to get origin URL: {stderr}");
     }
 
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();

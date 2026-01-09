@@ -407,7 +407,7 @@ impl DiffWidget {
             } else {
                 theme.border_style()
             })
-            .title(format!(" Diff ({}) ", style_indicator));
+            .title(format!(" Diff ({style_indicator}) "));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -443,7 +443,7 @@ impl DiffWidget {
                 theme.highlight_style()
             };
             lines.push(Line::from(Span::styled(
-                format!(" {}", file_header),
+                format!(" {file_header}"),
                 file_style,
             )));
 
@@ -532,11 +532,11 @@ impl DiffWidget {
             };
 
             left_lines.push(Line::from(Span::styled(
-                format!(" {} (old)", file_header),
+                format!(" {file_header} (old)"),
                 file_style,
             )));
             right_lines.push(Line::from(Span::styled(
-                format!(" {} (new)", file_header),
+                format!(" {file_header} (new)"),
                 file_style,
             )));
 

@@ -329,7 +329,7 @@ impl Keybind {
             KeyCode::Down => self.key == "down",
             KeyCode::Left => self.key == "left",
             KeyCode::Right => self.key == "right",
-            KeyCode::F(n) => self.key == format!("f{}", n),
+            KeyCode::F(n) => self.key == format!("f{n}"),
             _ => false,
         }
     }
@@ -394,7 +394,7 @@ impl Default for KeybindConfig {
     fn default() -> Self {
         let mut bindings = HashMap::new();
         for action in KeyAction::all() {
-            let key = format!("{:?}", action).to_lowercase();
+            let key = format!("{action:?}").to_lowercase();
             bindings.insert(key, action.default_binding().to_string());
         }
 
@@ -429,7 +429,7 @@ impl KeybindManager {
 
         let mut actions = HashMap::new();
         for action in KeyAction::all() {
-            let key = format!("{:?}", action).to_lowercase();
+            let key = format!("{action:?}").to_lowercase();
             let binding = config
                 .bindings
                 .get(&key)

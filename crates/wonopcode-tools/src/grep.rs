@@ -89,7 +89,7 @@ impl Tool for GrepTool {
 
         // Compile the regex pattern
         let regex = Regex::new(pattern)
-            .map_err(|e| ToolError::validation(format!("Invalid regex pattern: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid regex pattern: {e}")))?;
 
         // Parse include pattern for glob matching
         let include_matcher = include.map(build_glob_matcher);
@@ -152,8 +152,7 @@ impl Tool for GrepTool {
                     for (line_num, line_content) in matches {
                         if total_matches >= MAX_TOTAL_MATCHES {
                             results.push(format!(
-                                "... truncated (reached {} matches)",
-                                MAX_TOTAL_MATCHES
+                                "... truncated (reached {MAX_TOTAL_MATCHES} matches)"
                             ));
                             break;
                         }
@@ -177,11 +176,10 @@ impl Tool for GrepTool {
         let output = sort_results_by_mtime(results);
         let match_count = output.lines().count();
 
-        Ok(ToolOutput::new(
-            format!("Grep: {} ({} matches)", pattern, match_count),
-            output,
+        Ok(
+            ToolOutput::new(format!("Grep: {pattern} ({match_count} matches)"), output)
+                .with_metadata(json!({ "count": match_count })),
         )
-        .with_metadata(json!({ "count": match_count })))
     }
 }
 
@@ -236,20 +234,19 @@ impl GrepTool {
                 &SandboxCapabilities::default(),
             )
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Sandbox grep failed: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Sandbox grep failed: {e}")))?;
 
         // Convert sandbox paths in output to host paths
         let output = convert_sandbox_paths_to_host(&result.stdout, ctx);
         let match_count = output.lines().filter(|l| !l.is_empty()).count();
 
-        Ok(ToolOutput::new(
-            format!("Grep: {} ({} matches)", pattern, match_count),
-            output,
+        Ok(
+            ToolOutput::new(format!("Grep: {pattern} ({match_count} matches)"), output)
+                .with_metadata(json!({
+                    "count": match_count,
+                    "sandboxed": true
+                })),
         )
-        .with_metadata(json!({
-            "count": match_count,
-            "sandboxed": true
-        })))
     }
 }
 

@@ -122,7 +122,7 @@ impl BedrockProvider {
                 let is_govcloud = self.region.starts_with("us-gov");
 
                 if needs_prefix && !is_govcloud {
-                    format!("us.{}", model_id)
+                    format!("us.{model_id}")
                 } else {
                     model_id.to_string()
                 }
@@ -145,7 +145,7 @@ impl BedrockProvider {
                     .any(|m| model_id.contains(m));
 
                 if region_needs_prefix && model_needs_prefix {
-                    format!("eu.{}", model_id)
+                    format!("eu.{model_id}")
                 } else {
                     model_id.to_string()
                 }
@@ -157,14 +157,14 @@ impl BedrockProvider {
                 if is_australia
                     && (model_id.contains("claude-sonnet-4") || model_id.contains("claude-haiku"))
                 {
-                    format!("au.{}", model_id)
+                    format!("au.{model_id}")
                 } else {
                     let needs_prefix = ["claude", "nova-lite", "nova-micro", "nova-pro"]
                         .iter()
                         .any(|m| model_id.contains(m));
 
                     if needs_prefix {
-                        format!("apac.{}", model_id)
+                        format!("apac.{model_id}")
                     } else {
                         model_id.to_string()
                     }
@@ -349,33 +349,27 @@ impl BedrockProvider {
 
         let canonical_headers = if let Some(ref token) = self.session_token {
             format!(
-                "content-type:application/json\nhost:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\nx-amz-security-token:{}\n",
-                host, content_hash, amz_date, token
+                "content-type:application/json\nhost:{host}\nx-amz-content-sha256:{content_hash}\nx-amz-date:{amz_date}\nx-amz-security-token:{token}\n"
             )
         } else {
             format!(
-                "content-type:application/json\nhost:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
-                host, content_hash, amz_date
+                "content-type:application/json\nhost:{host}\nx-amz-content-sha256:{content_hash}\nx-amz-date:{amz_date}\n"
             )
         };
 
-        let canonical_request = format!(
-            "{}\n{}\n\n{}\n{}\n{}",
-            method, path, canonical_headers, signed_headers, content_hash
-        );
+        let canonical_request =
+            format!("{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{content_hash}");
 
         // Create string to sign
         let algorithm = "AWS4-HMAC-SHA256";
-        let credential_scope = format!("{}/{}/bedrock/aws4_request", date_stamp, self.region);
+        let credential_scope = format!("{date_stamp}/{}/bedrock/aws4_request", self.region);
 
         let mut hasher = Sha256::new();
         hasher.update(canonical_request.as_bytes());
         let canonical_hash = hex::encode(hasher.finalize());
 
-        let string_to_sign = format!(
-            "{}\n{}\n{}\n{}",
-            algorithm, amz_date, credential_scope, canonical_hash
-        );
+        let string_to_sign =
+            format!("{algorithm}\n{amz_date}\n{credential_scope}\n{canonical_hash}");
 
         // Create signing key
         type HmacSha256 = Hmac<Sha256>;
@@ -485,7 +479,7 @@ impl LanguageModel for BedrockProvider {
             serde_json::to_string(&request).map_err(|e| ProviderError::internal(e.to_string()))?;
 
         let path = format!("/model/{}/converse-stream", urlencoding::encode(&model_id));
-        let url = format!("{}{}", self.endpoint(), path);
+        let url = format!("{}{path}", self.endpoint());
 
         debug!(model = %model_id, region = %self.region, "Sending Bedrock request");
         trace!(request = %body, "Full request");
@@ -508,7 +502,7 @@ impl LanguageModel for BedrockProvider {
             let error_text = response.text().await.unwrap_or_default();
             warn!(status = %status, error = %error_text, "Bedrock API error");
             return Err(ProviderError::Internal {
-                message: format!("Bedrock API error {}: {}", status, error_text),
+                message: format!("Bedrock API error {status}: {error_text}"),
             });
         }
 

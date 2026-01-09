@@ -46,7 +46,7 @@ impl PodmanRuntime {
             .args(["version", "--format", "{{.Version}}"])
             .output()
             .await
-            .map_err(|e| SandboxError::connection_failed(format!("Podman not available: {}", e)))?;
+            .map_err(|e| SandboxError::connection_failed(format!("Podman not available: {e}")))?;
 
         if !output.status.success() {
             return Err(SandboxError::connection_failed(
@@ -60,7 +60,7 @@ impl PodmanRuntime {
         // This ensures the same project always uses the same container.
         let project_path = path_mapper.host_root().to_string_lossy();
         let hash = Self::hash_path(&project_path);
-        let id = format!("wonopcode-{}", hash);
+        let id = format!("wonopcode-{hash}");
 
         info!(id = %id, version = %version, project = %project_path, "Podman runtime created");
 
@@ -81,7 +81,7 @@ impl PodmanRuntime {
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
         let hash = hasher.finish();
-        format!("{:016x}", hash)[..12].to_string()
+        format!("{hash:016x}")[..12].to_string()
     }
 
     /// Run a podman command and return output.
@@ -91,7 +91,7 @@ impl PodmanRuntime {
             .args(args)
             .output()
             .await
-            .map_err(|e| SandboxError::ExecFailed(format!("Podman command failed: {}", e)))
+            .map_err(|e| SandboxError::ExecFailed(format!("Podman command failed: {e}")))
     }
 
     /// Ensure the container image is available.
@@ -151,7 +151,7 @@ impl PodmanRuntime {
             "ro"
         };
         args.push("-v".to_string());
-        args.push(format!("{}:{}:{}", host_root, sandbox_root, mount_opt));
+        args.push(format!("{host_root}:{sandbox_root}:{mount_opt}"));
 
         // Cache mounts (named volumes)
         if self.config.mounts.persist_caches {
@@ -169,7 +169,7 @@ impl PodmanRuntime {
         // Resource limits
         if let Some(mem_bytes) = self.config.resources.memory_bytes() {
             args.push("--memory".to_string());
-            args.push(format!("{}b", mem_bytes));
+            args.push(format!("{mem_bytes}b"));
         }
         args.push("--cpus".to_string());
         args.push(format!("{}", self.config.resources.cpus));

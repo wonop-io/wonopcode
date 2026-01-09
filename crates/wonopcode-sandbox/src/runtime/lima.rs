@@ -91,7 +91,7 @@ impl LimaRuntime {
             .args(args)
             .output()
             .await
-            .map_err(|e| SandboxError::ExecFailed(format!("limactl failed: {}", e)))
+            .map_err(|e| SandboxError::ExecFailed(format!("limactl failed: {e}")))
     }
 
     /// Check if the VM exists.
@@ -147,8 +147,7 @@ impl LimaRuntime {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(SandboxError::CreateFailed(format!(
-                "Failed to create Lima VM: {}",
-                stderr
+                "Failed to create Lima VM: {stderr}"
             )));
         }
 
@@ -166,7 +165,7 @@ impl LimaRuntime {
 
         tokio::fs::write(&template_path, template)
             .await
-            .map_err(|e| SandboxError::CreateFailed(format!("Failed to write template: {}", e)))?;
+            .map_err(|e| SandboxError::CreateFailed(format!("Failed to write template: {e}")))?;
 
         Ok(template_path.to_string_lossy().to_string())
     }
@@ -208,7 +207,7 @@ impl LimaRuntime {
         let workdir_str = workdir.to_string_lossy();
 
         // Build the full command with cd
-        let full_command = format!("cd '{}' && {}", workdir_str, command);
+        let full_command = format!("cd '{workdir_str}' && {command}");
 
         debug!(command = %command, workdir = %workdir_str, "Executing in Lima VM");
 
@@ -289,8 +288,7 @@ impl SandboxRuntime for LimaRuntime {
             let stderr = String::from_utf8_lossy(&output.stderr);
             *self.status.write().await = SandboxStatus::Error;
             return Err(SandboxError::StartFailed(format!(
-                "Failed to start Lima VM: {}",
-                stderr
+                "Failed to start Lima VM: {stderr}"
             )));
         }
 
@@ -396,7 +394,7 @@ impl SandboxRuntime for LimaRuntime {
         // For binary-safe writing, use base64
         let content_b64 = base64_encode(content);
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
-        let command = format!("echo '{}' | base64 -d > '{}'", content_b64, path_escaped);
+        let command = format!("echo '{content_b64}' | base64 -d > '{path_escaped}'");
 
         let output = self
             .exec_in_vm(&command, Path::new("/"), Duration::from_secs(30))
@@ -415,7 +413,7 @@ impl SandboxRuntime for LimaRuntime {
         }
 
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
-        let command = format!("test -e '{}'", path_escaped);
+        let command = format!("test -e '{path_escaped}'");
         let output = self
             .exec_in_vm(&command, Path::new("/"), Duration::from_secs(10))
             .await?;
@@ -431,8 +429,7 @@ impl SandboxRuntime for LimaRuntime {
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
         // Use stat with format that works on both Linux and macOS
         let command = format!(
-            "stat -c '%s %F %a' '{}' 2>/dev/null || stat -f '%z %HT %Lp' '{}'",
-            path_escaped, path_escaped
+            "stat -c '%s %F %a' '{path_escaped}' 2>/dev/null || stat -f '%z %HT %Lp' '{path_escaped}'"
         );
 
         let output = self
@@ -469,8 +466,7 @@ impl SandboxRuntime for LimaRuntime {
 
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
         let command = format!(
-            "find '{}' -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\n' 2>/dev/null || ls -1F '{}'",
-            path_escaped, path_escaped
+            "find '{path_escaped}' -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\n' 2>/dev/null || ls -1F '{path_escaped}'"
         );
 
         let output = self
@@ -513,7 +509,7 @@ impl SandboxRuntime for LimaRuntime {
         }
 
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
-        let command = format!("mkdir -p '{}'", path_escaped);
+        let command = format!("mkdir -p '{path_escaped}'");
         let output = self
             .exec_in_vm(&command, Path::new("/"), Duration::from_secs(10))
             .await?;
@@ -531,7 +527,7 @@ impl SandboxRuntime for LimaRuntime {
         }
 
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
-        let command = format!("rm -f '{}'", path_escaped);
+        let command = format!("rm -f '{path_escaped}'");
         let output = self
             .exec_in_vm(&command, Path::new("/"), Duration::from_secs(10))
             .await?;
@@ -550,9 +546,9 @@ impl SandboxRuntime for LimaRuntime {
 
         let path_escaped = path.to_string_lossy().replace('\'', "'\\''");
         let command = if recursive {
-            format!("rm -rf '{}'", path_escaped)
+            format!("rm -rf '{path_escaped}'")
         } else {
-            format!("rmdir '{}'", path_escaped)
+            format!("rmdir '{path_escaped}'")
         };
 
         let output = self

@@ -92,7 +92,7 @@ Usage notes:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: BashArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Validate command is not empty
         if args.command.trim().is_empty() {
@@ -234,7 +234,7 @@ impl BashTool {
         let result = sandbox
             .execute(command, &sandbox_workdir, timeout, &capabilities)
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Sandbox execution failed: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Sandbox execution failed: {e}")))?;
 
         // Combine output
         let combined = result.combined();
@@ -294,7 +294,7 @@ impl BashTool {
         // Spawn the process
         let mut child = cmd
             .spawn()
-            .map_err(|e| ToolError::execution_failed(format!("Failed to spawn process: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Failed to spawn process: {e}")))?;
 
         // Handle background execution
         if run_in_background {
@@ -388,12 +388,11 @@ impl BashTool {
                     "truncated": truncated
                 })))
             }
-            Ok(Err(e)) => Err(ToolError::execution_failed(format!("Process error: {}", e))),
+            Ok(Err(e)) => Err(ToolError::execution_failed(format!("Process error: {e}"))),
             Err(_) => {
                 // Timeout - process is killed by kill_on_drop
                 Err(ToolError::execution_failed(format!(
-                    "Command timed out after {}ms",
-                    timeout_ms
+                    "Command timed out after {timeout_ms}ms"
                 )))
             }
         }

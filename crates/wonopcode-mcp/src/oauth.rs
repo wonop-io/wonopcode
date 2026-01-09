@@ -104,10 +104,7 @@ impl OAuthProvider {
 
     /// Get the redirect URL.
     pub fn redirect_url(&self) -> String {
-        format!(
-            "http://127.0.0.1:{}{}",
-            OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_PATH
-        )
+        format!("http://127.0.0.1:{OAUTH_CALLBACK_PORT}{OAUTH_CALLBACK_PATH}")
     }
 
     /// Get client metadata for dynamic registration.
@@ -376,20 +373,19 @@ pub async fn exchange_code(
         .form(&params)
         .send()
         .await
-        .map_err(|e| McpError::AuthFailed(format!("Token request failed: {}", e)))?;
+        .map_err(|e| McpError::AuthFailed(format!("Token request failed: {e}")))?;
 
     if !response.status().is_success() {
         let text = response.text().await.unwrap_or_default();
         return Err(McpError::AuthFailed(format!(
-            "Token exchange failed: {}",
-            text
+            "Token exchange failed: {text}"
         )));
     }
 
     let tokens: OAuthTokens = response
         .json()
         .await
-        .map_err(|e| McpError::AuthFailed(format!("Invalid token response: {}", e)))?;
+        .map_err(|e| McpError::AuthFailed(format!("Invalid token response: {e}")))?;
 
     Ok(tokens)
 }
@@ -418,20 +414,19 @@ pub async fn refresh_tokens(
         .form(&params)
         .send()
         .await
-        .map_err(|e| McpError::AuthFailed(format!("Refresh request failed: {}", e)))?;
+        .map_err(|e| McpError::AuthFailed(format!("Refresh request failed: {e}")))?;
 
     if !response.status().is_success() {
         let text = response.text().await.unwrap_or_default();
         return Err(McpError::AuthFailed(format!(
-            "Token refresh failed: {}",
-            text
+            "Token refresh failed: {text}"
         )));
     }
 
     let tokens: OAuthTokens = response
         .json()
         .await
-        .map_err(|e| McpError::AuthFailed(format!("Invalid refresh response: {}", e)))?;
+        .map_err(|e| McpError::AuthFailed(format!("Invalid refresh response: {e}")))?;
 
     Ok(tokens)
 }

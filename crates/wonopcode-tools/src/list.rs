@@ -78,15 +78,13 @@ impl Tool for ListTool {
             .unwrap_or_else(|| ctx.cwd.clone());
 
         // Collect additional ignore patterns from args
-        let mut ignore_patterns: Vec<String> = IGNORE_PATTERNS
-            .iter()
-            .map(|p| format!("!{}/**", p))
-            .collect();
+        let mut ignore_patterns: Vec<String> =
+            IGNORE_PATTERNS.iter().map(|p| format!("!{p}/**")).collect();
 
         if let Some(extra) = args["ignore"].as_array() {
             for pattern in extra {
                 if let Some(p) = pattern.as_str() {
-                    ignore_patterns.push(format!("!{}", p));
+                    ignore_patterns.push(format!("!{p}"));
                 }
             }
         }
@@ -139,7 +137,7 @@ impl Tool for ListTool {
             let path_str = rel_path.to_string_lossy();
             let should_ignore = IGNORE_PATTERNS
                 .iter()
-                .any(|p| path_str.starts_with(p) || path_str.contains(&format!("/{}/", p)));
+                .any(|p| path_str.starts_with(p) || path_str.contains(&format!("/{p}/")));
 
             if should_ignore {
                 continue;
@@ -268,7 +266,7 @@ fn render_dir(
     // Render files in this directory
     if let Some(files) = files_by_dir.get(dir_path) {
         for file in files {
-            output.push_str(&format!("{}{}\n", child_indent, file));
+            output.push_str(&format!("{child_indent}{file}\n"));
         }
     }
 

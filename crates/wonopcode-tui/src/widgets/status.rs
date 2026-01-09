@@ -122,7 +122,7 @@ impl StatusWidget {
                 right_parts.push(Span::styled(" │ ", theme.dim_style()));
             }
             right_parts.push(Span::styled(
-                format!("{}↓ {}↑", input, output),
+                format!("{input}↓ {output}↑"),
                 theme.dim_style(),
             ));
         }

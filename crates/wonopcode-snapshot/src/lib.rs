@@ -12,7 +12,7 @@
 //! use wonopcode_snapshot::{SnapshotStore, SnapshotConfig};
 //! use std::path::PathBuf;
 //!
-//! # async fn example() -> anyhow::Result<()> {
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let store = SnapshotStore::new(
 //!     PathBuf::from(".wonopcode/snapshots"),
 //!     PathBuf::from("/project/root"),

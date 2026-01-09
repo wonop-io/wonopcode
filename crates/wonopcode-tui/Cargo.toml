@@ -16,7 +16,6 @@ wonopcode-core.workspace = true
 wonopcode-protocol.workspace = true
 
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
@@ -26,7 +25,6 @@ tracing.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tui-textarea.workspace = true
-pulldown-cmark.workspace = true
 syntect.workspace = true
 similar.workspace = true
 reqwest.workspace = true

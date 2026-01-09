@@ -269,7 +269,7 @@ impl FooterWidget {
             }
             FooterStatus::Running(action) => {
                 spans.push(Span::styled(self.spinner_char(), theme.warning_style()));
-                spans.push(Span::styled(format!(" {}", action), theme.warning_style()));
+                spans.push(Span::styled(format!(" {action}"), theme.warning_style()));
             }
             FooterStatus::Error(err) => {
                 spans.push(Span::styled(err.as_str(), theme.error_style()));
@@ -386,7 +386,7 @@ impl FooterWidget {
         // Token counts
         if let Some((input, output)) = self.tokens {
             right_parts.push(Span::styled(
-                format!("{}↓ {}↑", input, output),
+                format!("{input}↓ {output}↑"),
                 theme.dim_style(),
             ));
         }

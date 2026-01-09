@@ -634,7 +634,7 @@ impl SidebarWidget {
         ]));
         // Format: "34% used"
         lines.push(Line::from(vec![
-            Span::styled(format!("{}%", usage_pct), usage_style),
+            Span::styled(format!("{usage_pct}%"), usage_style),
             Span::styled(" used", theme.muted_style()),
         ]));
         // Format: "$0.0000 spent"
@@ -652,7 +652,7 @@ impl SidebarWidget {
         let arrow = if collapsed { "▶" } else { "▼" };
 
         let mut header_spans = vec![
-            Span::styled(format!("{} ", arrow), theme.muted_style()),
+            Span::styled(format!("{arrow} "), theme.muted_style()),
             Span::styled("LSP", title_style),
         ];
         if !self.lsp_servers.is_empty() {
@@ -677,7 +677,7 @@ impl SidebarWidget {
                     };
 
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {} ", circle), status_style),
+                        Span::styled(format!("  {circle} "), status_style),
                         Span::styled(
                             truncate(&server.name, width.saturating_sub(6)),
                             theme.text_style(),
@@ -696,7 +696,7 @@ impl SidebarWidget {
         let arrow = if collapsed { "▶" } else { "▼" };
 
         let mut header_spans = vec![
-            Span::styled(format!("{} ", arrow), theme.muted_style()),
+            Span::styled(format!("{arrow} "), theme.muted_style()),
             Span::styled("MCP", title_style),
         ];
         if !self.mcp_servers.is_empty() {
@@ -743,7 +743,7 @@ impl SidebarWidget {
         let arrow = if collapsed { "▶" } else { "▼" };
 
         let mut header_spans = vec![
-            Span::styled(format!("{} ", arrow), theme.muted_style()),
+            Span::styled(format!("{arrow} "), theme.muted_style()),
             Span::styled("Todos", title_style),
         ];
         if !self.todos.is_empty() {
@@ -769,7 +769,7 @@ impl SidebarWidget {
                     };
 
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {} ", icon), style),
+                        Span::styled(format!("  {icon} "), style),
                         Span::styled(
                             truncate(&todo.content, width.saturating_sub(8)),
                             theme.text_style(),
@@ -792,7 +792,7 @@ impl SidebarWidget {
         let total_removed: u32 = self.modified_files.iter().map(|f| f.removed).sum();
 
         let mut header_spans = vec![
-            Span::styled(format!("{} ", arrow), theme.muted_style()),
+            Span::styled(format!("{arrow} "), theme.muted_style()),
             Span::styled("Modified", title_style),
         ];
         if !self.modified_files.is_empty() {
@@ -878,7 +878,7 @@ fn render_hyperlink(buffer: &mut Buffer, x: u16, y: u16, text: &str, url: &str) 
 
         let cell_x = x + cell_offset;
         if let Some(cell) = buffer.cell_mut((cell_x, y)) {
-            let hyperlink = format!("\x1B]8;;{}\x07{}\x1B]8;;\x07", url, chunk);
+            let hyperlink = format!("\x1B]8;;{url}\x07{chunk}\x1B]8;;\x07");
             cell.set_symbol(&hyperlink);
         }
 

@@ -69,7 +69,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to add reaction: {} - {}", status, body);
-            anyhow::bail!("Failed to add reaction: {}", status);
+            anyhow::bail!("Failed to add reaction: {status}");
         }
 
         debug!("Added {} reaction to comment {}", reaction, comment_id);
@@ -102,7 +102,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to remove reaction: {} - {}", status, body);
-            anyhow::bail!("Failed to remove reaction: {}", status);
+            anyhow::bail!("Failed to remove reaction: {status}");
         }
 
         Ok(())
@@ -135,7 +135,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to create comment: {} - {}", status, body);
-            anyhow::bail!("Failed to create comment: {}", status);
+            anyhow::bail!("Failed to create comment: {status}");
         }
 
         let comment: Comment = response.json().await?;
@@ -170,7 +170,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to update comment: {} - {}", status, body);
-            anyhow::bail!("Failed to update comment: {}", status);
+            anyhow::bail!("Failed to update comment: {status}");
         }
 
         let comment: Comment = response.json().await?;
@@ -202,7 +202,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to get pull request: {} - {}", status, body);
-            anyhow::bail!("Failed to get pull request: {}", status);
+            anyhow::bail!("Failed to get pull request: {status}");
         }
 
         let pr: PullRequest = response.json().await?;
@@ -240,7 +240,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to create pull request: {} - {}", status, body);
-            anyhow::bail!("Failed to create pull request: {}", status);
+            anyhow::bail!("Failed to create pull request: {status}");
         }
 
         let pr: PullRequest = response.json().await?;
@@ -268,7 +268,7 @@ impl GitHubClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             error!("Failed to get issue: {} - {}", status, body);
-            anyhow::bail!("Failed to get issue: {}", status);
+            anyhow::bail!("Failed to get issue: {status}");
         }
 
         let issue: Issue = response.json().await?;
@@ -303,7 +303,7 @@ impl GitHubClient {
             }
             let body = response.text().await.unwrap_or_default();
             error!("Failed to get permission level: {} - {}", status, body);
-            anyhow::bail!("Failed to get permission level: {}", status);
+            anyhow::bail!("Failed to get permission level: {status}");
         }
 
         #[derive(Deserialize)]

@@ -177,7 +177,7 @@ impl Version {
         if let Some(PreRelease::Nightly(ref s)) = self.pre_release {
             s.clone()
         } else {
-            format!("v{}", self)
+            format!("v{self}")
         }
     }
 }
@@ -186,7 +186,7 @@ impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
         if let Some(ref pre) = self.pre_release {
-            write!(f, "-{}", pre)?;
+            write!(f, "-{pre}")?;
         }
         Ok(())
     }
@@ -199,24 +199,24 @@ impl fmt::Display for PreRelease {
                 if *n == 0 {
                     write!(f, "alpha")
                 } else {
-                    write!(f, "alpha.{}", n)
+                    write!(f, "alpha.{n}")
                 }
             }
             PreRelease::Beta(n) => {
                 if *n == 0 {
                     write!(f, "beta")
                 } else {
-                    write!(f, "beta.{}", n)
+                    write!(f, "beta.{n}")
                 }
             }
             PreRelease::Rc(n) => {
                 if *n == 0 {
                     write!(f, "rc")
                 } else {
-                    write!(f, "rc.{}", n)
+                    write!(f, "rc.{n}")
                 }
             }
-            PreRelease::Nightly(s) => write!(f, "{}", s),
+            PreRelease::Nightly(s) => write!(f, "{s}"),
         }
     }
 }

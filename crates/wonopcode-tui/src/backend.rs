@@ -87,7 +87,7 @@ impl RemoteBackend {
         let base_url = if address.starts_with("http://") || address.starts_with("https://") {
             address.to_string()
         } else {
-            format!("http://{}", address)
+            format!("http://{address}")
         };
 
         let client = reqwest::Client::builder()

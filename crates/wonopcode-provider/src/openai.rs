@@ -35,7 +35,7 @@ impl OpenAIProvider {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key))
+            HeaderValue::from_str(&format!("Bearer {api_key}"))
                 .map_err(|_| ProviderError::invalid_api_key("openai"))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -173,7 +173,7 @@ fn convert_content(parts: &[ContentPart]) -> Value {
             ContentPart::Image { source } => {
                 let url = match source {
                     crate::message::ImageSource::Base64 { media_type, data } => {
-                        format!("data:{};base64,{}", media_type, data)
+                        format!("data:{media_type};base64,{data}")
                     }
                     crate::message::ImageSource::Url { url } => url.clone(),
                 };
@@ -360,7 +360,7 @@ impl LanguageModel for OpenAIProvider {
             let error_text = response.text().await.unwrap_or_default();
             warn!(status = %status, error = %error_text, "OpenAI API error");
             return Err(ProviderError::Internal {
-                message: format!("OpenAI API error {}: {}", status, error_text),
+                message: format!("OpenAI API error {status}: {error_text}"),
             });
         }
 
@@ -373,7 +373,7 @@ impl LanguageModel for OpenAIProvider {
             use tokio_util::io::StreamReader;
 
             let reader = StreamReader::new(
-                byte_stream.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                byte_stream.map(|r| r.map_err(std::io::Error::other))
             );
             let mut lines = reader.lines();
 

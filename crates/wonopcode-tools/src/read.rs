@@ -97,13 +97,13 @@ Usage:
             let exists = sandbox
                 .path_exists(&sandbox_path)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {}", e)))?;
+                .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {e}")))?;
 
             if !exists {
                 let suggestion = suggest_similar_file(&file_path).await;
                 let mut message = format!("File not found: {}", file_path.display());
                 if let Some(suggestion) = suggestion {
-                    message.push_str(&format!("\n\nDid you mean: {}", suggestion));
+                    message.push_str(&format!("\n\nDid you mean: {suggestion}"));
                 }
                 return Err(ToolError::file_not_found(message));
             }
@@ -112,7 +112,7 @@ Usage:
             let metadata = sandbox
                 .metadata(&sandbox_path)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {}", e)))?;
+                .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {e}")))?;
 
             if metadata.size > MAX_FILE_SIZE {
                 return Err(ToolError::validation(format!(
@@ -125,7 +125,7 @@ Usage:
             sandbox
                 .read_file(&sandbox_path)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Sandbox read error: {}", e)))?
+                .map_err(|e| ToolError::execution_failed(format!("Sandbox read error: {e}")))?
         } else {
             // Direct host filesystem access
 
@@ -134,7 +134,7 @@ Usage:
                 let suggestion = suggest_similar_file(&file_path).await;
                 let mut message = format!("File not found: {}", file_path.display());
                 if let Some(suggestion) = suggestion {
-                    message.push_str(&format!("\n\nDid you mean: {}", suggestion));
+                    message.push_str(&format!("\n\nDid you mean: {suggestion}"));
                 }
                 return Err(ToolError::file_not_found(message));
             }

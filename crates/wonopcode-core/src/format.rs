@@ -46,7 +46,7 @@ impl Formatter {
     pub fn handles(&self, extension: &str) -> bool {
         self.extensions.iter().any(|ext| {
             ext.eq_ignore_ascii_case(extension)
-                || ext.eq_ignore_ascii_case(&format!(".{}", extension))
+                || ext.eq_ignore_ascii_case(&format!(".{extension}"))
         })
     }
 
@@ -87,7 +87,7 @@ impl Formatter {
         }
 
         let output = cmd.output().await.map_err(|e| {
-            FormatterError::ExecutionFailed(format!("Failed to execute {}: {}", program, e))
+            FormatterError::ExecutionFailed(format!("Failed to execute {program}: {e}"))
         })?;
 
         if !output.status.success() {

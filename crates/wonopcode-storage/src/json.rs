@@ -39,8 +39,7 @@ impl JsonStorage {
                 || *component == ".."
             {
                 return Err(StorageError::invalid_key(format!(
-                    "Invalid key component: {}",
-                    component
+                    "Invalid key component: {component}"
                 )));
             }
         }

@@ -99,7 +99,7 @@ impl LspTransport {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| LspError::ProcessError(format!("Failed to start server: {}", e)))?;
+            .map_err(|e| LspError::ProcessError(format!("Failed to start server: {e}")))?;
 
         let stdin = child
             .stdin
@@ -126,7 +126,7 @@ impl LspTransport {
         // Read response
         let response = self.read_message().await?;
         let response: JsonRpcResponse = serde_json::from_str(&response)
-            .map_err(|e| LspError::protocol_error(format!("Invalid response: {}", e)))?;
+            .map_err(|e| LspError::protocol_error(format!("Invalid response: {e}")))?;
 
         Ok(response)
     }
@@ -191,7 +191,7 @@ impl LspTransport {
         stdout.read_exact(&mut content).await?;
 
         let content = String::from_utf8(content)
-            .map_err(|e| LspError::protocol_error(format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| LspError::protocol_error(format!("Invalid UTF-8: {e}")))?;
 
         trace!(content = %content, "Received LSP message");
 

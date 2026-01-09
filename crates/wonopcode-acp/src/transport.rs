@@ -245,9 +245,9 @@ impl StdioTransport {
 
         // Wait for response with timeout
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
-            Ok(Ok(result)) => result.map_err(|e| {
-                TransportError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.message))
-            }),
+            Ok(Ok(result)) => {
+                result.map_err(|e| TransportError::Io(std::io::Error::other(e.message)))
+            }
             Ok(Err(_)) => Err(TransportError::ChannelClosed),
             Err(_) => {
                 // Remove pending request

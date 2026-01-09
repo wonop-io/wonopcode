@@ -317,7 +317,7 @@ impl TimelineWidget {
 
                 // Add tool summary if present
                 if let Some(ref tools) = entry.tool_summary {
-                    spans.push(Span::styled(format!(" [{}]", tools), theme.muted_style()));
+                    spans.push(Span::styled(format!(" [{tools}]"), theme.muted_style()));
                 }
 
                 ListItem::new(Line::from(spans))

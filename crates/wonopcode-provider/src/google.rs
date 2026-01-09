@@ -212,7 +212,7 @@ impl LanguageModel for GoogleProvider {
             use tokio_util::io::StreamReader;
 
             let reader = StreamReader::new(
-                byte_stream.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                byte_stream.map(|r| r.map_err(std::io::Error::other))
             );
             let mut lines = reader.lines();
 

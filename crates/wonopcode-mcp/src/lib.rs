@@ -22,7 +22,7 @@
 //! ```no_run
 //! use wonopcode_mcp::{McpClient, ServerConfig};
 //!
-//! # async fn example() -> anyhow::Result<()> {
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Configure an MCP server via HTTP/SSE
 //! let config = ServerConfig::sse(
 //!     "my-server",

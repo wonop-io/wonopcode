@@ -76,9 +76,10 @@ impl Hook {
             cmd.current_dir(cwd);
         }
 
-        let output = cmd.output().await.map_err(|e| {
-            HookError::ExecutionFailed(format!("Failed to execute {}: {}", program, e))
-        })?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| HookError::ExecutionFailed(format!("Failed to execute {program}: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -138,8 +139,8 @@ impl HookContext {
 fn substitute_variables(input: &str, context: &HookContext) -> String {
     let mut result = input.to_string();
     for (key, value) in &context.env {
-        result = result.replace(&format!("${}", key), value);
-        result = result.replace(&format!("${{{}}}", key), value);
+        result = result.replace(&format!("${key}"), value);
+        result = result.replace(&format!("${{{key}}}"), value);
     }
     result
 }
@@ -250,7 +251,7 @@ impl HookRegistry {
             // Simple pattern matching: *.ext or exact path
             let matches = if pattern.starts_with("*.") {
                 let ext = &pattern[1..];
-                file_str.ends_with(ext) || format!(".{}", extension) == ext
+                file_str.ends_with(ext) || format!(".{extension}") == ext
             } else if pattern.contains('*') {
                 // Basic glob matching
                 glob_match(pattern, &file_str)

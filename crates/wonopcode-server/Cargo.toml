@@ -22,7 +22,6 @@ wonopcode-mcp.workspace = true
 glob.workspace = true
 dirs.workspace = true
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 async-trait.workspace = true

@@ -74,7 +74,7 @@ fn format_time(time: SystemTime) -> String {
         Ok(duration) => {
             let secs = duration.as_secs();
             // Simple formatting - could use chrono for better output
-            format!("{}s since epoch", secs)
+            format!("{secs}s since epoch")
         }
         Err(_) => "unknown time".to_string(),
     }

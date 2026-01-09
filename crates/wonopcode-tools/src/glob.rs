@@ -115,7 +115,7 @@ impl Tool for GlobTool {
             .join("\n");
 
         Ok(
-            ToolOutput::new(format!("Glob: {} ({} files)", pattern, count), output)
+            ToolOutput::new(format!("Glob: {pattern} ({count} files)"), output)
                 .with_metadata(json!({ "count": count })),
         )
     }
@@ -151,7 +151,7 @@ impl GlobTool {
                 &SandboxCapabilities::default(),
             )
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Sandbox find failed: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Sandbox find failed: {e}")))?;
 
         if !result.success && !result.stderr.is_empty() {
             // Log warning but continue - find may return non-zero for empty results
@@ -176,7 +176,7 @@ impl GlobTool {
         let output = files.join("\n");
 
         Ok(
-            ToolOutput::new(format!("Glob: {} ({} files)", pattern, count), output).with_metadata(
+            ToolOutput::new(format!("Glob: {pattern} ({count} files)"), output).with_metadata(
                 json!({
                     "count": count,
                     "sandboxed": true
@@ -197,7 +197,7 @@ fn build_find_command(pattern: &str, base_path: &Path) -> String {
 
     if let Some(name_pattern) = pattern.strip_prefix("**/") {
         // Recursive pattern like **/*.rs
-        format!("find '{}' -type f -name '{}'", base, name_pattern)
+        format!("find '{base}' -type f -name '{name_pattern}'")
     } else if pattern.contains("**/") {
         // Pattern like src/**/*.ts
         let parts: Vec<&str> = pattern.splitn(2, "**/").collect();
@@ -205,30 +205,24 @@ fn build_find_command(pattern: &str, base_path: &Path) -> String {
             let subdir = parts[0].trim_end_matches('/');
             let name_pattern = parts[1];
             if subdir.is_empty() {
-                format!("find '{}' -type f -name '{}'", base, name_pattern)
+                format!("find '{base}' -type f -name '{name_pattern}'")
             } else {
-                format!(
-                    "find '{}/{}' -type f -name '{}'",
-                    base, subdir, name_pattern
-                )
+                format!("find '{base}/{subdir}' -type f -name '{name_pattern}'")
             }
         } else {
-            format!("find '{}' -type f -name '{}'", base, pattern)
+            format!("find '{base}' -type f -name '{pattern}'")
         }
     } else if pattern.contains('/') {
         // Pattern with directory like src/*.rs
         let (dir, name) = pattern.rsplit_once('/').unwrap_or(("", pattern));
         if dir.is_empty() {
-            format!("find '{}' -maxdepth 1 -type f -name '{}'", base, name)
+            format!("find '{base}' -maxdepth 1 -type f -name '{name}'")
         } else {
-            format!(
-                "find '{}/{}' -maxdepth 1 -type f -name '{}'",
-                base, dir, name
-            )
+            format!("find '{base}/{dir}' -maxdepth 1 -type f -name '{name}'")
         }
     } else {
         // Simple pattern like *.txt - search current directory only
-        format!("find '{}' -maxdepth 1 -type f -name '{}'", base, pattern)
+        format!("find '{base}' -maxdepth 1 -type f -name '{pattern}'")
     }
 }
 

@@ -60,7 +60,7 @@ const GITHUB_REPO: &str = "wonop-io/wonopcode";
 pub async fn fetch_releases(channel: ReleaseChannel) -> Result<Vec<Release>> {
     let client = reqwest::Client::builder().user_agent("wonopcode").build()?;
 
-    let url = format!("https://api.github.com/repos/{}/releases", GITHUB_REPO);
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
     let response = client.get(&url).send().await?;
 
     if !response.status().is_success() {
@@ -161,7 +161,7 @@ pub fn find_platform_asset(release: &Release) -> Result<&Asset> {
                 && !name.ends_with(".sha256")
                 && !name.ends_with(".md5")
         })
-        .ok_or_else(|| anyhow::anyhow!("No binary available for {}-{}", os, arch))
+        .ok_or_else(|| anyhow::anyhow!("No binary available for {os}-{arch}"))
 }
 
 /// Format file size for display.
@@ -171,7 +171,7 @@ pub fn format_size(bytes: u64) -> String {
     } else if bytes >= 1_000 {
         format!("{:.1} KB", bytes as f64 / 1_000.0)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 
@@ -449,7 +449,7 @@ pub async fn handle_check(channel: Option<ReleaseChannel>, json: bool) -> Result
                 println!("You are running the latest version.");
             }
         } else {
-            println!("No releases found for channel '{}'", channel);
+            println!("No releases found for channel '{channel}'");
         }
     }
 
@@ -473,32 +473,32 @@ pub async fn handle_upgrade(
     let current = Version::parse(env!("CARGO_PKG_VERSION"))
         .ok_or_else(|| anyhow::anyhow!("Invalid current version"))?;
 
-    println!("Current version: {}", current);
+    println!("Current version: {current}");
 
     // Determine which release to install
     let release = if let Some(ref ver) = version {
         // Specific version requested
-        print!("Finding version {}... ", ver);
+        print!("Finding version {ver}... ");
         io::stdout().flush()?;
 
         let target_version =
-            Version::parse(ver).ok_or_else(|| anyhow::anyhow!("Invalid version: {}", ver))?;
+            Version::parse(ver).ok_or_else(|| anyhow::anyhow!("Invalid version: {ver}"))?;
 
         let releases = fetch_releases(ReleaseChannel::Nightly).await?; // Fetch all
         releases
             .into_iter()
             .find(|r| r.version == target_version)
-            .ok_or_else(|| anyhow::anyhow!("Version {} not found", ver))?
+            .ok_or_else(|| anyhow::anyhow!("Version {ver} not found"))?
     } else {
         // Latest version for channel
         let channel = channel.unwrap_or_default();
 
-        print!("Checking for updates ({})... ", channel);
+        print!("Checking for updates ({channel})... ");
         io::stdout().flush()?;
 
         fetch_latest_release(channel)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("No releases found for channel '{}'", channel))?
+            .ok_or_else(|| anyhow::anyhow!("No releases found for channel '{channel}'"))?
     };
 
     println!("done");

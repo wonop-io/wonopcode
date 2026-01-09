@@ -48,16 +48,16 @@ impl OpenAICompatibleProvider {
         if let Some(ref api_key) = config.api_key {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", api_key))
+                HeaderValue::from_str(&format!("Bearer {api_key}"))
                     .map_err(|_| ProviderError::invalid_api_key("openai-compatible"))?,
             );
         }
 
         for (key, value) in &config.headers {
             let header_name = HeaderName::try_from(key.as_str())
-                .map_err(|e| ProviderError::internal(format!("Invalid header name: {}", e)))?;
+                .map_err(|e| ProviderError::internal(format!("Invalid header name: {e}")))?;
             let header_value = HeaderValue::from_str(value)
-                .map_err(|e| ProviderError::internal(format!("Invalid header value: {}", e)))?;
+                .map_err(|e| ProviderError::internal(format!("Invalid header value: {e}")))?;
             headers.insert(header_name, header_value);
         }
 
@@ -162,7 +162,7 @@ fn convert_content(parts: &[ContentPart]) -> Value {
             ContentPart::Image { source } => {
                 let url = match source {
                     crate::message::ImageSource::Base64 { media_type, data } => {
-                        format!("data:{};base64,{}", media_type, data)
+                        format!("data:{media_type};base64,{data}")
                     }
                     crate::message::ImageSource::Url { url } => url.clone(),
                 };
@@ -324,7 +324,7 @@ impl LanguageModel for OpenAICompatibleProvider {
             let error_text = response.text().await.unwrap_or_default();
             warn!(status = %status, error = %error_text, "OpenAI-compatible API error");
             return Err(ProviderError::Internal {
-                message: format!("API error {}: {}", status, error_text),
+                message: format!("API error {status}: {error_text}"),
             });
         }
 
@@ -337,7 +337,7 @@ impl LanguageModel for OpenAICompatibleProvider {
             use tokio_util::io::StreamReader;
 
             let reader = StreamReader::new(
-                byte_stream.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                byte_stream.map(|r| r.map_err(std::io::Error::other))
             );
             let mut lines = reader.lines();
 

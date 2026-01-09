@@ -70,7 +70,7 @@ fn render_markdown_internal(
                 };
 
                 // Code block header with background - pad to full width
-                let header_text = format!(" {} ", lang_display);
+                let header_text = format!(" {lang_display} ");
                 let header_padding = code_width.saturating_sub(header_text.len());
 
                 if settings.code_backgrounds_enabled {
@@ -222,7 +222,7 @@ fn render_markdown_internal(
                 let content = &line[idx + 2..];
                 let mut spans = vec![
                     Span::styled("  ", theme.text_style()),
-                    Span::styled(format!("{}. ", prefix), theme.muted_style()),
+                    Span::styled(format!("{prefix}. "), theme.muted_style()),
                 ];
                 // Process inline markdown in list content
                 let inline = render_inline_markdown(content, theme);
@@ -279,7 +279,7 @@ fn render_markdown_internal(
         };
 
         // Code block header with background - pad to full width
-        let header_text = format!(" {} ", lang_display);
+        let header_text = format!(" {lang_display} ");
         let header_padding = code_width.saturating_sub(header_text.len());
 
         if settings.code_backgrounds_enabled {
@@ -592,7 +592,7 @@ fn render_inline_markdown(line: &str, theme: &Theme) -> Line<'static> {
                 }
 
                 spans.push(Span::styled(
-                    format!(" {} ", code),
+                    format!(" {code} "),
                     Style::default()
                         .fg(theme.success)
                         .bg(theme.background_element),

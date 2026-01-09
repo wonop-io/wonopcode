@@ -124,7 +124,7 @@ pub fn classify_error(status: Option<u16>, message: &str) -> RetryableError {
             }
             500..=599 => {
                 return RetryableError::ServerError {
-                    message: format!("Server error: {}", status),
+                    message: format!("Server error: {status}"),
                 };
             }
             _ => {}

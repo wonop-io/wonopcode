@@ -263,7 +263,7 @@ impl ServerPromptRunner {
             Some(user_system)
         } else if let Some(agent_prompt) = &self.agent_config.prompt {
             // Combine base system prompt with agent-specific prompt
-            Some(format!("{}\n\n{}", base_system, agent_prompt))
+            Some(format!("{base_system}\n\n{agent_prompt}"))
         } else {
             Some(base_system)
         };
@@ -287,7 +287,7 @@ impl ServerPromptRunner {
         let stream = match self.provider.generate(messages, options).await {
             Ok(s) => s,
             Err(e) => {
-                let error = format!("Provider error: {}", e);
+                let error = format!("Provider error: {e}");
                 let _ = event_tx.send(PromptEvent::Error {
                     error: error.clone(),
                 });
@@ -398,7 +398,7 @@ impl ServerPromptRunner {
                 StreamChunk::Error(e) => {
                     warn!("Stream error: {}", e);
                     let _ = event_tx.send(PromptEvent::Status {
-                        message: format!("Stream error: {}", e),
+                        message: format!("Stream error: {e}"),
                     });
                 }
             }
@@ -509,7 +509,7 @@ pub fn create_provider_from_config(
                 .map_err(|e| e.to_string())?;
             Ok(Arc::new(provider) as BoxedLanguageModel)
         }
-        _ => Err(format!("Unsupported provider: {}", provider_name)),
+        _ => Err(format!("Unsupported provider: {provider_name}")),
     }
 }
 

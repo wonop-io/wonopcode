@@ -36,11 +36,11 @@ const GITHUB_REPO: &str = "wonop-io/wonopcode";
 /// Format version as a git tag based on channel.
 fn format_tag(version: &str, channel: ReleaseChannel) -> String {
     match channel {
-        ReleaseChannel::Stable => format!("v{}", version),
-        ReleaseChannel::Beta => format!("v{}-beta.1", version),
+        ReleaseChannel::Stable => format!("v{version}"),
+        ReleaseChannel::Beta => format!("v{version}-beta.1"),
         ReleaseChannel::Nightly => {
             let date = chrono::Utc::now().format("%Y%m%d");
-            format!("nightly-{}", date)
+            format!("nightly-{date}")
         }
     }
 }
@@ -51,9 +51,9 @@ fn extract_changelog_section(version: &str) -> Option<String> {
 
     // Try different section formats
     let patterns = [
-        format!("## [{}]", version),
-        format!("## {}", version),
-        format!("## v{}", version),
+        format!("## [{version}]"),
+        format!("## {version}"),
+        format!("## v{version}"),
     ];
 
     for pattern in &patterns {
@@ -82,17 +82,16 @@ async fn create_github_release(
 
     let prerelease = channel != ReleaseChannel::Stable;
     let name = match channel {
-        ReleaseChannel::Stable => format!("Wonopcode {}", tag),
-        ReleaseChannel::Beta => format!("Wonopcode {} (Beta)", tag),
-        ReleaseChannel::Nightly => format!("Wonopcode {} (Nightly)", tag),
+        ReleaseChannel::Stable => format!("Wonopcode {tag}"),
+        ReleaseChannel::Beta => format!("Wonopcode {tag} (Beta)"),
+        ReleaseChannel::Nightly => format!("Wonopcode {tag} (Nightly)"),
     };
 
     let response = client
         .post(format!(
-            "https://api.github.com/repos/{}/releases",
-            GITHUB_REPO
+            "https://api.github.com/repos/{GITHUB_REPO}/releases"
         ))
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .json(&serde_json::json!({
@@ -128,8 +127,8 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
     println!("Wonopcode Publish");
     println!("=================");
     println!();
-    println!("Version: {}", version);
-    println!("Tag:     {}", tag);
+    println!("Version: {version}");
+    println!("Tag:     {tag}");
     println!("Channel: {}", options.channel);
     println!();
 
@@ -137,8 +136,7 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
     let notes = options.notes.clone().unwrap_or_else(|| {
         extract_changelog_section(version).unwrap_or_else(|| {
             format!(
-                "Release {} of wonopcode.\n\nSee https://github.com/{}/blob/main/CHANGELOG.md for details.",
-                version, GITHUB_REPO
+                "Release {version} of wonopcode.\n\nSee https://github.com/{GITHUB_REPO}/blob/main/CHANGELOG.md for details."
             )
         })
     });
@@ -146,7 +144,7 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
     if options.dry_run {
         println!("[DRY RUN] Would create release:");
         println!();
-        println!("  Tag:        {}", tag);
+        println!("  Tag:        {tag}");
         println!("  Channel:    {:?}", options.channel);
         println!(
             "  Pre-release: {}",
@@ -156,7 +154,7 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
         println!("Release notes:");
         println!("---");
         for line in notes.lines().take(10) {
-            println!("  {}", line);
+            println!("  {line}");
         }
         if notes.lines().count() > 10 {
             println!("  ... ({} more lines)", notes.lines().count() - 10);
@@ -186,10 +184,10 @@ pub async fn handle_publish(options: PublishOptions) -> Result<()> {
     println!();
     println!("Release created successfully!");
     println!();
-    println!("URL: {}", html_url);
+    println!("URL: {html_url}");
     println!();
     println!("GitHub Actions will build and attach binaries.");
-    println!("Check: https://github.com/{}/actions", GITHUB_REPO);
+    println!("Check: https://github.com/{GITHUB_REPO}/actions");
 
     Ok(())
 }

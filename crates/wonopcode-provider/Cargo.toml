@@ -11,10 +11,7 @@ categories.workspace = true
 description = "AI provider abstraction for wonopcode"
 
 [dependencies]
-wonopcode-util.workspace = true
-
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
@@ -33,13 +30,8 @@ hmac = "0.12"
 hex = "0.4"
 urlencoding = "2.1"
 
-# Claude CLI SDK for subscription-based access
-claude-sdk-rs = "1.0"
-
 [dev-dependencies]
 tempfile.workspace = true
-mockall.workspace = true
-wiremock.workspace = true
 
 [lints]
 workspace = true

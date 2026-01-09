@@ -193,7 +193,7 @@ impl SandboxManager {
     /// Returns "Auto" if detection is pending, or the runtime name.
     pub fn runtime_type_display(&self) -> String {
         match self.runtime_type() {
-            Some(rt) => format!("{:?}", rt),
+            Some(rt) => format!("{rt:?}"),
             None => "Auto".to_string(),
         }
     }

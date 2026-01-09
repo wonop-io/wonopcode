@@ -77,7 +77,7 @@ impl SessionManager {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).cloned().ok_or_else(|| {
             error!("Session not found: {}", session_id);
-            JsonRpcError::invalid_params(format!("Session not found: {}", session_id))
+            JsonRpcError::invalid_params(format!("Session not found: {session_id}"))
         })
     }
 
@@ -95,7 +95,7 @@ impl SessionManager {
     ) -> Result<AcpSessionState, JsonRpcError> {
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(session_id).ok_or_else(|| {
-            JsonRpcError::invalid_params(format!("Session not found: {}", session_id))
+            JsonRpcError::invalid_params(format!("Session not found: {session_id}"))
         })?;
 
         session.model = Some(model);
@@ -110,7 +110,7 @@ impl SessionManager {
     ) -> Result<AcpSessionState, JsonRpcError> {
         let mut sessions = self.sessions.write().await;
         let session = sessions.get_mut(session_id).ok_or_else(|| {
-            JsonRpcError::invalid_params(format!("Session not found: {}", session_id))
+            JsonRpcError::invalid_params(format!("Session not found: {session_id}"))
         })?;
 
         session.mode_id = Some(mode_id);

@@ -383,7 +383,7 @@ Task States:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: TodoWriteArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Convert input to TodoItems
         let items: Vec<TodoItem> = args
@@ -433,8 +433,7 @@ Task States:
         // Save to store
         if let Err(e) = self.store.set(&ctx.root_dir, items.clone()) {
             return Err(ToolError::execution_failed(format!(
-                "Failed to save todos: {}",
-                e
+                "Failed to save todos: {e}"
             )));
         }
 
@@ -443,8 +442,7 @@ Task States:
 
         Ok(ToolOutput::new(
             format!(
-                "Todo list updated: {} pending, {} in progress, {} completed",
-                pending, in_progress, completed
+                "Todo list updated: {pending} pending, {in_progress} in progress, {completed} completed"
             ),
             output,
         )

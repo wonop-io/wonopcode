@@ -175,7 +175,7 @@ impl PerfLogger {
         if let Ok(mut writer) = self.writer.lock() {
             if let Some(ref mut w) = *writer {
                 if let Ok(json) = serde_json::to_string(&event) {
-                    let _ = writeln!(w, "{}", json);
+                    let _ = writeln!(w, "{json}");
                     // Flush periodically for real-time monitoring
                     let _ = w.flush();
                 }

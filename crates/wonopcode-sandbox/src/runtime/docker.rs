@@ -52,13 +52,13 @@ impl DockerRuntime {
         docker
             .ping()
             .await
-            .map_err(|e| SandboxError::connection_failed(format!("Docker ping failed: {}", e)))?;
+            .map_err(|e| SandboxError::connection_failed(format!("Docker ping failed: {e}")))?;
 
         // Generate a deterministic container ID based on the project path.
         // This ensures the same project always uses the same container.
         let project_path = path_mapper.host_root().to_string_lossy();
         let hash = Self::hash_path(&project_path);
-        let id = format!("wonopcode-{}", hash);
+        let id = format!("wonopcode-{hash}");
 
         info!(id = %id, project = %project_path, "Docker runtime created");
 
@@ -80,7 +80,7 @@ impl DockerRuntime {
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
         let hash = hasher.finish();
-        format!("{:016x}", hash)[..12].to_string()
+        format!("{hash:016x}")[..12].to_string()
     }
 
     /// Cleanup orphaned wonopcode containers that are stopped.
@@ -226,7 +226,7 @@ impl DockerRuntime {
 
         // Add readonly mounts
         for (host_path, container_path) in &self.config.mounts.readonly {
-            binds.push(format!("{}:{}:ro", host_path, container_path));
+            binds.push(format!("{host_path}:{container_path}:ro"));
         }
 
         let host_config = HostConfig {

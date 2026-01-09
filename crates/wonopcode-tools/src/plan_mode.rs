@@ -81,8 +81,7 @@ Call ExitPlanMode when you're ready to implement your plan."#
 
         let message = if let Some(reason) = &args.reason {
             format!(
-                "Entered plan mode. Reason: {}\n\nYou now have read-only access. Use this time to analyze and plan. Call ExitPlanMode when ready to implement.",
-                reason
+                "Entered plan mode. Reason: {reason}\n\nYou now have read-only access. Use this time to analyze and plan. Call ExitPlanMode when ready to implement."
             )
         } else {
             "Entered plan mode.\n\nYou now have read-only access. Use this time to analyze and plan. Call ExitPlanMode when ready to implement.".to_string()
@@ -159,16 +158,14 @@ Call this when you're ready to implement your plan."#
             return Ok(ToolOutput::new(
                 "Not in plan mode",
                 format!(
-                    "You are currently in {} mode, not plan mode. No change needed.",
-                    current_agent
+                    "You are currently in {current_agent} mode, not plan mode. No change needed."
                 ),
             ));
         }
 
         let message = if let Some(summary) = &args.summary {
             format!(
-                "Exited plan mode. Plan summary: {}\n\nYou now have full permissions. Proceed with implementation.",
-                summary
+                "Exited plan mode. Plan summary: {summary}\n\nYou now have full permissions. Proceed with implementation."
             )
         } else {
             "Exited plan mode.\n\nYou now have full permissions. Proceed with implementation."

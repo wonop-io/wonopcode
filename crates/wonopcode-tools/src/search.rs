@@ -120,7 +120,7 @@ The search is optimized for technical and programming-related queries."#
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: WebSearchArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         debug!(query = %args.query, "Executing web search");
 
@@ -230,7 +230,7 @@ This tool is optimized for code-related queries and returns programming context.
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: CodeSearchArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         debug!(query = %args.query, "Executing code search");
 
@@ -326,7 +326,7 @@ async fn call_exa_api(
             if e.is_timeout() {
                 ToolError::Timeout(Duration::from_secs(timeout_secs))
             } else {
-                ToolError::execution_failed(format!("HTTP request failed: {}", e))
+                ToolError::execution_failed(format!("HTTP request failed: {e}"))
             }
         })?;
 
@@ -334,8 +334,7 @@ async fn call_exa_api(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(ToolError::execution_failed(format!(
-            "Exa API returned status {}: {}",
-            status, body
+            "Exa API returned status {status}: {body}"
         )));
     }
 
@@ -343,7 +342,7 @@ async fn call_exa_api(
     let body = response
         .text()
         .await
-        .map_err(|e| ToolError::execution_failed(format!("Failed to read response body: {}", e)))?;
+        .map_err(|e| ToolError::execution_failed(format!("Failed to read response body: {e}")))?;
 
     parse_sse_response(&body)
 }

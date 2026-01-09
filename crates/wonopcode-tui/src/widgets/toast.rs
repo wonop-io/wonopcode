@@ -201,7 +201,7 @@ impl ToastManager {
         };
 
         let mut lines = vec![Line::from(vec![
-            Span::styled(format!("{} ", icon), icon_style),
+            Span::styled(format!("{icon} "), icon_style),
             Span::styled(&toast.title, text_style),
         ])];
 

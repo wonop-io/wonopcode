@@ -348,7 +348,7 @@ impl Processor {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| format!("Tool not found: {}", name))?;
+            .ok_or_else(|| format!("Tool not found: {name}"))?;
 
         let ctx = wonopcode_tools::ToolContext {
             session_id: "acp".to_string(),

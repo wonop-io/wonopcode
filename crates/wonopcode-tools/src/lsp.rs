@@ -139,7 +139,7 @@ Note: Requires the appropriate language server to be installed:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: LspArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Resolve file path
         let file_path = resolve_path(&args.file, &ctx.cwd, &ctx.root_dir)?;
@@ -176,7 +176,7 @@ Note: Requires the appropriate language server to be installed:
                         warn!("LSP definition failed: {}", e);
                         Ok(ToolOutput::new(
                             "Definition lookup failed",
-                            format!("Error: {}. Make sure the language server is installed and the file type is supported.", e),
+                            format!("Error: {e}. Make sure the language server is installed and the file type is supported."),
                         ))
                     }
                 }
@@ -211,7 +211,7 @@ Note: Requires the appropriate language server to be installed:
                         warn!("LSP references failed: {}", e);
                         Ok(ToolOutput::new(
                             "References lookup failed",
-                            format!("Error: {}. Make sure the language server is installed.", e),
+                            format!("Error: {e}. Make sure the language server is installed."),
                         ))
                     }
                 }
@@ -239,7 +239,7 @@ Note: Requires the appropriate language server to be installed:
                         warn!("LSP symbols failed: {}", e);
                         Ok(ToolOutput::new(
                             "Symbols lookup failed",
-                            format!("Error: {}. Make sure the language server is installed.", e),
+                            format!("Error: {e}. Make sure the language server is installed."),
                         ))
                     }
                 }
@@ -267,7 +267,7 @@ Note: Requires the appropriate language server to be installed:
                         warn!("LSP hover failed: {}", e);
                         Ok(ToolOutput::new(
                             "Hover lookup failed",
-                            format!("Error: {}. Make sure the language server is installed.", e),
+                            format!("Error: {e}. Make sure the language server is installed."),
                         ))
                     }
                 }

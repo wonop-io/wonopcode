@@ -307,7 +307,7 @@ impl Runner {
                             .bus
                             .publish(SandboxStatusChanged {
                                 state: SandboxState::Stopped,
-                                runtime_type: Some(format!("{:?}", rt)),
+                                runtime_type: Some(format!("{rt:?}")),
                                 error: None,
                             })
                             .await;
@@ -592,7 +592,7 @@ impl Runner {
                 // Test provider doesn't need an API key
                 info!("Using test provider (no API key required)");
             } else {
-                return Err(format!("No API key found for provider '{}'. Set the environment variable or run 'wonopcode auth login {}'", provider_name, provider_name).into());
+                return Err(format!("No API key found for provider '{provider_name}'. Set the environment variable or run 'wonopcode auth login {provider_name}'").into());
             }
         }
 
@@ -715,8 +715,7 @@ impl Runner {
                             error: None,
                         },
                         Some(format!(
-                            "⬡ Sandbox active ({}) - commands execute in isolated container",
-                            runtime_lower
+                            "⬡ Sandbox active ({runtime_lower}) - commands execute in isolated container"
                         )),
                     )
                 } else {
@@ -727,8 +726,7 @@ impl Runner {
                             error: None,
                         },
                         Some(format!(
-                            "⬡ Sandbox available ({}) - use /sandbox start to enable isolation",
-                            runtime_lower
+                            "⬡ Sandbox available ({runtime_lower}) - use /sandbox start to enable isolation"
                         )),
                     )
                 }
@@ -842,15 +840,13 @@ impl Runner {
                     info!(model = %model_spec, "Changing model");
                     match self.change_model(&model_spec).await {
                         Ok(()) => {
-                            let _ = update_tx.send(AppUpdate::Status(format!(
-                                "Model changed to {}",
-                                model_spec
-                            )));
+                            let _ = update_tx
+                                .send(AppUpdate::Status(format!("Model changed to {model_spec}")));
                         }
                         Err(e) => {
                             error!("Failed to change model: {}", e);
                             let _ = update_tx
-                                .send(AppUpdate::Error(format!("Failed to change model: {}", e)));
+                                .send(AppUpdate::Error(format!("Failed to change model: {e}")));
                         }
                     }
                 }
@@ -858,10 +854,8 @@ impl Runner {
                     info!(agent = %agent_name, "Changing agent");
                     // Agent change is mostly a TUI concern for now
                     // Future: could change tool permissions, system prompt, etc.
-                    let _ = update_tx.send(AppUpdate::Status(format!(
-                        "Agent changed to {}",
-                        agent_name
-                    )));
+                    let _ =
+                        update_tx.send(AppUpdate::Status(format!("Agent changed to {agent_name}")));
                 }
                 AppAction::NewSession => {
                     info!("Creating new session");
@@ -887,8 +881,7 @@ impl Runner {
                 AppAction::Revert { message_id } => {
                     info!(message_id = %message_id, "Revert requested");
                     let _ = update_tx.send(AppUpdate::Status(format!(
-                        "Reverting to message {}...",
-                        message_id
+                        "Reverting to message {message_id}..."
                     )));
 
                     // Create SessionRevert and perform revert
@@ -922,7 +915,7 @@ impl Runner {
                         Err(e) => {
                             warn!(error = %e, "Failed to revert session");
                             let _ =
-                                update_tx.send(AppUpdate::Status(format!("Revert failed: {}", e)));
+                                update_tx.send(AppUpdate::Status(format!("Revert failed: {e}")));
                         }
                     }
                 }
@@ -945,8 +938,8 @@ impl Runner {
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to unrevert session");
-                            let _ = update_tx
-                                .send(AppUpdate::Status(format!("Unrevert failed: {}", e)));
+                            let _ =
+                                update_tx.send(AppUpdate::Status(format!("Unrevert failed: {e}")));
                         }
                     }
                 }
@@ -1012,7 +1005,7 @@ impl Runner {
                             }
 
                             let status = if messages_summarized > 0 {
-                                format!("Compacted {} messages", messages_summarized)
+                                format!("Compacted {messages_summarized} messages")
                             } else {
                                 "Pruned old tool outputs".to_string()
                             };
@@ -1030,7 +1023,7 @@ impl Runner {
                         CompactionResult::Failed(err) => {
                             warn!(error = %err, "Compaction failed");
                             let _ = update_tx
-                                .send(AppUpdate::Error(format!("Compaction failed: {}", err)));
+                                .send(AppUpdate::Error(format!("Compaction failed: {err}")));
                         }
                     }
                 }
@@ -1049,7 +1042,7 @@ impl Runner {
                         warn!(error = %e, "Failed to persist session rename");
                     }
                     let _ =
-                        update_tx.send(AppUpdate::Status(format!("Session renamed to: {}", title)));
+                        update_tx.send(AppUpdate::Status(format!("Session renamed to: {title}")));
                 }
                 AppAction::McpToggle { name } => {
                     info!(server = %name, "MCP toggle requested");
@@ -1058,8 +1051,7 @@ impl Runner {
                             Ok(enabled) => {
                                 let status = if enabled { "enabled" } else { "disabled" };
                                 let _ = update_tx.send(AppUpdate::Status(format!(
-                                    "MCP server '{}' {}",
-                                    name, status
+                                    "MCP server '{name}' {status}"
                                 )));
 
                                 // Send updated MCP status
@@ -1078,8 +1070,7 @@ impl Runner {
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to toggle MCP server");
                                 let _ = update_tx.send(AppUpdate::Error(format!(
-                                    "Failed to toggle '{}': {}",
-                                    name, e
+                                    "Failed to toggle '{name}': {e}"
                                 )));
                             }
                         }
@@ -1092,12 +1083,12 @@ impl Runner {
                     info!(server = %name, "MCP reconnect requested");
                     if let Some(ref mcp_client) = self.mcp_client {
                         let _ = update_tx
-                            .send(AppUpdate::Status(format!("Reconnecting to '{}'...", name)));
+                            .send(AppUpdate::Status(format!("Reconnecting to '{name}'...")));
 
                         match mcp_client.reconnect_server(&name).await {
                             Ok(()) => {
                                 let _ = update_tx
-                                    .send(AppUpdate::Status(format!("Reconnected to '{}'", name)));
+                                    .send(AppUpdate::Status(format!("Reconnected to '{name}'")));
 
                                 // Send updated MCP status
                                 let mcp_updates: Vec<McpStatusUpdate> = mcp_client
@@ -1115,8 +1106,7 @@ impl Runner {
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to reconnect MCP server");
                                 let _ = update_tx.send(AppUpdate::Error(format!(
-                                    "Failed to reconnect '{}': {}",
-                                    name, e
+                                    "Failed to reconnect '{name}': {e}"
                                 )));
                             }
                         }
@@ -1149,7 +1139,7 @@ impl Runner {
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to fork session");
-                            let _ = update_tx.send(AppUpdate::Error(format!("Fork failed: {}", e)));
+                            let _ = update_tx.send(AppUpdate::Error(format!("Fork failed: {e}")));
                         }
                     }
                 }
@@ -1174,8 +1164,7 @@ impl Runner {
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to share session");
-                            let _ =
-                                update_tx.send(AppUpdate::Error(format!("Share failed: {}", e)));
+                            let _ = update_tx.send(AppUpdate::Error(format!("Share failed: {e}")));
                         }
                     }
                 }
@@ -1191,8 +1180,7 @@ impl Runner {
                     info!(message_id = %message_id, "Go to message requested");
                     // This is handled in the TUI (scroll to message)
                     let _ = update_tx.send(AppUpdate::Status(format!(
-                        "Navigated to message {}",
-                        message_id
+                        "Navigated to message {message_id}"
                     )));
                 }
                 AppAction::SandboxStart => {
@@ -1221,14 +1209,13 @@ impl Runner {
                                 SaveScope::Global => "global config",
                             };
                             let _ = update_tx.send(AppUpdate::SystemMessage(format!(
-                                "Settings saved to {}",
-                                location
+                                "Settings saved to {location}"
                             )));
                         }
                         Err(e) => {
                             error!("Failed to save settings: {}", e);
                             let _ = update_tx
-                                .send(AppUpdate::Error(format!("Failed to save settings: {}", e)));
+                                .send(AppUpdate::Error(format!("Failed to save settings: {e}")));
                         }
                     }
                 }
@@ -1354,8 +1341,7 @@ impl Runner {
                     // Send system message about sandbox starting
                     let runtime = manager.runtime_type_display().to_lowercase();
                     let _ = update_tx.send(AppUpdate::SystemMessage(format!(
-                        "⬡ Sandbox started ({}) - commands will execute in isolated container",
-                        runtime
+                        "⬡ Sandbox started ({runtime}) - commands will execute in isolated container"
                     )));
 
                     // Recreate provider with sandbox enabled so MCP server uses sandbox
@@ -1609,8 +1595,7 @@ impl Runner {
                         messages.clear();
                         messages.push(first);
                         messages.push(ProviderMessage::assistant(format!(
-                            "[Context auto-compacted: {} earlier messages truncated to prevent memory growth]",
-                            dropped_count
+                            "[Context auto-compacted: {dropped_count} earlier messages truncated to prevent memory growth]"
                         )));
                         messages.extend(recent);
 
@@ -1687,10 +1672,7 @@ impl Runner {
                     }
 
                     let status = if messages_summarized > 0 {
-                        format!(
-                            "Summarized {} messages to save context",
-                            messages_summarized
-                        )
+                        format!("Summarized {messages_summarized} messages to save context")
                     } else {
                         "Pruned old tool outputs to save context".to_string()
                     };
@@ -1715,8 +1697,7 @@ impl Runner {
                         messages.clear();
                         messages.push(first);
                         messages.push(ProviderMessage::assistant(format!(
-                            "[Context compacted: {} earlier messages truncated due to context limits]",
-                            dropped_count
+                            "[Context compacted: {dropped_count} earlier messages truncated due to context limits]"
                         )));
                         messages.extend(recent);
 
@@ -2142,8 +2123,7 @@ impl Runner {
                             Decision::Ask => {
                                 // For now, treat Ask as Deny with a warning
                                 let _ = update_tx.send(AppUpdate::Status(format!(
-                                    "Doom loop detected: '{}' called {} times with identical args",
-                                    tool_name, DOOM_LOOP_THRESHOLD
+                                    "Doom loop detected: '{tool_name}' called {DOOM_LOOP_THRESHOLD} times with identical args"
                                 )));
                                 doom_loop_blocked.push((call_id, tool_name, args_str));
                                 continue;
@@ -2181,9 +2161,8 @@ impl Runner {
                 for (call_id, tool_name, _args_str) in &doom_loop_blocked {
                     let error_msg = format!(
                         "Tool execution blocked: doom loop detected. \
-                        You have called '{}' {} times in a row with identical arguments. \
-                        Please try a different approach or use different arguments.",
-                        tool_name, DOOM_LOOP_THRESHOLD
+                        You have called '{tool_name}' {DOOM_LOOP_THRESHOLD} times in a row with identical arguments. \
+                        Please try a different approach or use different arguments."
                     );
 
                     let _ = update_tx.send(AppUpdate::ToolStarted {
@@ -2204,9 +2183,8 @@ impl Runner {
                 // Handle permission blocked tools - add error responses to messages
                 for (call_id, tool_name, _args_str) in &permission_blocked {
                     let error_msg = format!(
-                        "Tool execution denied: permission not granted for '{}'. \
-                        The user has declined to allow this tool execution.",
-                        tool_name
+                        "Tool execution denied: permission not granted for '{tool_name}'. \
+                        The user has declined to allow this tool execution."
                     );
 
                     let _ = update_tx.send(AppUpdate::ToolStarted {
@@ -2316,7 +2294,7 @@ impl Runner {
                                                     "Subagent execution failed"
                                                 );
                                                 Err(wonopcode_tools::ToolError::execution_failed(
-                                                    format!("Subagent failed: {}", e),
+                                                    format!("Subagent failed: {e}"),
                                                 ))
                                             }
                                         }
@@ -2335,8 +2313,7 @@ impl Runner {
                                             "Invalid task arguments"
                                         );
                                         Err(wonopcode_tools::ToolError::validation(format!(
-                                            "Invalid task arguments: {}",
-                                            e
+                                            "Invalid task arguments: {e}"
                                         )))
                                     }
                                 }
@@ -2368,7 +2345,7 @@ impl Runner {
                                     };
                                     (output, true, out.metadata)
                                 }
-                                Err(e) => (format!("Error: {}", e), false, serde_json::Value::Null),
+                                Err(e) => (format!("Error: {e}"), false, serde_json::Value::Null),
                             };
 
                             // Log tool completion with performance metrics
@@ -2449,7 +2426,7 @@ impl Runner {
                                             as u32;
                                         if files > 0 {
                                             updates.push(ModifiedFileUpdate {
-                                                path: format!("{} files", files),
+                                                path: format!("{files} files"),
                                                 added: edits,
                                                 removed: 0,
                                             });
@@ -2719,7 +2696,7 @@ async fn run_subagent_standalone(
                 .unwrap_or(false);
 
             let output = if !is_allowed {
-                format!("Tool '{}' is not available for {} agent", name, agent_type)
+                format!("Tool '{name}' is not available for {agent_type} agent")
             } else {
                 let args: serde_json::Value = serde_json::from_str(args_str)
                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
@@ -2730,7 +2707,7 @@ async fn run_subagent_standalone(
                     None => {
                         messages.push(ProviderMessage::tool_result(
                             id,
-                            format!("Unknown tool: {}", name),
+                            format!("Unknown tool: {name}"),
                         ));
                         continue;
                     }
@@ -2750,7 +2727,7 @@ async fn run_subagent_standalone(
 
                 match tool.execute(args, &ctx).await {
                     Ok(out) => out.output,
-                    Err(e) => format!("Error: {}", e),
+                    Err(e) => format!("Error: {e}"),
                 }
             };
 
@@ -2770,8 +2747,7 @@ async fn run_subagent_standalone(
             )
         } else {
             Ok(format!(
-                "Subagent completed after {} steps but did not produce a text summary.",
-                steps
+                "Subagent completed after {steps} steps but did not produce a text summary."
             ))
         }
     } else {
@@ -2793,7 +2769,7 @@ async fn execute_tool_standalone(
     sandbox: Option<Arc<dyn SandboxRuntime>>,
 ) -> Result<wonopcode_tools::ToolOutput, wonopcode_tools::ToolError> {
     let tool = tools.get(tool_name).ok_or_else(|| {
-        wonopcode_tools::ToolError::validation(format!("Unknown tool: {}", tool_name))
+        wonopcode_tools::ToolError::validation(format!("Unknown tool: {tool_name}"))
     })?;
 
     let ctx = wonopcode_tools::ToolContext {
@@ -3216,7 +3192,7 @@ fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<
 
         for entry in items {
             if *count >= max_files {
-                entries.push(format!("{}...", prefix));
+                entries.push(format!("{prefix}..."));
                 break;
             }
 
@@ -3225,11 +3201,11 @@ fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
 
             if is_dir {
-                entries.push(format!("{}{}/", prefix, name_str));
+                entries.push(format!("{prefix}{name_str}/"));
                 *count += 1;
                 collect_entries(
                     &entry.path(),
-                    &format!("{}  ", prefix),
+                    &format!("{prefix}  "),
                     depth + 1,
                     max_depth,
                     entries,
@@ -3237,7 +3213,7 @@ fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<
                     max_files,
                 );
             } else {
-                entries.push(format!("{}{}", prefix, name_str));
+                entries.push(format!("{prefix}{name_str}"));
                 *count += 1;
             }
         }
@@ -3560,7 +3536,7 @@ fn extract_modified_file_from_observed_tool(
                 })
             } else {
                 Some(ModifiedFileUpdate {
-                    path: format!("{} files", files_count),
+                    path: format!("{files_count} files"),
                     added,
                     removed,
                 })
@@ -3703,21 +3679,21 @@ fn format_tool_description(tool_name: &str, input: &serde_json::Value) -> String
     match tool_name {
         "read" => {
             if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Read file: {}", path)
+                format!("Read file: {path}")
             } else {
                 "Read a file".to_string()
             }
         }
         "write" => {
             if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Write to file: {}", path)
+                format!("Write to file: {path}")
             } else {
                 "Write to a file".to_string()
             }
         }
         "edit" => {
             if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Edit file: {}", path)
+                format!("Edit file: {path}")
             } else {
                 "Edit a file".to_string()
             }
@@ -3729,40 +3705,40 @@ fn format_tool_description(tool_name: &str, input: &serde_json::Value) -> String
                 } else {
                     command.to_string()
                 };
-                format!("Execute: {}", truncated)
+                format!("Execute: {truncated}")
             } else {
                 "Execute a bash command".to_string()
             }
         }
         "glob" => {
             if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                format!("Search files: {}", pattern)
+                format!("Search files: {pattern}")
             } else {
                 "Search for files".to_string()
             }
         }
         "grep" => {
             if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                format!("Search content: {}", pattern)
+                format!("Search content: {pattern}")
             } else {
                 "Search file contents".to_string()
             }
         }
         "webfetch" => {
             if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                format!("Fetch URL: {}", url)
+                format!("Fetch URL: {url}")
             } else {
                 "Fetch a web page".to_string()
             }
         }
         "task" => {
             if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                format!("Run task: {}", desc)
+                format!("Run task: {desc}")
             } else {
                 "Run a sub-task".to_string()
             }
         }
-        _ => format!("Execute tool: {}", tool_name),
+        _ => format!("Execute tool: {tool_name}"),
     }
 }
 

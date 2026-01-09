@@ -1104,8 +1104,7 @@ impl App {
                         SaveScope::Global => "global",
                     };
                     self.toasts.push(Toast::success(format!(
-                        "Settings saved to {} config",
-                        scope_name
+                        "Settings saved to {scope_name} config"
                     )));
                 }
                 self.dialog = ActiveDialog::None;
@@ -1215,10 +1214,10 @@ async function fetchUserData(userId) {
             } else {
                 // Assistant message with varied content
                 let content = match i % 10 {
-                    1 => format!("Here's a Fibonacci implementation:\n\n{}", rust_code),
-                    3 => format!("Here's quicksort in Python:\n\n{}", python_code),
-                    5 => format!("Here's an async example:\n\n{}", js_code),
-                    7 => format!("{}\n\n{}", long_text, markdown_table),
+                    1 => format!("Here's a Fibonacci implementation:\n\n{rust_code}"),
+                    3 => format!("Here's quicksort in Python:\n\n{python_code}"),
+                    5 => format!("Here's an async example:\n\n{js_code}"),
+                    7 => format!("{long_text}\n\n{markdown_table}"),
                     9 => format!("Response #{}: {}\n\n{}", i / 2, long_text, rust_code),
                     _ => long_text.to_string(),
                 };
@@ -1229,7 +1228,7 @@ async function fetchUserData(userId) {
 
                 // Add some tool calls to some messages
                 if i % 6 == 5 {
-                    let mut tool = DisplayToolCall::new(format!("tool-{}", i), "read".to_string());
+                    let mut tool = DisplayToolCall::new(format!("tool-{i}"), "read".to_string());
                     tool.status = ToolStatus::Success;
                     tool.input = Some("path/to/file.rs".to_string());
                     tool.output = Some("File contents here...".to_string());
@@ -1324,7 +1323,7 @@ async function fetchUserData(userId) {
                     .collect();
 
                 let preview = if preview.len() < msg.content.len() && !msg.content.is_empty() {
-                    format!("{}...", preview)
+                    format!("{preview}...")
                 } else {
                     preview
                 };
@@ -1369,18 +1368,18 @@ async function fetchUserData(userId) {
 
         // Determine export path
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("wonopcode_export_{}.md", timestamp);
+        let filename = format!("wonopcode_export_{timestamp}.md");
         let export_path = std::path::PathBuf::from(&self.directory).join(&filename);
 
         // Write to file
         match std::fs::write(&export_path, &content) {
             Ok(_) => {
                 self.toasts
-                    .push(Toast::success(format!("Exported to: {}", filename)));
+                    .push(Toast::success(format!("Exported to: {filename}")));
             }
             Err(e) => {
                 self.toasts
-                    .push(Toast::error(format!("Export failed: {}", e)));
+                    .push(Toast::error(format!("Export failed: {e}")));
             }
         }
     }
@@ -2082,8 +2081,7 @@ async function fetchUserData(userId) {
                                         );
                                         if line_count >= 2 {
                                             self.toasts.push(Toast::info(format!(
-                                                "Pasted {} lines",
-                                                line_count
+                                                "Pasted {line_count} lines"
                                             )));
                                         }
                                         self.input.insert_paste(&text);
@@ -2454,7 +2452,7 @@ async function fetchUserData(userId) {
                     self.dialog = ActiveDialog::None;
                     let _ = self.action_tx.send(AppAction::ChangeModel(id.clone()));
                     self.set_model(&id);
-                    self.toasts.push(Toast::success(format!("Model: {}", id)));
+                    self.toasts.push(Toast::success(format!("Model: {id}")));
                 }
             }
             ActiveDialog::AgentSelect => {
@@ -2463,7 +2461,7 @@ async function fetchUserData(userId) {
                         self.dialog = ActiveDialog::None;
                         let _ = self.action_tx.send(AppAction::ChangeAgent(id.clone()));
                         self.set_agent(&id);
-                        self.toasts.push(Toast::success(format!("Agent: {}", id)));
+                        self.toasts.push(Toast::success(format!("Agent: {id}")));
                     }
                 }
             }
@@ -2492,7 +2490,7 @@ async function fetchUserData(userId) {
                                     self.sidebar.set_session_title(&new_title);
                                     self.topbar.set_session_title(Some(new_title.clone()));
                                     self.toasts
-                                        .push(Toast::success(format!("Renamed to: {}", new_title)));
+                                        .push(Toast::success(format!("Renamed to: {new_title}")));
                                     // Send action to persist the rename
                                     let _ = self
                                         .action_tx
@@ -2513,13 +2511,13 @@ async function fetchUserData(userId) {
                             self.mcp_dialog = None;
                         } else if let Some(name) = action.strip_prefix("toggle:") {
                             self.toasts
-                                .push(Toast::info(format!("Toggle MCP server: {}", name)));
+                                .push(Toast::info(format!("Toggle MCP server: {name}")));
                             let _ = self.action_tx.send(AppAction::McpToggle {
                                 name: name.to_string(),
                             });
                         } else if let Some(name) = action.strip_prefix("reconnect:") {
                             self.toasts
-                                .push(Toast::info(format!("Reconnecting: {}", name)));
+                                .push(Toast::info(format!("Reconnecting: {name}")));
                             let _ = self.action_tx.send(AppAction::McpReconnect {
                                 name: name.to_string(),
                             });
@@ -2543,7 +2541,7 @@ async function fetchUserData(userId) {
                             }
                         } else if let Some(msg_id) = action.strip_prefix("fork:") {
                             self.toasts
-                                .push(Toast::info(format!("Forking from message {}...", msg_id)));
+                                .push(Toast::info(format!("Forking from message {msg_id}...")));
                             let _ = self.action_tx.send(AppAction::ForkSession {
                                 message_id: Some(msg_id.to_string()),
                             });
@@ -2740,7 +2738,7 @@ async function fetchUserData(userId) {
                     "hidden"
                 };
                 self.toasts
-                    .push(Toast::info(format!("Thinking blocks: {}", status)));
+                    .push(Toast::info(format!("Thinking blocks: {status}")));
                 return;
             }
             "share" => {
@@ -2798,7 +2796,7 @@ async function fetchUserData(userId) {
             }
             _ => {
                 self.toasts
-                    .push(Toast::warning(format!("Unknown command: /{}", command)));
+                    .push(Toast::warning(format!("Unknown command: /{command}")));
                 return;
             }
         };
@@ -2884,7 +2882,7 @@ async function fetchUserData(userId) {
                 // Normalize MCP tool names: mcp__wonopcode-tools__bash -> bash
                 let display_name = normalize_tool_name(&name);
                 self.footer
-                    .set_status(FooterStatus::Running(format!("Running: {}", display_name)));
+                    .set_status(FooterStatus::Running(format!("Running: {display_name}")));
                 // Add tool call to messages for rendering
                 self.messages
                     .add_tool_call_with_input(id, display_name, input);
@@ -3036,7 +3034,7 @@ async function fetchUserData(userId) {
                     SandboxDisplayState::Error => {
                         let msg = status.error.unwrap_or_else(|| "Unknown error".to_string());
                         self.toasts
-                            .push(Toast::error(format!("Sandbox error: {}", msg)));
+                            .push(Toast::error(format!("Sandbox error: {msg}")));
                     }
                     _ => {}
                 }
@@ -3054,7 +3052,7 @@ async function fetchUserData(userId) {
                     "Build Mode (full access)"
                 };
                 self.toasts
-                    .push(Toast::info(format!("Switched to {}", mode_name)));
+                    .push(Toast::info(format!("Switched to {mode_name}")));
             }
             AppUpdate::PermissionRequest(req) => {
                 // Show permission dialog

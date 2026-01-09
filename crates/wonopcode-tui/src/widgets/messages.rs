@@ -466,10 +466,10 @@ fn tool_title(
                 .unwrap_or("file");
             let mut params = Vec::new();
             if let Some(offset) = parsed.get("offset").and_then(|v| v.as_u64()) {
-                params.push(format!("offset={}", offset));
+                params.push(format!("offset={offset}"));
             }
             if let Some(limit) = parsed.get("limit").and_then(|v| v.as_u64()) {
-                params.push(format!("limit={}", limit));
+                params.push(format!("limit={limit}"));
             }
             let params_str = if params.is_empty() {
                 None
@@ -487,7 +487,7 @@ fn tool_title(
             let bytes = metadata
                 .and_then(|m| m.get("bytes"))
                 .and_then(|v| v.as_u64());
-            let suffix = bytes.map(|b| format!(" ({} bytes)", b)).unwrap_or_default();
+            let suffix = bytes.map(|b| format!(" ({b} bytes)")).unwrap_or_default();
             (format!("Wrote {}{}", shorten_path(path), suffix), None)
         }
         "edit" => {
@@ -518,13 +518,11 @@ fn tool_title(
             let count = metadata
                 .and_then(|m| m.get("count"))
                 .and_then(|v| v.as_u64());
-            let count_str = count
-                .map(|c| format!(" ({} matches)", c))
-                .unwrap_or_default();
+            let count_str = count.map(|c| format!(" ({c} matches)")).unwrap_or_default();
             let title = if let Some(p) = path {
                 format!("Glob \"{}\" in {}{}", pattern, shorten_path(p), count_str)
             } else {
-                format!("Glob \"{}\"{}", pattern, count_str)
+                format!("Glob \"{pattern}\"{count_str}")
             };
             (title, None)
         }
@@ -536,15 +534,13 @@ fn tool_title(
             let count = metadata
                 .and_then(|m| m.get("matches"))
                 .and_then(|v| v.as_u64());
-            let count_str = count
-                .map(|c| format!(" ({} matches)", c))
-                .unwrap_or_default();
+            let count_str = count.map(|c| format!(" ({c} matches)")).unwrap_or_default();
             let title = if let Some(p) = path {
                 format!("Grep \"{}\" in {}{}", pattern, shorten_path(p), count_str)
             } else {
-                format!("Grep \"{}\"{}", pattern, count_str)
+                format!("Grep \"{pattern}\"{count_str}")
             };
-            let params_str = include.map(|i| format!("include={}", i));
+            let params_str = include.map(|i| format!("include={i}"));
             (title, params_str)
         }
         "list" => {
@@ -553,7 +549,7 @@ fn tool_title(
             let count = metadata
                 .and_then(|m| m.get("count"))
                 .and_then(|v| v.as_u64());
-            let count_str = count.map(|c| format!(" ({} items)", c)).unwrap_or_default();
+            let count_str = count.map(|c| format!(" ({c} items)")).unwrap_or_default();
             (format!("List {}{}", shorten_path(path), count_str), None)
         }
         "task" => {
@@ -563,9 +559,9 @@ fn tool_title(
                 .unwrap_or("Task");
             let subagent = parsed.get("subagent_type").and_then(|v| v.as_str());
             let title = if let Some(agent) = subagent {
-                format!("{} Task \"{}\"", agent, desc)
+                format!("{agent} Task \"{desc}\"")
             } else {
-                format!("Task \"{}\"", desc)
+                format!("Task \"{desc}\"")
             };
             (title, None)
         }
@@ -594,8 +590,7 @@ fn tool_title(
             if total > 0 {
                 (
                     format!(
-                        "Update todos ({} pending, {} in progress, {} done)",
-                        pending, in_progress, completed
+                        "Update todos ({pending} pending, {in_progress} in progress, {completed} done)"
                     ),
                     None,
                 )
@@ -609,7 +604,7 @@ fn tool_title(
                 .get("action")
                 .and_then(|v| v.as_str())
                 .unwrap_or("query");
-            (format!("LSP {}", action), None)
+            (format!("LSP {action}"), None)
         }
         _ => (name.to_string(), None),
     }
@@ -1975,7 +1970,7 @@ impl MessagesWidget {
         };
 
         // Build the params string if present
-        let params_span = params.map(|p| format!(" [{}]", p));
+        let params_span = params.map(|p| format!(" [{p}]"));
 
         if is_block {
             // Block tools: bordered container with background
@@ -1983,7 +1978,7 @@ impl MessagesWidget {
             let mut header_spans = vec![
                 Span::styled("  ╭─ ", theme.tool_border_style()),
                 Span::styled(
-                    format!("{} ", icon),
+                    format!("{icon} "),
                     theme.accent_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(title, theme.muted_style()),
@@ -2008,7 +2003,7 @@ impl MessagesWidget {
             let mut spans = vec![
                 Span::styled("  ", theme.text_style()),
                 Span::styled(
-                    format!("{} ", icon),
+                    format!("{icon} "),
                     theme.accent_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(title, theme.muted_style()),
@@ -2205,7 +2200,7 @@ impl MessagesWidget {
                 .to_string();
             let truncated = if content.chars().count() > 70 && !tool.expanded {
                 let truncated_content: String = content.chars().take(67).collect();
-                format!("{}...", truncated_content)
+                format!("{truncated_content}...")
             } else {
                 content
             };
@@ -2495,10 +2490,7 @@ impl MessagesWidget {
             let hidden_lines = total_lines - 4;
             lines.push(Line::from(vec![
                 Span::styled("  │ ", theme.tool_border_style()),
-                Span::styled(
-                    format!("... {} more lines ", hidden_lines),
-                    theme.dim_style(),
-                ),
+                Span::styled(format!("... {hidden_lines} more lines "), theme.dim_style()),
                 Span::styled("[press ", theme.dim_style()),
                 Span::styled("o", theme.accent_style()),
                 Span::styled(" to expand]", theme.dim_style()),

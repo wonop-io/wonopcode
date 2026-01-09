@@ -81,11 +81,11 @@ Usage:
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: WebFetchArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Parse and validate URL
         let mut url = Url::parse(&args.url)
-            .map_err(|e| ToolError::validation(format!("Invalid URL: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid URL: {e}")))?;
 
         // Upgrade HTTP to HTTPS
         if url.scheme() == "http" {
@@ -115,17 +115,17 @@ Usage:
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .map_err(|e| {
-                ToolError::execution_failed(format!("Failed to create HTTP client: {}", e))
+                ToolError::execution_failed(format!("Failed to create HTTP client: {e}"))
             })?;
 
         // Fetch the URL
         let response = client.get(url.as_str()).send().await.map_err(|e| {
             if e.is_timeout() {
-                ToolError::execution_failed(format!("Request timed out after {}s", timeout_secs))
+                ToolError::execution_failed(format!("Request timed out after {timeout_secs}s"))
             } else if e.is_redirect() {
                 ToolError::execution_failed("Too many redirects")
             } else {
-                ToolError::execution_failed(format!("Request failed: {}", e))
+                ToolError::execution_failed(format!("Request failed: {e}"))
             }
         })?;
 
@@ -143,8 +143,8 @@ Usage:
         let final_url = response.url().clone();
         if final_url.host() != url.host() {
             return Ok(ToolOutput::new(
-                format!("Redirect to {}", final_url),
-                format!("The URL redirected to a different host: {}\nPlease make a new request with this URL.", final_url),
+                format!("Redirect to {final_url}"),
+                format!("The URL redirected to a different host: {final_url}\nPlease make a new request with this URL."),
             ).with_metadata(json!({
                 "redirect": true,
                 "original_url": url.to_string(),
@@ -164,7 +164,7 @@ Usage:
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Failed to read response: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Failed to read response: {e}")))?;
 
         if bytes.len() > MAX_RESPONSE_SIZE {
             return Err(ToolError::execution_failed(format!(
@@ -201,7 +201,7 @@ Usage:
         let (content, truncated) = truncate_content(&content, 50000);
 
         Ok(
-            ToolOutput::new(format!("Fetched {}", url), content).with_metadata(json!({
+            ToolOutput::new(format!("Fetched {url}"), content).with_metadata(json!({
                 "url": url.to_string(),
                 "content_type": content_type,
                 "size": bytes.len(),

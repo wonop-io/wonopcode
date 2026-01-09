@@ -14,7 +14,6 @@ description = "Storage layer for wonopcode"
 wonopcode-util.workspace = true
 
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 serde.workspace = true

@@ -111,7 +111,7 @@ impl AzureProvider {
         } else if let Some(ref token) = azure_ad_token {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", token))
+                HeaderValue::from_str(&format!("Bearer {token}"))
                     .map_err(|_| ProviderError::invalid_api_key("azure"))?,
             );
         }
@@ -230,7 +230,7 @@ impl AzureProvider {
                 ContentPart::Image { source } => {
                     let url = match source {
                         crate::message::ImageSource::Base64 { media_type, data } => {
-                            format!("data:{};base64,{}", media_type, data)
+                            format!("data:{media_type};base64,{data}")
                         }
                         crate::message::ImageSource::Url { url } => url.clone(),
                     };
@@ -408,7 +408,7 @@ impl LanguageModel for AzureProvider {
             let error_text = response.text().await.unwrap_or_default();
             warn!(status = %status, error = %error_text, "Azure OpenAI API error");
             return Err(ProviderError::Internal {
-                message: format!("Azure OpenAI API error {}: {}", status, error_text),
+                message: format!("Azure OpenAI API error {status}: {error_text}"),
             });
         }
 
@@ -421,7 +421,7 @@ impl LanguageModel for AzureProvider {
             use tokio_util::io::StreamReader;
 
             let reader = StreamReader::new(
-                byte_stream.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+                byte_stream.map(|r| r.map_err(std::io::Error::other))
             );
             let mut lines = reader.lines();
 

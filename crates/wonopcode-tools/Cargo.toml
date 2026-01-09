@@ -12,14 +12,12 @@ description = "Tool implementations for wonopcode"
 
 [dependencies]
 wonopcode-util.workspace = true
-wonopcode-storage.workspace = true
 wonopcode-snapshot.workspace = true
 wonopcode-lsp.workspace = true
 wonopcode-mcp.workspace = true
 wonopcode-sandbox.workspace = true
 
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 async-trait.workspace = true
@@ -31,8 +29,6 @@ tracing.workspace = true
 globwalk.workspace = true
 ignore.workspace = true
 similar.workspace = true
-tree-sitter.workspace = true
-tree-sitter-bash.workspace = true
 regex.workspace = true
 url.workspace = true
 reqwest.workspace = true
@@ -41,7 +37,6 @@ walkdir.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-mockall.workspace = true
 
 [lints]
 workspace = true

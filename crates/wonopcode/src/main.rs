@@ -463,7 +463,7 @@ fn init_logging(verbose: bool, headless: bool) -> Option<std::path::PathBuf> {
 
     // Create log directory if needed
     if let Err(e) = std::fs::create_dir_all(&log_dir) {
-        eprintln!("Warning: Could not create log directory: {}", e);
+        eprintln!("Warning: Could not create log directory: {e}");
         return None;
     }
 
@@ -478,7 +478,7 @@ fn init_logging(verbose: bool, headless: bool) -> Option<std::path::PathBuf> {
     {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Warning: Could not open log file: {}", e);
+            eprintln!("Warning: Could not open log file: {e}");
             return None;
         }
     };
@@ -606,11 +606,20 @@ async fn run_command(
             || !ClaudeCliProvider::is_available()
             || !ClaudeCliProvider::is_authenticated()
         {
-            eprintln!("Error: No API key found for provider '{}'", provider);
-            eprintln!("Run: wonopcode auth login {}", provider);
+            eprintln!("Error: No API key found for provider '{provider}'");
+            eprintln!("Run: wonopcode auth login {provider}");
             return Ok(());
         }
     }
+
+    // Start background MCP HTTP server for Claude CLI integration
+    let (mcp_url, mcp_server_handle) = match start_mcp_server(cwd).await {
+        Ok((url, handle)) => (Some(url), Some(handle)),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
+            (None, None)
+        }
+    };
 
     // Create runner config
     let config = RunnerConfig {
@@ -623,14 +632,14 @@ async fn run_command(
         doom_loop: wonopcode_core::permission::Decision::Ask,
         test_provider_settings: None,
         allow_all: false,
-        mcp_url: None, // No custom MCP tools in TUI mode
+        mcp_url, // Use background MCP server for custom tools
     };
 
     // Create runner with snapshot support
     let runner = match Runner::new_with_snapshots(config.clone(), instance.clone()).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error creating runner: {}", e);
+            eprintln!("Error creating runner: {e}");
             return Ok(());
         }
     };
@@ -655,7 +664,7 @@ async fn run_command(
         match update {
             wonopcode_tui::AppUpdate::TextDelta(delta) => {
                 if !is_json {
-                    print!("{}", delta);
+                    print!("{delta}");
                     io::stdout().flush()?;
                 }
                 response_text.push_str(&delta);
@@ -702,7 +711,7 @@ async fn run_command(
                         })
                     );
                 } else if response_text.is_empty() {
-                    println!("{}", text);
+                    println!("{text}");
                 }
                 break;
             }
@@ -716,7 +725,7 @@ async fn run_command(
                         })
                     );
                 } else {
-                    eprintln!("\nError: {}", e);
+                    eprintln!("\nError: {e}");
                 }
                 break;
             }
@@ -730,6 +739,11 @@ async fn run_command(
 
     // Shutdown
     let _ = action_tx.send(wonopcode_tui::AppAction::Quit);
+    // Shutdown MCP server
+    if let Some(handle) = mcp_server_handle {
+        handle.abort();
+    }
+
     runner_handle.abort();
     instance.dispose().await;
 
@@ -743,7 +757,7 @@ fn parse_release_channel(s: &str) -> Option<wonopcode_core::version::ReleaseChan
         "beta" => Some(wonopcode_core::version::ReleaseChannel::Beta),
         "nightly" => Some(wonopcode_core::version::ReleaseChannel::Nightly),
         _ => {
-            eprintln!("Unknown release channel: {}. Using 'stable'.", s);
+            eprintln!("Unknown release channel: {s}. Using 'stable'.");
             None
         }
     }
@@ -898,7 +912,7 @@ async fn auth_login(provider: &str) -> anyhow::Result<()> {
         "openai" => "https://platform.openai.com/api-keys",
         "openrouter" => "https://openrouter.ai/keys",
         _ => {
-            eprintln!("Unknown provider: {}", provider);
+            eprintln!("Unknown provider: {provider}");
             eprintln!("Supported providers: anthropic, openai, openrouter");
             return Ok(());
         }
@@ -987,7 +1001,7 @@ async fn auth_login_claude_subscription() -> anyhow::Result<()> {
         }
         Err(e) => {
             eprintln!();
-            eprintln!("Error running Claude CLI: {}", e);
+            eprintln!("Error running Claude CLI: {e}");
             eprintln!();
             eprintln!("Make sure Claude Code CLI is installed:");
             eprintln!("  npm install -g @anthropic-ai/claude-code");
@@ -1004,7 +1018,7 @@ async fn auth_login_api_key(provider: &str, key_url: &str) -> anyhow::Result<()>
     // Check if already authenticated
     if let Some(key) = runner::load_api_key(provider) {
         if !key.is_empty() {
-            println!("Already authenticated with {}.", provider);
+            println!("Already authenticated with {provider}.");
             print!("Do you want to replace the existing key? [y/N] ");
             io::stdout().flush()?;
 
@@ -1018,12 +1032,12 @@ async fn auth_login_api_key(provider: &str, key_url: &str) -> anyhow::Result<()>
     }
 
     println!();
-    println!("To get an API key for {}, visit:", provider);
-    println!("  {}", key_url);
+    println!("To get an API key for {provider}, visit:");
+    println!("  {key_url}");
     println!();
 
     // Prompt for API key
-    print!("Enter your {} API key: ", provider);
+    print!("Enter your {provider} API key: ");
     io::stdout().flush()?;
 
     // Read API key
@@ -1044,10 +1058,7 @@ async fn auth_login_api_key(provider: &str, key_url: &str) -> anyhow::Result<()>
 
     if !valid {
         println!();
-        println!(
-            "Warning: The API key doesn't match the expected format for {}.",
-            provider
-        );
+        println!("Warning: The API key doesn't match the expected format for {provider}.");
         print!("Continue anyway? [y/N] ");
         io::stdout().flush()?;
 
@@ -1063,9 +1074,9 @@ async fn auth_login_api_key(provider: &str, key_url: &str) -> anyhow::Result<()>
     save_api_key(provider, &api_key).await?;
 
     println!();
-    println!("✓ API key saved for {}.", provider);
+    println!("✓ API key saved for {provider}.");
     println!();
-    println!("You can now use wonopcode with --provider {}", provider);
+    println!("You can now use wonopcode with --provider {provider}");
 
     Ok(())
 }
@@ -1076,7 +1087,7 @@ async fn auth_logout(provider: &str) -> anyhow::Result<()> {
     match provider {
         "anthropic" | "openai" | "openrouter" => {}
         _ => {
-            eprintln!("Unknown provider: {}", provider);
+            eprintln!("Unknown provider: {provider}");
             return Ok(());
         }
     }
@@ -1084,7 +1095,7 @@ async fn auth_logout(provider: &str) -> anyhow::Result<()> {
     // Remove from config
     remove_api_key(provider).await?;
 
-    println!("✓ Logged out from {}.", provider);
+    println!("✓ Logged out from {provider}.");
 
     Ok(())
 }
@@ -1160,7 +1171,7 @@ fn mask_api_key(key: &str) -> String {
     }
     let prefix = &key[..4];
     let suffix = &key[key.len() - 4..];
-    format!("{}...{}", prefix, suffix)
+    format!("{prefix}...{suffix}")
 }
 
 /// Get the credentials file path.
@@ -1274,18 +1285,18 @@ async fn handle_session(command: SessionCommands, cwd: &std::path::Path) -> anyh
                     session.updated_at().format("%Y-%m-%d %H:%M:%S")
                 );
                 if let Some(parent) = &session.parent_id {
-                    println!("Parent: {}", parent);
+                    println!("Parent: {parent}");
                 }
             }
             None => {
-                println!("Session not found: {}", id);
+                println!("Session not found: {id}");
             }
         },
         SessionCommands::Delete { id } => {
             let project_id = instance.project_id().await;
             match instance.session_repo().delete(&project_id, &id).await {
-                Ok(_) => println!("Session deleted: {}", id),
-                Err(e) => println!("Error deleting session: {}", e),
+                Ok(_) => println!("Session deleted: {id}"),
+                Err(e) => println!("Error deleting session: {e}"),
             }
         }
     }
@@ -1312,7 +1323,7 @@ async fn handle_export(
         match instance.get_session(&id).await {
             Some(session) => vec![session],
             None => {
-                eprintln!("Session not found: {}", id);
+                eprintln!("Session not found: {id}");
                 instance.dispose().await;
                 return Ok(());
             }
@@ -1409,7 +1420,7 @@ async fn handle_export(
                     } else {
                         "Assistant"
                     };
-                    content.push_str(&format!("### {}\n\n", role));
+                    content.push_str(&format!("### {role}\n\n"));
 
                     for part in &msg_with_parts.parts {
                         match part {
@@ -1475,10 +1486,7 @@ async fn handle_export(
             );
         }
         _ => {
-            eprintln!(
-                "Unknown export format: {}. Use 'json' or 'markdown'.",
-                format
-            );
+            eprintln!("Unknown export format: {format}. Use 'json' or 'markdown'.");
         }
     }
 
@@ -1568,10 +1576,7 @@ async fn handle_import(cwd: &std::path::Path, input: std::path::PathBuf) -> anyh
     }
 
     println!();
-    println!(
-        "Import complete: {} imported, {} skipped",
-        imported, skipped
-    );
+    println!("Import complete: {imported} imported, {skipped} skipped");
 
     instance.dispose().await;
     Ok(())
@@ -1634,6 +1639,15 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         }
     }
 
+    // Start background MCP HTTP server for Claude CLI integration
+    let (mcp_url, mcp_server_handle) = match start_mcp_server(cwd).await {
+        Ok((url, handle)) => (Some(url), Some(handle)),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
+            (None, None)
+        }
+    };
+
     // Create runner config
     let config = RunnerConfig {
         provider: provider.clone(),
@@ -1645,7 +1659,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         doom_loop: wonopcode_core::permission::Decision::Ask,
         test_provider_settings: None,
         allow_all: false,
-        mcp_url: None, // No custom MCP tools in TUI mode
+        mcp_url, // Use background MCP server for custom tools
     };
 
     // Get MCP config from config file
@@ -1662,7 +1676,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         // Basic mode: simple line-based input
         // Show update notification if available
         if let Some(ref msg) = update_msg {
-            eprintln!("{}", msg);
+            eprintln!("{msg}");
             eprintln!();
         }
         run_basic_mode(&instance, &config, cli.prompt, mcp_configs).await?;
@@ -1677,6 +1691,13 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
             update_msg,
         )
         .await?;
+    }
+
+    // Shutdown MCP server
+    if let Some(handle) = mcp_server_handle {
+        handle.abort();
+        // Give it a moment to shutdown gracefully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
     // Cleanup
@@ -1704,7 +1725,7 @@ async fn run_basic_mode(
         match Runner::new_with_features(config.clone(), instance.clone(), mcp_configs).await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Error creating runner: {}", e);
+                eprintln!("Error creating runner: {e}");
                 return Ok(());
             }
         };
@@ -1720,7 +1741,7 @@ async fn run_basic_mode(
 
     // Handle initial prompt or interactive
     if let Some(prompt) = initial_prompt {
-        println!("You: {}", prompt);
+        println!("You: {prompt}");
         println!();
         let _ = action_tx.send(wonopcode_tui::AppAction::SendPrompt(prompt));
 
@@ -1729,12 +1750,12 @@ async fn run_basic_mode(
         while let Some(update) = update_rx.recv().await {
             match update {
                 wonopcode_tui::AppUpdate::TextDelta(delta) => {
-                    print!("{}", delta);
+                    print!("{delta}");
                     io::stdout().flush()?;
                     response_text.push_str(&delta);
                 }
                 wonopcode_tui::AppUpdate::ToolStarted { name, .. } => {
-                    println!("\n[Running tool: {}]", name);
+                    println!("\n[Running tool: {name}]");
                 }
                 wonopcode_tui::AppUpdate::ToolCompleted { success, .. } => {
                     if success {
@@ -1745,13 +1766,13 @@ async fn run_basic_mode(
                 }
                 wonopcode_tui::AppUpdate::Completed { text } => {
                     if response_text.is_empty() {
-                        println!("{}", text);
+                        println!("{text}");
                     }
                     println!();
                     break;
                 }
                 wonopcode_tui::AppUpdate::Error(e) => {
-                    eprintln!("\nError: {}", e);
+                    eprintln!("\nError: {e}");
                     break;
                 }
                 _ => {}
@@ -1786,12 +1807,12 @@ async fn run_basic_mode(
             while let Some(update) = update_rx.recv().await {
                 match update {
                     wonopcode_tui::AppUpdate::TextDelta(delta) => {
-                        print!("{}", delta);
+                        print!("{delta}");
                         io::stdout().flush()?;
                         response_text.push_str(&delta);
                     }
                     wonopcode_tui::AppUpdate::ToolStarted { name, .. } => {
-                        println!("\n[Running tool: {}]", name);
+                        println!("\n[Running tool: {name}]");
                     }
                     wonopcode_tui::AppUpdate::ToolCompleted { success, .. } => {
                         if success {
@@ -1802,13 +1823,13 @@ async fn run_basic_mode(
                     }
                     wonopcode_tui::AppUpdate::Completed { text } => {
                         if response_text.is_empty() {
-                            println!("{}", text);
+                            println!("{text}");
                         }
                         println!();
                         break;
                     }
                     wonopcode_tui::AppUpdate::Error(e) => {
-                        eprintln!("\nError: {}", e);
+                        eprintln!("\nError: {e}");
                         break;
                     }
                     _ => {}
@@ -1859,7 +1880,7 @@ async fn run_tui_mode(
     let runner = match Runner::new_with_features(config, instance.clone(), mcp_configs).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error creating runner: {}", e);
+            eprintln!("Error creating runner: {e}");
             return Ok(());
         }
     };
@@ -1937,7 +1958,7 @@ async fn run_headless(
     let api_key = runner::load_api_key(&provider).unwrap_or_default();
 
     // Build MCP HTTP URL for headless mode
-    let mcp_sse_url = format!("http://{}/mcp/sse", address);
+    let mcp_sse_url = format!("http://{address}/mcp/sse");
 
     // Create runner config with MCP HTTP transport
     let config = RunnerConfig {
@@ -1971,7 +1992,7 @@ async fn run_headless(
     {
         let mut state = state_handle.write().await;
         state.project = cwd.display().to_string();
-        state.model = format!("{}/{}", provider, model_id);
+        state.model = format!("{provider}/{model_id}");
 
         // Set initial sandbox state based on config
         if let Some(sandbox_cfg) = &config_file.sandbox {
@@ -2158,8 +2179,8 @@ async fn run_headless(
     let runner = match Runner::new_with_features(config, instance.clone(), mcp_configs).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error creating runner: {}", e);
-            return Err(anyhow::anyhow!("Failed to create runner: {}", e));
+            eprintln!("Error creating runner: {e}");
+            return Err(anyhow::anyhow!("Failed to create runner: {e}"));
         }
     };
 
@@ -2568,7 +2589,7 @@ async fn run_headless(
     });
 
     // Create MCP HTTP state for tool serving
-    let mcp_message_url = format!("http://{}/mcp/message", address);
+    let mcp_message_url = format!("http://{address}/mcp/message");
     let mcp_state = create_mcp_http_state(cwd, &mcp_message_url).await.ok();
     let has_mcp = mcp_state.is_some();
 
@@ -2577,9 +2598,9 @@ async fn run_headless(
 
     // Start server
     let listener = tokio::net::TcpListener::bind(address).await?;
-    println!("Server running on http://{}", address);
+    println!("Server running on http://{address}");
     if has_mcp {
-        println!("MCP endpoint: http://{}/mcp/sse", address);
+        println!("MCP endpoint: http://{address}/mcp/sse");
     }
     println!("Press Ctrl+C to stop");
 
@@ -2599,12 +2620,12 @@ async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
 
     // Parse address
     let address = if address.starts_with(':') {
-        format!("127.0.0.1{}", address)
+        format!("127.0.0.1{address}")
     } else {
         address.to_string()
     };
 
-    println!("Connecting to {}...", address);
+    println!("Connecting to {address}...");
 
     // Create remote backend
     let backend = RemoteBackend::new(&address)?;
@@ -2768,8 +2789,7 @@ async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
                                 }
                                 wonopcode_protocol::MessageSegment::Thinking { text } => {
                                     wonopcode_tui::widgets::MessageSegment::Text(format!(
-                                        "*Thinking:* {}",
-                                        text
+                                        "*Thinking:* {text}"
                                     ))
                                 }
                                 wonopcode_protocol::MessageSegment::Tool { tool } => {
@@ -2903,8 +2923,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
 
         if !allowed_by_rules {
             return Err(format!(
-                "Permission denied for tool '{}'. HTTP MCP mode requires explicit permission rules.",
-                tool_name
+                "Permission denied for tool '{tool_name}'. HTTP MCP mode requires explicit permission rules."
             ));
         }
 
@@ -2945,7 +2964,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
 
                 // Add sandbox indicator for bash tool
                 if has_sandbox && tool_name == "bash" {
-                    text = format!("[sandbox] {}", text);
+                    text = format!("[sandbox] {text}");
                 }
 
                 // For file-modifying tools, append metadata as JSON so the TUI can parse it
@@ -2960,6 +2979,56 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             Err(e) => Err(e.to_string()),
         }
     }
+}
+
+/// Start a background HTTP server for MCP tools.
+///
+/// This starts an HTTP server on a random available port that serves only the MCP endpoints.
+/// Returns the MCP SSE URL and a server handle that can be used to shutdown the server.
+///
+/// # Arguments
+/// * `cwd` - Working directory for the MCP server
+///
+/// # Returns
+/// A tuple of (mcp_sse_url, server_handle) where:
+/// - `mcp_sse_url` is the URL to use for MCP connections (e.g., "http://127.0.0.1:12345/mcp/sse")
+/// - `server_handle` is a tokio task handle for the server (can be aborted to shutdown)
+async fn start_mcp_server(
+    cwd: &std::path::Path,
+) -> anyhow::Result<(String, tokio::task::JoinHandle<()>)> {
+    use axum::Router;
+    use wonopcode_mcp::create_mcp_router;
+
+    // Bind to a random available port
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let local_addr = listener.local_addr()?;
+
+    info!(address = %local_addr, "Starting background MCP HTTP server");
+
+    // Build the URL for the MCP message endpoint
+    let mcp_message_url = format!("http://{local_addr}/mcp/message");
+
+    // Create MCP state
+    let mcp_state = create_mcp_http_state(cwd, &mcp_message_url).await?;
+
+    // Create router with just MCP endpoints (no CORS needed for localhost)
+    let mcp_router = create_mcp_router(mcp_state);
+    let app = Router::new().nest("/mcp", mcp_router);
+
+    // Build the SSE URL to return
+    let mcp_sse_url = format!("http://{local_addr}/mcp/sse");
+
+    // Spawn the server in the background
+    let server_handle = tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!(error = %e, "MCP HTTP server error");
+        }
+        info!("MCP HTTP server shutdown");
+    });
+
+    info!(mcp_url = %mcp_sse_url, "MCP HTTP server started");
+
+    Ok((mcp_sse_url, server_handle))
 }
 
 /// Create MCP HTTP state for the headless server.
@@ -3171,7 +3240,7 @@ async fn run_web_server(
     let display_url = if address.ip().is_unspecified() {
         // Show localhost for local access
         let local_url = format!("http://localhost:{}", address.port());
-        println!("  Local access:      {}", local_url);
+        println!("  Local access:      {local_url}");
 
         // Try to find network IPs
         if let Ok(interfaces) = get_network_ips() {
@@ -3181,8 +3250,8 @@ async fn run_web_server(
         }
         local_url
     } else {
-        let url = format!("http://{}", address);
-        println!("  Web interface:     {}", url);
+        let url = format!("http://{address}");
+        println!("  Web interface:     {url}");
         url
     };
 
@@ -3299,7 +3368,7 @@ async fn handle_mcp_add(
             println!("Add the following to your wonopcode.json:");
             println!();
             println!(r#"  "mcp": {{"#);
-            println!(r#"    "{}": {{"#, name);
+            println!(r#"    "{name}": {{"#);
             println!(r#"      "type": "local","#);
             println!(r#"      "command": ["{}"]"#, cmd.replace('"', r#"\""#));
             println!(r#"    }}"#);
@@ -3325,17 +3394,14 @@ async fn handle_mcp_add(
             println!("Add the following to your wonopcode.json:");
             println!();
             println!(r#"  "mcp": {{"#);
-            println!(r#"    "{}": {{"#, name);
+            println!(r#"    "{name}": {{"#);
             println!(r#"      "type": "remote","#);
-            println!(r#"      "url": "{}""#, server_url);
+            println!(r#"      "url": "{server_url}""#);
             println!(r#"    }}"#);
             println!(r#"  }}"#);
         }
         _ => {
-            println!(
-                "Error: Invalid server type '{}'. Use 'local' or 'remote'.",
-                server_type
-            );
+            println!("Error: Invalid server type '{server_type}'. Use 'local' or 'remote'.");
         }
     }
 
@@ -3365,7 +3431,7 @@ async fn handle_mcp_list(cwd: &std::path::Path) -> anyhow::Result<()> {
                         format!("remote: {}", remote.url)
                     }
                 };
-                println!("  {} {} ({})", status_icon, name, type_info);
+                println!("  {status_icon} {name} ({type_info})");
             }
             println!();
             println!("{} server(s) configured", servers.len());
@@ -3403,11 +3469,11 @@ async fn handle_mcp_auth(name: &str, cwd: &std::path::Path) -> anyhow::Result<()
     let server_config = match servers.get(name) {
         Some(c) => c,
         None => {
-            println!("MCP server '{}' not found.", name);
+            println!("MCP server '{name}' not found.");
             println!();
             println!("Available servers:");
             for name in servers.keys() {
-                println!("  - {}", name);
+                println!("  - {name}");
             }
             return Ok(());
         }
@@ -3415,7 +3481,7 @@ async fn handle_mcp_auth(name: &str, cwd: &std::path::Path) -> anyhow::Result<()
 
     match server_config {
         wonopcode_core::config::McpConfig::Remote(remote) => {
-            println!("Server: {}", name);
+            println!("Server: {name}");
             println!("URL: {}", remote.url);
             println!();
             println!("OAuth authentication is initiated when connecting to the server.");
@@ -3424,10 +3490,7 @@ async fn handle_mcp_auth(name: &str, cwd: &std::path::Path) -> anyhow::Result<()
             println!("To test the connection, restart wonopcode and the OAuth flow will begin.");
         }
         wonopcode_core::config::McpConfig::Local(_) => {
-            println!(
-                "Server '{}' is a local server and doesn't support OAuth.",
-                name
-            );
+            println!("Server '{name}' is a local server and doesn't support OAuth.");
         }
     }
 
@@ -3460,9 +3523,9 @@ async fn handle_mcp_logout(name: &str) -> anyhow::Result<()> {
     if credentials.remove(name).is_some() {
         let new_content = serde_json::to_string_pretty(&credentials)?;
         tokio::fs::write(&credentials_path, new_content).await?;
-        println!("Removed OAuth credentials for '{}'.", name);
+        println!("Removed OAuth credentials for '{name}'.");
     } else {
-        println!("No credentials found for '{}'.", name);
+        println!("No credentials found for '{name}'.");
     }
 
     println!();
@@ -3540,7 +3603,7 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                     println!();
 
                     if let Some(desc) = &agent.description {
-                        println!("Description: {}", desc);
+                        println!("Description: {desc}");
                         println!();
                     }
 
@@ -3554,19 +3617,19 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                     println!("  Hidden:   {}", if agent.hidden { "yes" } else { "no" });
 
                     if let Some(model) = &agent.model {
-                        println!("  Model:    {}", model);
+                        println!("  Model:    {model}");
                     }
                     if let Some(temp) = agent.temperature {
-                        println!("  Temp:     {}", temp);
+                        println!("  Temp:     {temp}");
                     }
                     if let Some(top_p) = agent.top_p {
-                        println!("  Top-p:    {}", top_p);
+                        println!("  Top-p:    {top_p}");
                     }
                     if let Some(max_steps) = agent.max_steps {
-                        println!("  Max steps: {}", max_steps);
+                        println!("  Max steps: {max_steps}");
                     }
                     if let Some(color) = &agent.color {
-                        println!("  Color:    {}", color);
+                        println!("  Color:    {color}");
                     }
 
                     println!();
@@ -3574,10 +3637,10 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                     println!("  Edit:     {:?}", agent.permission.edit);
                     println!("  Webfetch: {:?}", agent.permission.webfetch);
                     if let Some(doom) = &agent.permission.doom_loop {
-                        println!("  Doom loop: {:?}", doom);
+                        println!("  Doom loop: {doom:?}");
                     }
                     if let Some(ext) = &agent.permission.external_directory {
-                        println!("  External dir: {:?}", ext);
+                        println!("  External dir: {ext:?}");
                     }
 
                     // Show bash permissions
@@ -3585,7 +3648,7 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                         println!();
                         println!("Bash permissions:");
                         for (pattern, perm) in &agent.permission.bash {
-                            println!("  {:<20} {:?}", pattern, perm);
+                            println!("  {pattern:<20} {perm:?}");
                         }
                     }
 
@@ -3595,7 +3658,7 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                         println!("Tool overrides:");
                         for (tool, enabled) in &agent.tools {
                             let status = if *enabled { "enabled" } else { "disabled" };
-                            println!("  {:<12} {}", tool, status);
+                            println!("  {tool:<12} {status}");
                         }
                     }
 
@@ -3614,7 +3677,7 @@ async fn handle_agent(command: AgentCommands, cwd: &std::path::Path) -> anyhow::
                     println!();
                 }
                 None => {
-                    println!("Agent '{}' not found.", name);
+                    println!("Agent '{name}' not found.");
                     println!();
                     println!("Available agents:");
                     for agent in registry.all().filter(|a| !a.hidden) {

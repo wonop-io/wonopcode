@@ -256,7 +256,7 @@ impl SelectDialog {
                         // Add section header
                         let header = ListItem::new(Line::from(vec![
                             Span::styled(
-                                format!("── {} ", cat),
+                                format!("── {cat} "),
                                 Style::default()
                                     .fg(theme.accent)
                                     .add_modifier(Modifier::BOLD),
@@ -279,7 +279,7 @@ impl SelectDialog {
             }
 
             if let Some(kb) = &item.keybind {
-                spans.push(Span::styled(format!("  [{}]", kb), theme.highlight_style()));
+                spans.push(Span::styled(format!("  [{kb}]"), theme.highlight_style()));
             }
 
             list_items.push(ListItem::new(Line::from(spans)));
@@ -1106,7 +1106,7 @@ impl McpDialog {
                 };
 
                 let mut spans = vec![
-                    Span::styled(format!("{} ", status_symbol), status_style),
+                    Span::styled(format!("{status_symbol} "), status_style),
                     Span::styled(&server.name, theme.text_style()),
                     enabled_text,
                     tool_text,
@@ -1115,7 +1115,7 @@ impl McpDialog {
                 // Add error message if present
                 if let Some(error) = &server.error {
                     spans.push(Span::styled(
-                        format!(" - {}", error),
+                        format!(" - {error}"),
                         Style::default().fg(theme.error),
                     ));
                 }
@@ -1520,15 +1520,12 @@ impl PerfDialog {
                 .take(visible_count)
             {
                 widget_lines.push(Line::from(vec![
-                    Span::styled(format!("  {:12}", name), theme.muted_style()),
-                    Span::styled(format!("avg: {:6.2}ms", avg), theme.text_style()),
+                    Span::styled(format!("  {name:12}"), theme.muted_style()),
+                    Span::styled(format!("avg: {avg:6.2}ms"), theme.text_style()),
                     Span::raw("  "),
-                    Span::styled(
-                        format!("max: {:6.2}ms", max),
-                        self.latency_style(*max, theme),
-                    ),
+                    Span::styled(format!("max: {max:6.2}ms"), self.latency_style(*max, theme)),
                     Span::raw("  "),
-                    Span::styled(format!("({} calls)", calls), theme.dim_style()),
+                    Span::styled(format!("({calls} calls)"), theme.dim_style()),
                 ]));
             }
             if self.widget_stats.len() > visible_count {
@@ -2250,14 +2247,14 @@ impl SandboxDialog {
 
         let runtime_text = self.runtime.as_deref().unwrap_or("sandbox");
         let mut status_lines = vec![Line::from(vec![
-            Span::styled(format!("{} ", status_icon), status_style),
-            Span::styled(format!("{} - {}", runtime_text, status_text), status_style),
+            Span::styled(format!("{status_icon} "), status_style),
+            Span::styled(format!("{runtime_text} - {status_text}"), status_style),
         ])];
 
         // Add error message if present
         if let Some(ref error) = self.error {
             status_lines.push(Line::from(Span::styled(
-                format!("  {}", error),
+                format!("  {error}"),
                 theme.error_style(),
             )));
         }
@@ -2279,8 +2276,8 @@ impl SandboxDialog {
 
                 let spans = vec![
                     Span::styled(*label, theme.text_style()),
-                    Span::styled(format!(" {} ", key_hint), theme.highlight_style()),
-                    Span::styled(format!("- {}", desc), theme.dim_style()),
+                    Span::styled(format!(" {key_hint} "), theme.highlight_style()),
+                    Span::styled(format!("- {desc}"), theme.dim_style()),
                 ];
 
                 ListItem::new(Line::from(spans))
@@ -2439,7 +2436,7 @@ impl SettingValue {
                 }
             }
             SettingValue::Number { value, .. } => value.to_string(),
-            SettingValue::Float { value, .. } => format!("{:.2}", value),
+            SettingValue::Float { value, .. } => format!("{value:.2}"),
             SettingValue::List(items) => {
                 if items.is_empty() {
                     "(empty)".to_string()
@@ -3262,7 +3259,7 @@ impl SettingsDialog {
                                 update_item(
                                     item,
                                     SettingValue::Select {
-                                        value: format!("{:?}", level).to_lowercase(),
+                                        value: format!("{level:?}").to_lowercase(),
                                         options: options.clone(),
                                     },
                                 );
@@ -3285,7 +3282,7 @@ impl SettingsDialog {
                                 update_item(
                                     item,
                                     SettingValue::Select {
-                                        value: format!("{:?}", share).to_lowercase(),
+                                        value: format!("{share:?}").to_lowercase(),
                                         options: options.clone(),
                                     },
                                 );
@@ -3404,7 +3401,7 @@ impl SettingsDialog {
                             update_item(
                                 item,
                                 SettingValue::Select {
-                                    value: format!("{:?}", perm).to_lowercase(),
+                                    value: format!("{perm:?}").to_lowercase(),
                                     options: options.clone(),
                                 },
                             );
@@ -3495,7 +3492,7 @@ impl SettingsDialog {
                                     update_item(
                                         item,
                                         SettingValue::Select {
-                                            value: format!("{:?}", paste).to_lowercase(),
+                                            value: format!("{paste:?}").to_lowercase(),
                                             options: options.clone(),
                                         },
                                     );
@@ -4061,7 +4058,7 @@ impl SettingsDialog {
                     Some(EditAction::StartString(value.to_string(), false))
                 }
                 SettingValue::Float { value, .. } => {
-                    Some(EditAction::StartString(format!("{:.2}", value), false))
+                    Some(EditAction::StartString(format!("{value:.2}"), false))
                 }
                 SettingValue::List(_) => Some(EditAction::StartList),
             }
@@ -4196,7 +4193,7 @@ impl SettingsDialog {
                 KeyCode::Down => "down".to_string(),
                 KeyCode::Left => "left".to_string(),
                 KeyCode::Right => "right".to_string(),
-                KeyCode::F(n) => format!("f{}", n),
+                KeyCode::F(n) => format!("f{n}"),
                 _ => return SettingsResult::None,
             };
 
@@ -4486,7 +4483,7 @@ impl SettingsDialog {
                             let display =
                                 options.get(self.select_index).cloned().unwrap_or_default();
                             spans.push(Span::styled(
-                                format!("▼ {}", display),
+                                format!("▼ {display}"),
                                 Style::default()
                                     .fg(theme.primary)
                                     .add_modifier(Modifier::BOLD),

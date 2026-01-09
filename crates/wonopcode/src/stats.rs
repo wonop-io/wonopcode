@@ -236,10 +236,10 @@ pub fn display_stats(stats: &SessionStats, tool_limit: Option<usize>) {
         stats.median_tokens_per_session
     };
 
-    println!("{}", render_row("Total Cost", &format!("${:.2}", cost)));
+    println!("{}", render_row("Total Cost", &format!("${cost:.2}")));
     println!(
         "{}",
-        render_row("Avg Cost/Day", &format!("${:.2}", cost_per_day))
+        render_row("Avg Cost/Day", &format!("${cost_per_day:.2}"))
     );
     println!(
         "{}",
@@ -313,10 +313,7 @@ pub fn display_stats(stats: &SessionStats, tool_limit: Option<usize>) {
                 tool.clone()
             };
 
-            let content = format!(
-                " {:18} {:20} {:>3} ({:>4.1}%)",
-                tool_display, bar, count, percentage
-            );
+            let content = format!(" {tool_display:18} {bar:20} {count:>3} ({percentage:>4.1}%)");
             let padding = WIDTH.saturating_sub(content.len() + 1);
             println!("│{}{} │", content, " ".repeat(padding));
         }

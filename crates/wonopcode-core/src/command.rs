@@ -303,7 +303,7 @@ $ARGUMENTS"#,
     async fn load_command(path: &Path) -> Result<Command, String> {
         let content = fs::read_to_string(path)
             .await
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+            .map_err(|e| format!("Failed to read file: {e}"))?;
 
         let (frontmatter, body) = parse_frontmatter(&content)?;
 
@@ -400,7 +400,7 @@ fn parse_frontmatter(content: &str) -> Result<(CommandFrontmatter, String), Stri
 
     // Parse YAML frontmatter
     let frontmatter: CommandFrontmatter = serde_yaml::from_str(frontmatter_str)
-        .map_err(|e| format!("Invalid frontmatter YAML: {}", e))?;
+        .map_err(|e| format!("Invalid frontmatter YAML: {e}"))?;
 
     Ok((frontmatter, body.to_string()))
 }
@@ -415,14 +415,14 @@ fn expand_template(template: &str, args: &[&str], full_arguments: &str) -> Strin
     // Find the highest numbered placeholder
     let mut max_placeholder = 0;
     for i in 1..=20 {
-        if result.contains(&format!("${}", i)) {
+        if result.contains(&format!("${i}")) {
             max_placeholder = i;
         }
     }
 
     // Replace numbered placeholders
     for i in 1..=max_placeholder {
-        let placeholder = format!("${}", i);
+        let placeholder = format!("${i}");
         let value = if i == max_placeholder && i <= args.len() {
             // Last placeholder gets all remaining arguments
             args[i - 1..].join(" ")

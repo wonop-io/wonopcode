@@ -93,7 +93,7 @@ impl ResourceMonitor {
             ])
             .output()
             .await
-            .map_err(|e| crate::SandboxError::ExecFailed(format!("docker stats failed: {}", e)))?;
+            .map_err(|e| crate::SandboxError::ExecFailed(format!("docker stats failed: {e}")))?;
 
         if !output.status.success() {
             return Ok(ResourceStats::default());
@@ -115,7 +115,7 @@ impl ResourceMonitor {
             ])
             .output()
             .await
-            .map_err(|e| crate::SandboxError::ExecFailed(format!("podman stats failed: {}", e)))?;
+            .map_err(|e| crate::SandboxError::ExecFailed(format!("podman stats failed: {e}")))?;
 
         if !output.status.success() {
             return Ok(ResourceStats::default());
@@ -226,7 +226,7 @@ fn format_bytes(bytes: u64) -> String {
     } else if bytes >= KIB {
         format!("{:.1}KiB", bytes as f64 / KIB as f64)
     } else {
-        format!("{}B", bytes)
+        format!("{bytes}B")
     }
 }
 

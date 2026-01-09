@@ -105,7 +105,7 @@ Guidelines:
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
         let args: PatchArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {}", e)))?;
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
         // Parse the patch
         let hunks = parse_patch(&args.patch_text)?;
@@ -305,8 +305,7 @@ Guidelines:
         }
 
         let summary = format!(
-            "{} file(s) modified, {} added, {} deleted (+{} -{})",
-            files_modified, files_added, files_deleted, total_additions, total_deletions
+            "{files_modified} file(s) modified, {files_added} added, {files_deleted} deleted (+{total_additions} -{total_deletions})"
         );
 
         let output = format!("{}\n\n{}", summary, results.join("\n"));

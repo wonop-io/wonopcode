@@ -167,7 +167,7 @@ impl WriteTool {
         let file_exists = sandbox
             .path_exists(&sandbox_path)
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Sandbox error: {e}")))?;
 
         if file_exists {
             if let Some(ref file_time) = ctx.file_time {
@@ -199,14 +199,14 @@ impl WriteTool {
             sandbox
                 .create_dir_all(parent)
                 .await
-                .map_err(|e| ToolError::execution_failed(format!("Sandbox mkdir error: {}", e)))?;
+                .map_err(|e| ToolError::execution_failed(format!("Sandbox mkdir error: {e}")))?;
         }
 
         // Write file through sandbox
         sandbox
             .write_file(&sandbox_path, content.as_bytes())
             .await
-            .map_err(|e| ToolError::execution_failed(format!("Sandbox write error: {}", e)))?;
+            .map_err(|e| ToolError::execution_failed(format!("Sandbox write error: {e}")))?;
 
         // Update file read time after successful write
         if let Some(ref file_time) = ctx.file_time {

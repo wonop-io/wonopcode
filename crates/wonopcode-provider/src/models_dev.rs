@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// URL for models.dev API
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
@@ -267,10 +267,10 @@ impl ModelsDevClient {
             .map_err(|e| ModelsDevError::Fetch(e.to_string()))?;
 
         if !response.status().is_success() {
+            let status = response.status();
             return Err(ModelsDevError::Fetch(format!(
-                "HTTP {}: {}",
-                response.status(),
-                response.status().canonical_reason().unwrap_or("Unknown")
+                "HTTP {status}: {}",
+                status.canonical_reason().unwrap_or("Unknown")
             )));
         }
 
@@ -293,7 +293,7 @@ impl ModelsDevClient {
 
         // Save to disk cache
         if let Err(e) = self.save_to_disk(&text).await {
-            warn!("Failed to save models.dev cache: {}", e);
+            warn!("Failed to save models.dev cache: {e}");
         }
 
         info!(

@@ -325,9 +325,8 @@ pub fn environment_context(
         context.push_str(&format!(
             r#"
 <files>
-  {}
-</files>"#,
-            tree
+  {tree}
+</files>"#
         ));
     }
 

@@ -129,7 +129,7 @@ impl OAuthCallbackServer {
 
         let addr = SocketAddr::from(([127, 0, 0, 1], OAUTH_CALLBACK_PORT));
         let listener = TcpListener::bind(addr).await.map_err(|e| {
-            McpError::connection_failed(format!("Failed to bind OAuth callback server: {}", e))
+            McpError::connection_failed(format!("Failed to bind OAuth callback server: {e}"))
         })?;
 
         info!(port = OAUTH_CALLBACK_PORT, "OAuth callback server started");
@@ -263,7 +263,7 @@ async fn handle_connection(
     let n = stream
         .read(&mut buffer)
         .await
-        .map_err(|e| McpError::protocol_error(format!("Failed to read request: {}", e)))?;
+        .map_err(|e| McpError::protocol_error(format!("Failed to read request: {e}")))?;
 
     let request = String::from_utf8_lossy(&buffer[..n]);
 
@@ -280,7 +280,7 @@ async fn handle_connection(
     let path = parts[1];
 
     // Parse URL
-    let url = format!("http://127.0.0.1{}", path);
+    let url = format!("http://127.0.0.1{path}");
     let parsed = match url::Url::parse(&url) {
         Ok(u) => u,
         Err(_) => {

@@ -234,7 +234,7 @@ fn extract_prompt(body: &str) -> String {
 fn parse_repo_name(full_name: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = full_name.split('/').collect();
     if parts.len() != 2 {
-        anyhow::bail!("Invalid repository name: {}", full_name);
+        anyhow::bail!("Invalid repository name: {full_name}");
     }
     Ok((parts[0].to_string(), parts[1].to_string()))
 }

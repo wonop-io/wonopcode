@@ -48,7 +48,7 @@ impl VertexProvider {
         if !access_token.is_empty() {
             headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", access_token))
+                HeaderValue::from_str(&format!("Bearer {access_token}"))
                     .map_err(|e| ProviderError::internal(e.to_string()))?,
             );
         }
@@ -287,7 +287,7 @@ impl LanguageModel for VertexProvider {
                                     // Function call
                                     if let Some(fc) = part.function_call {
                                         tool_call_counter += 1;
-                                        let id = format!("call_{}", tool_call_counter);
+                                        let id = format!("call_{tool_call_counter}");
                                         let args = serde_json::to_string(&fc.args).unwrap_or_default();
 
                                         yield StreamChunk::ToolCall {
@@ -386,7 +386,7 @@ async fn get_access_token() -> ProviderResult<String> {
         .args(["auth", "print-access-token"])
         .output()
         .await
-        .map_err(|e| ProviderError::internal(format!("Failed to run gcloud: {}", e)))?;
+        .map_err(|e| ProviderError::internal(format!("Failed to run gcloud: {e}")))?;
 
     if output.status.success() {
         let token = String::from_utf8_lossy(&output.stdout).trim().to_string();

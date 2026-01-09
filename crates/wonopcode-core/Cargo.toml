@@ -18,7 +18,6 @@ wonopcode-tools.workspace = true
 wonopcode-snapshot.workspace = true
 
 thiserror.workspace = true
-anyhow.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 async-trait.workspace = true
@@ -36,7 +35,6 @@ walkdir.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-mockall.workspace = true
 
 [lints]
 workspace = true
