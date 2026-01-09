@@ -199,6 +199,21 @@ impl SharedFileTodoStore {
         })
     }
 
+    /// Initialize the environment variable for shared todo storage.
+    /// Call this early in the application startup before any component
+    /// that needs todo storage is created.
+    /// Returns the path that was set.
+    pub fn init_env() -> std::path::PathBuf {
+        if let Ok(path) = std::env::var(TODO_FILE_ENV_VAR) {
+            std::path::PathBuf::from(path)
+        } else {
+            let path =
+                std::env::temp_dir().join(format!("wonopcode-todos-{}.json", std::process::id()));
+            std::env::set_var(TODO_FILE_ENV_VAR, &path);
+            path
+        }
+    }
+
     /// Get the path to the shared file.
     pub fn path(&self) -> &Path {
         &self.path

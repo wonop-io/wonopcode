@@ -2,6 +2,7 @@
 //!
 //! This module provides the ability to run prompts via HTTP with SSE streaming.
 
+use crate::state::SharedTodoStore;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use wonopcode_provider::{
     stream::StreamChunk,
     BoxedLanguageModel, GenerateOptions, Message as ProviderMessage, ToolDefinition,
 };
+use wonopcode_tools::todo::{TodoItem, TodoPriority, TodoStatus};
 
 /// Active session runners for abort support.
 pub type SessionRunners = Arc<RwLock<HashMap<String, CancellationToken>>>;
@@ -139,12 +141,14 @@ pub struct ServerPromptRunner {
     tools: Vec<ToolDefinition>,
     /// Agent configuration.
     agent_config: AgentConfig,
+    /// Shared todo store for updating todos when tools are observed.
+    todo_store: Option<SharedTodoStore>,
 }
 
 impl ServerPromptRunner {
     /// Create a new server prompt runner.
     pub fn new(provider: BoxedLanguageModel, cwd: PathBuf, cancel: CancellationToken) -> Self {
-        Self::with_agent(provider, cwd, cancel, AgentConfig::default())
+        Self::with_agent(provider, cwd, cancel, AgentConfig::default(), None)
     }
 
     /// Create a new server prompt runner with agent configuration.
@@ -153,6 +157,7 @@ impl ServerPromptRunner {
         cwd: PathBuf,
         cancel: CancellationToken,
         agent_config: AgentConfig,
+        todo_store: Option<SharedTodoStore>,
     ) -> Self {
         // Basic tool definitions for the model to know about.
         // In a full implementation, these would be dynamically loaded.
@@ -236,6 +241,7 @@ impl ServerPromptRunner {
             cancel,
             tools,
             agent_config,
+            todo_store,
         }
     }
 
@@ -363,6 +369,42 @@ impl ServerPromptRunner {
                     debug!(id = %id, name = %name, "Tool observed (external execution)");
                     let input_value: serde_json::Value =
                         serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
+
+                    // Intercept todowrite calls to update the shared todo store
+                    let base_name = name.split("__").last().unwrap_or(&name);
+                    if base_name == "todowrite" {
+                        if let Some(store) = &self.todo_store {
+                            if let Some(todos_array) = input_value.get("todos").and_then(|v| v.as_array()) {
+                                let todos: Vec<TodoItem> = todos_array
+                                    .iter()
+                                    .filter_map(|item| {
+                                        let id = item.get("id")?.as_str()?.to_string();
+                                        let content = item.get("content")?.as_str()?.to_string();
+                                        let status = match item.get("status")?.as_str()? {
+                                            "pending" => TodoStatus::Pending,
+                                            "in_progress" => TodoStatus::InProgress,
+                                            "completed" => TodoStatus::Completed,
+                                            "cancelled" => TodoStatus::Cancelled,
+                                            _ => TodoStatus::Pending,
+                                        };
+                                        let priority = match item.get("priority")?.as_str()? {
+                                            "high" => TodoPriority::High,
+                                            "medium" => TodoPriority::Medium,
+                                            "low" => TodoPriority::Low,
+                                            _ => TodoPriority::Medium,
+                                        };
+                                        Some(TodoItem { id, content, status, priority })
+                                    })
+                                    .collect();
+
+                                // Update the shared todo store
+                                let mut store_guard = store.blocking_write();
+                                *store_guard = todos;
+                                debug!("Updated shared todo store with {} items", store_guard.len());
+                            }
+                        }
+                    }
+
                     let _ = event_tx.send(PromptEvent::ToolStarted {
                         id,
                         name,

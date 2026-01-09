@@ -396,6 +396,8 @@ pub struct App {
     perf_dialog: Option<PerfDialog>,
     /// Permission request dialog.
     permission_dialog: Option<PermissionDialog>,
+    /// Queue of pending permission requests (when dialog is already showing).
+    permission_queue: std::collections::VecDeque<PermissionRequestUpdate>,
     /// Mode indicator.
     mode_indicator: ModeIndicator,
     /// Which-key overlay.
@@ -490,6 +492,7 @@ impl App {
             settings_dialog: None,
             perf_dialog: None,
             permission_dialog: None,
+            permission_queue: std::collections::VecDeque::new(),
             mode_indicator: ModeIndicator::new(),
             which_key: WhichKeyOverlay::new(),
             help_overlay: HelpOverlay::new(),
@@ -940,8 +943,25 @@ impl App {
             }
         }
 
-        self.dialog = ActiveDialog::None;
-        self.footer.set_pending_permissions(0);
+        // Check if there are more queued permission requests
+        if let Some(next_req) = self.permission_queue.pop_front() {
+            // Show the next queued permission dialog
+            self.permission_dialog = Some(PermissionDialog::new(
+                next_req.id,
+                next_req.tool,
+                next_req.action,
+                next_req.description,
+                next_req.path,
+            ));
+            self.dialog = ActiveDialog::Permission;
+            // Update pending count (current dialog + remaining queue)
+            let pending_count = 1 + self.permission_queue.len();
+            self.footer.set_pending_permissions(pending_count);
+        } else {
+            // No more pending permissions
+            self.dialog = ActiveDialog::None;
+            self.footer.set_pending_permissions(0);
+        }
     }
 
     /// Show the settings dialog.
@@ -2907,9 +2927,12 @@ async function fetchUserData(userId) {
                 }
             }
             AppUpdate::Completed { text: _ } => {
-                let segments = self.messages.end_streaming();
+                // Use atomic end_streaming_and_add_message to avoid flicker
+                let mut msg = DisplayMessage::assistant("");
+                msg.agent = self.current_agent();
+                msg.model = Some(format!("{}/{}", self.provider, self.model));
+                self.messages.end_streaming_and_add_message(msg);
 
-                self.add_assistant_message_with_segments(segments);
                 self.set_state(AppState::Input);
                 self.footer.set_status(FooterStatus::Idle);
                 self.input.set_focused(true);
@@ -3055,17 +3078,23 @@ async function fetchUserData(userId) {
                     .push(Toast::info(format!("Switched to {mode_name}")));
             }
             AppUpdate::PermissionRequest(req) => {
-                // Show permission dialog
-                self.permission_dialog = Some(PermissionDialog::new(
-                    req.id,
-                    req.tool,
-                    req.action,
-                    req.description,
-                    req.path,
-                ));
-                self.dialog = ActiveDialog::Permission;
-                // Update pending count
-                self.footer.set_pending_permissions(1);
+                // If a permission dialog is already showing, queue this request
+                if self.permission_dialog.is_some() {
+                    self.permission_queue.push_back(req);
+                } else {
+                    // Show permission dialog
+                    self.permission_dialog = Some(PermissionDialog::new(
+                        req.id,
+                        req.tool,
+                        req.action,
+                        req.description,
+                        req.path,
+                    ));
+                    self.dialog = ActiveDialog::Permission;
+                }
+                // Update pending count (current dialog + queue size)
+                let pending_count = 1 + self.permission_queue.len();
+                self.footer.set_pending_permissions(pending_count);
             }
             AppUpdate::SessionLoaded {
                 id,

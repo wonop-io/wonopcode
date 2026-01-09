@@ -11,6 +11,97 @@ use crate::theme::{RenderSettings, Theme};
 /// Default width for code block backgrounds when width is not specified.
 const DEFAULT_CODE_WIDTH: usize = 80;
 
+/// Wrap a line of styled spans to fit within a given width.
+/// Returns multiple lines if the content exceeds the width.
+pub fn wrap_line(line: Line<'static>, max_width: usize) -> Vec<Line<'static>> {
+    if max_width == 0 {
+        return vec![line];
+    }
+
+    // Calculate total width of the line
+    let total_width: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+
+    // If it fits, return as-is
+    if total_width <= max_width {
+        return vec![line];
+    }
+
+    // Need to wrap - process spans and break at word boundaries
+    let mut result: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
+
+    for span in line.spans {
+        let style = span.style;
+        let content = span.content.to_string();
+
+        // Process this span's content word by word
+        let mut remaining = content.as_str();
+
+        while !remaining.is_empty() {
+            // Find next word boundary (space or end)
+            let (word, rest) = match remaining.find(' ') {
+                Some(idx) => (&remaining[..=idx], &remaining[idx + 1..]),
+                None => (remaining, ""),
+            };
+
+            let word_len = word.chars().count();
+
+            // If adding this word would exceed width
+            if current_width + word_len > max_width && current_width > 0 {
+                // Flush current line
+                if !current_spans.is_empty() {
+                    result.push(Line::from(std::mem::take(&mut current_spans)));
+                }
+                current_width = 0;
+            }
+
+            // Handle very long words that exceed max_width on their own
+            if word_len > max_width && current_width == 0 {
+                // Break the word itself
+                let chars: Vec<char> = word.chars().collect();
+                let mut start = 0;
+                while start < chars.len() {
+                    let end = (start + max_width).min(chars.len());
+                    let chunk: String = chars[start..end].iter().collect();
+                    if start > 0 || !current_spans.is_empty() {
+                        // Flush previous line first
+                        if !current_spans.is_empty() {
+                            result.push(Line::from(std::mem::take(&mut current_spans)));
+                        }
+                    }
+                    if end < chars.len() {
+                        // This chunk fills the line
+                        result.push(Line::from(vec![Span::styled(chunk, style)]));
+                    } else {
+                        // Last chunk, keep in current_spans for potential continuation
+                        current_spans.push(Span::styled(chunk.clone(), style));
+                        current_width = chunk.chars().count();
+                    }
+                    start = end;
+                }
+            } else {
+                // Normal case - add word to current line
+                current_spans.push(Span::styled(word.to_string(), style));
+                current_width += word_len;
+            }
+
+            remaining = rest;
+        }
+    }
+
+    // Flush any remaining content
+    if !current_spans.is_empty() {
+        result.push(Line::from(current_spans));
+    }
+
+    if result.is_empty() {
+        vec![Line::from("")]
+    } else {
+        result
+    }
+}
+
 /// Render markdown text to styled lines.
 pub fn render_markdown(text: &str, theme: &Theme) -> Text<'static> {
     render_markdown_with_width(text, theme, DEFAULT_CODE_WIDTH)
@@ -180,38 +271,52 @@ fn render_markdown_internal(
 
         // Handle headings
         if line.starts_with("# ") {
-            lines.push(Line::from(Span::styled(
+            let heading_style = theme.text_style().add_modifier(Modifier::BOLD);
+            let heading_line = Line::from(Span::styled(
                 line.strip_prefix("# ").unwrap_or(line).to_string(),
-                theme.text_style().add_modifier(Modifier::BOLD),
-            )));
+                heading_style,
+            ));
+            lines.extend(wrap_line(heading_line, width));
             continue;
         }
         if line.starts_with("## ") {
-            lines.push(Line::from(Span::styled(
+            let heading_style = theme.text_style().add_modifier(Modifier::BOLD);
+            let heading_line = Line::from(Span::styled(
                 line.strip_prefix("## ").unwrap_or(line).to_string(),
-                theme.text_style().add_modifier(Modifier::BOLD),
-            )));
+                heading_style,
+            ));
+            lines.extend(wrap_line(heading_line, width));
             continue;
         }
         if line.starts_with("### ") {
-            lines.push(Line::from(Span::styled(
+            let heading_style = theme.highlight_style().add_modifier(Modifier::BOLD);
+            let heading_line = Line::from(Span::styled(
                 line.strip_prefix("### ").unwrap_or(line).to_string(),
-                theme.highlight_style().add_modifier(Modifier::BOLD),
-            )));
+                heading_style,
+            ));
+            lines.extend(wrap_line(heading_line, width));
             continue;
         }
 
         // Handle bullet points
         if line.starts_with("- ") || line.starts_with("* ") {
             let content = &line[2..];
-            let mut spans = vec![
-                Span::styled("  ", theme.text_style()),
-                Span::styled("• ", theme.muted_style()),
-            ];
-            // Process inline markdown in bullet content
             let inline = render_inline_markdown(content, theme);
-            spans.extend(inline.spans);
-            lines.push(Line::from(spans));
+            // Wrap with reduced width to account for "  • " prefix (4 chars)
+            let wrapped = wrap_line(inline, width.saturating_sub(4));
+            for (i, wrapped_line) in wrapped.into_iter().enumerate() {
+                let mut spans = if i == 0 {
+                    vec![
+                        Span::styled("  ", theme.text_style()),
+                        Span::styled("• ", theme.muted_style()),
+                    ]
+                } else {
+                    // Continuation lines get indentation
+                    vec![Span::styled("    ", theme.text_style())]
+                };
+                spans.extend(wrapped_line.spans);
+                lines.push(Line::from(spans));
+            }
             continue;
         }
 
@@ -220,27 +325,42 @@ fn render_markdown_internal(
             let prefix = &line[..idx];
             if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
                 let content = &line[idx + 2..];
-                let mut spans = vec![
-                    Span::styled("  ", theme.text_style()),
-                    Span::styled(format!("{prefix}. "), theme.muted_style()),
-                ];
-                // Process inline markdown in list content
+                let prefix_str = format!("{prefix}. ");
+                let prefix_len = prefix_str.chars().count() + 2; // +2 for leading spaces
                 let inline = render_inline_markdown(content, theme);
-                spans.extend(inline.spans);
-                lines.push(Line::from(spans));
+                // Wrap with reduced width to account for prefix
+                let wrapped = wrap_line(inline, width.saturating_sub(prefix_len));
+                for (i, wrapped_line) in wrapped.into_iter().enumerate() {
+                    let mut spans = if i == 0 {
+                        vec![
+                            Span::styled("  ", theme.text_style()),
+                            Span::styled(prefix_str.clone(), theme.muted_style()),
+                        ]
+                    } else {
+                        // Continuation lines get matching indentation
+                        vec![Span::styled(" ".repeat(prefix_len), theme.text_style())]
+                    };
+                    spans.extend(wrapped_line.spans);
+                    lines.push(Line::from(spans));
+                }
                 continue;
             }
         }
 
         // Handle blockquotes
         if line.starts_with("> ") {
-            lines.push(Line::from(vec![
-                Span::styled("│ ", theme.muted_style()),
-                Span::styled(
-                    line.strip_prefix("> ").unwrap_or(line).to_string(),
-                    theme.dim_style().add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+            let content = line.strip_prefix("> ").unwrap_or(line);
+            let quote_style = theme.dim_style().add_modifier(Modifier::ITALIC);
+            // Wrap with reduced width for "│ " prefix (2 chars)
+            let wrapped = wrap_line(
+                Line::from(Span::styled(content.to_string(), quote_style)),
+                width.saturating_sub(2),
+            );
+            for wrapped_line in wrapped {
+                let mut spans = vec![Span::styled("│ ", theme.muted_style())];
+                spans.extend(wrapped_line.spans);
+                lines.push(Line::from(spans));
+            }
             continue;
         }
 
@@ -250,8 +370,10 @@ fn render_markdown_internal(
             continue;
         }
 
-        // Regular paragraph - handle inline formatting
-        lines.push(render_inline_markdown(line, theme));
+        // Regular paragraph - handle inline formatting with word wrapping
+        let paragraph_line = render_inline_markdown(line, theme);
+        let wrapped = wrap_line(paragraph_line, width);
+        lines.extend(wrapped);
     }
 
     // Flush pending table at end
