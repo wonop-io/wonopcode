@@ -172,6 +172,14 @@ impl ClaudeCliProvider {
         self.session_id.read().await.clone()
     }
 
+    /// Set an initial session ID for resumption.
+    ///
+    /// This is useful when recreating a provider (e.g., when sandbox state changes)
+    /// and you want to preserve the existing CLI session.
+    pub async fn set_session_id(&self, session_id: Option<String>) {
+        *self.session_id.write().await = session_id;
+    }
+
     /// Clear the session ID, forcing a new session on the next call.
     pub async fn clear_session(&self) {
         *self.session_id.write().await = None;
@@ -557,6 +565,14 @@ struct CliUsage {
 
 #[async_trait]
 impl LanguageModel for ClaudeCliProvider {
+    async fn get_cli_session_id(&self) -> Option<String> {
+        self.get_session_id().await
+    }
+
+    async fn set_cli_session_id(&self, session_id: Option<String>) {
+        self.set_session_id(session_id).await;
+    }
+
     async fn generate(
         &self,
         messages: Vec<Message>,

@@ -110,6 +110,22 @@ pub trait LanguageModel: Send + Sync {
 
     /// Get the provider ID (e.g., "anthropic", "openai").
     fn provider_id(&self) -> &str;
+
+    /// Get the CLI session ID if this provider uses CLI-based access.
+    ///
+    /// This is used for session persistence with providers like Claude CLI.
+    /// Returns `None` for API-based providers.
+    async fn get_cli_session_id(&self) -> Option<String> {
+        None
+    }
+
+    /// Set the CLI session ID for session resumption.
+    ///
+    /// This is used to restore session state when recreating providers.
+    /// Has no effect on API-based providers.
+    async fn set_cli_session_id(&self, _session_id: Option<String>) {
+        // Default implementation does nothing
+    }
 }
 
 /// A boxed language model for dynamic dispatch.

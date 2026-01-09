@@ -13,15 +13,15 @@
     "test_emulate_tool_observed": true
   },
   "tools": {
+    "webfetch": false,
+    "list": false,
+    "grep": false,
+    "write": false,
+    "patch": false,
+    "websearch": false,
     "read": false,
     "task": false,
-    "webfetch": false,
-    "websearch": false,
-    "write": false,
-    "grep": false,
-    "patch": false,
     "glob": false,
-    "list": false,
     "edit": false
   },
   "compaction": {

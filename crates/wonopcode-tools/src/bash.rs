@@ -453,6 +453,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore)]
     async fn test_simple_command() {
         let tool = BashTool;
         let ctx = test_context();
@@ -472,6 +473,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore)]
     async fn test_command_with_exit_code() {
         let tool = BashTool;
         let ctx = test_context();
@@ -492,6 +494,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore)]
     async fn test_command_stderr() {
         let tool = BashTool;
         let ctx = test_context();
@@ -511,6 +514,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore)]
     async fn test_command_timeout() {
         let tool = BashTool;
         let ctx = test_context();
@@ -550,6 +554,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(windows, ignore)]
     async fn test_workdir() {
         let tool = BashTool;
         let ctx = test_context();

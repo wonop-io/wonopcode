@@ -630,7 +630,30 @@ impl Runner {
             false
         };
 
+        // Get the current CLI session ID before recreating the provider
+        // This preserves Claude CLI session persistence when changing models within same provider
+        let old_provider_id = {
+            let provider = self.provider.read().await;
+            provider.provider_id().to_string()
+        };
+        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic" {
+            // Staying with Claude CLI provider - preserve session
+            let provider = self.provider.read().await;
+            provider.get_cli_session_id().await
+        } else {
+            // Changing providers - start fresh session
+            None
+        };
+
         let new_provider = create_provider(&new_config, sandbox_enabled, allow_all_for_mcp)?;
+
+        // Restore CLI session ID if we preserved it
+        if cli_session_id.is_some() {
+            new_provider
+                .set_cli_session_id(cli_session_id.clone())
+                .await;
+            debug!(cli_session_id = ?cli_session_id, "Restored CLI session ID after model change");
+        }
 
         // Update config and provider
         {
@@ -642,7 +665,7 @@ impl Runner {
             *provider = new_provider;
         }
 
-        info!(provider = %provider_name, model = %model_id, "Model changed successfully");
+        info!(provider = %provider_name, model = %model_id, cli_session_id = ?cli_session_id, "Model changed successfully");
         Ok(())
     }
 
@@ -1395,21 +1418,38 @@ impl Runner {
                 false
             };
 
+            // Get the current CLI session ID before recreating the provider
+            // This preserves Claude CLI session persistence across provider recreations
+            let cli_session_id = {
+                let provider = self.provider.read().await;
+                provider.get_cli_session_id().await
+            };
+
             // Using Claude CLI - recreate provider with new sandbox state
             debug!(
                 sandbox_enabled = sandbox_enabled,
                 allow_all_for_mcp = allow_all_for_mcp,
+                cli_session_id = ?cli_session_id,
                 "Recreating Claude CLI provider after sandbox state change"
             );
 
             match create_provider(&config, Some(sandbox_enabled), allow_all_for_mcp) {
                 Ok(new_provider) => {
+                    // Restore the CLI session ID to the new provider
+                    if cli_session_id.is_some() {
+                        new_provider
+                            .set_cli_session_id(cli_session_id.clone())
+                            .await;
+                        debug!(cli_session_id = ?cli_session_id, "Restored CLI session ID to new provider");
+                    }
+
                     drop(config); // Release read lock before acquiring write lock
                     let mut provider = self.provider.write().await;
                     *provider = new_provider;
                     info!(
                         sandbox_enabled = sandbox_enabled,
                         allow_all_for_mcp = allow_all_for_mcp,
+                        cli_session_id = ?cli_session_id,
                         "Recreated Claude CLI provider after sandbox state change"
                     );
                 }
