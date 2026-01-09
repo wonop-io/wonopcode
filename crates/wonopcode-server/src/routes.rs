@@ -2113,25 +2113,12 @@ async fn mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
 /// MCP servers can be added via this API for runtime configuration.
 /// The server will be started and connected immediately.
 ///
-/// # Supported Transport Types
+/// # Example
 ///
-/// ## Stdio (Local)
-/// ```json
-/// {
-///   "name": "my-server",
-///   "transport": "stdio",
-///   "command": "npx",
-///   "args": ["-y", "@modelcontextprotocol/server-example"],
-///   "env": { "API_KEY": "..." }
-/// }
-/// ```
-///
-/// ## SSE (Remote)
 /// ```json
 /// {
 ///   "name": "remote-server",
-///   "transport": "sse",
-///   "url": "https://example.com/mcp",
+///   "url": "https://example.com/mcp/sse",
 ///   "headers": { "Authorization": "Bearer ..." }
 /// }
 /// ```
@@ -2139,21 +2126,8 @@ async fn mcp_disconnect(Path(_name): Path<String>) -> impl IntoResponse {
 struct McpAddRequest {
     /// Unique name for the server.
     name: String,
-    /// Transport type: "stdio" or "sse".
-    #[serde(default)]
-    transport: Option<String>,
-    /// Command to run (for stdio transport).
-    #[serde(default)]
-    command: Option<String>,
-    /// Command arguments.
-    #[serde(default)]
-    args: Option<Vec<String>>,
-    /// Environment variables.
-    #[serde(default)]
-    env: Option<std::collections::HashMap<String, String>>,
     /// URL for SSE transport.
-    #[serde(default)]
-    url: Option<String>,
+    url: String,
     /// Headers for SSE transport.
     #[serde(default)]
     headers: Option<std::collections::HashMap<String, String>>,
@@ -2168,52 +2142,16 @@ async fn mcp_add(Json(req): Json<McpAddRequest>) -> impl IntoResponse {
     //
     // For now, provide helpful guidance on config file approach.
 
-    let transport = req.transport.as_deref().unwrap_or("stdio");
-    let has_command = req.command.is_some();
-    let has_url = req.url.is_some();
-
-    // Validate the request to give better feedback
-    let validation_error = match transport {
-        "stdio" if !has_command => Some("Stdio transport requires 'command' field"),
-        "sse" if !has_url => Some("SSE transport requires 'url' field"),
-        t if t != "stdio" && t != "sse" => Some("Transport must be 'stdio' or 'sse'"),
-        _ => None,
-    };
-
-    if let Some(error) = validation_error {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "validation_error",
-                "code": "BAD_REQUEST",
-                "message": error,
-                "server_name": req.name
-            })),
-        );
-    }
-
     // Build example config based on request
-    let config_example = if transport == "stdio" {
-        serde_json::json!({
-            "mcp": {
-                &req.name: {
-                    "command": req.command.as_deref().unwrap_or("npx"),
-                    "args": req.args.as_ref().unwrap_or(&vec![]),
-                    "env": req.env.as_ref().unwrap_or(&std::collections::HashMap::new())
-                }
+    let config_example = serde_json::json!({
+        "mcp": {
+            &req.name: {
+                "type": "remote",
+                "url": req.url,
+                "headers": req.headers.as_ref().unwrap_or(&std::collections::HashMap::new())
             }
-        })
-    } else {
-        serde_json::json!({
-            "mcp": {
-                &req.name: {
-                    "type": "sse",
-                    "url": req.url.as_deref().unwrap_or("https://example.com/mcp"),
-                    "headers": req.headers.as_ref().unwrap_or(&std::collections::HashMap::new())
-                }
-            }
-        })
-    };
+        }
+    });
 
     (
         StatusCode::NOT_IMPLEMENTED,
@@ -2226,7 +2164,7 @@ async fn mcp_add(Json(req): Json<McpAddRequest>) -> impl IntoResponse {
                 req.name
             ),
             "server_name": req.name,
-            "transport": transport,
+            "url": req.url,
             "config_valid": true,
             "suggestion": "Add the following to your wonopcode.json file:",
             "config_example": config_example,

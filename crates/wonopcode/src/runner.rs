@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
 };
-use wonopcode_core::config::{McpConfig, McpLocalConfig, SandboxConfig as CoreSandboxConfig};
+use wonopcode_core::config::{McpConfig, McpRemoteConfig, SandboxConfig as CoreSandboxConfig};
 use wonopcode_core::permission::{Decision, PermissionCheck, PermissionManager};
 use wonopcode_core::system_prompt;
 use wonopcode_core::Instance;
@@ -448,15 +448,10 @@ impl Runner {
 
         for (name, config) in configs {
             match &config {
-                McpConfig::Local(local_config) => {
-                    // Check if enabled (default true)
-                    if local_config.enabled == Some(false) {
-                        debug!(server = %name, "MCP server disabled, skipping");
-                        continue;
-                    }
-                    // Convert to McpServerConfig
-                    let server_config = convert_mcp_config(&name, local_config);
-                    server_configs.push((name, server_config));
+                McpConfig::Local(_local_config) => {
+                    // Local (stdio) MCP servers are no longer supported
+                    warn!(server = %name, "Local (stdio) MCP servers are no longer supported. Use remote (HTTP/SSE) servers instead.");
+                    continue;
                 }
                 McpConfig::Remote(remote_config) => {
                     // Check if enabled
@@ -464,8 +459,9 @@ impl Runner {
                         debug!(server = %name, "MCP server disabled, skipping");
                         continue;
                     }
-                    // Remote (SSE) not yet supported
-                    warn!(server = %name, "Remote MCP servers not yet supported");
+                    // Convert to McpServerConfig
+                    let server_config = convert_mcp_remote_config(&name, remote_config);
+                    server_configs.push((name, server_config));
                 }
             }
         }
@@ -2908,12 +2904,12 @@ async fn get_sandbox_for_tool(
 ///
 /// # Arguments
 /// * `config` - Runner configuration
-/// * `sandbox_enabled` - Whether sandbox is enabled (for Claude CLI provider)
-/// * `allow_all` - Whether to allow all tool executions without permission checks
+/// * `_sandbox_enabled` - Whether sandbox is enabled (currently unused, HTTP MCP handles this server-side)
+/// * `_allow_all` - Whether to allow all tool executions (currently unused, HTTP MCP handles this server-side)
 fn create_provider(
     config: &RunnerConfig,
-    sandbox_enabled: Option<bool>,
-    allow_all: bool,
+    _sandbox_enabled: Option<bool>,
+    _allow_all: bool,
 ) -> Result<BoxedLanguageModel, Box<dyn std::error::Error + Send + Sync>> {
     use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
 
@@ -2945,24 +2941,19 @@ fn create_provider(
 
                     if cli_authenticated {
                         info!("Using Claude CLI for subscription-based access with custom tools");
-                        // Check if we should use HTTP transport (headless mode)
+                        // MCP requires HTTP transport - mcp_url must be provided
                         if let Some(ref mcp_url) = config.mcp_url {
                             info!(mcp_url = %mcp_url, "Using MCP HTTP transport");
-                            let provider = wonopcode_provider::claude_cli::with_custom_tools_http(
+                            let provider = wonopcode_provider::claude_cli::with_custom_tools(
                                 model_info,
                                 mcp_url.clone(),
                             )?;
                             Ok(Arc::new(provider))
                         } else {
-                            // Use stdio transport (spawns child process)
-                            let cwd = std::env::current_dir().ok();
-                            let provider = wonopcode_provider::claude_cli::with_custom_tools(
-                                model_info,
-                                cwd,
-                                None,            // Session ID will be auto-generated
-                                sandbox_enabled, // Pass sandbox enabled state to MCP server
-                                allow_all,       // Pass permission mode to MCP server
-                            )?;
+                            // No MCP URL provided - use Claude CLI without custom tools
+                            info!("No MCP URL provided, using Claude CLI without custom tools");
+                            let provider =
+                                wonopcode_provider::claude_cli::ClaudeCliProvider::new(model_info)?;
                             Ok(Arc::new(provider))
                         }
                     } else {
@@ -3369,21 +3360,14 @@ fn load_api_key_from_file(provider: &str) -> Option<String> {
     None
 }
 
-/// Convert wonopcode McpLocalConfig to wonopcode_mcp ServerConfig.
-fn convert_mcp_config(name: &str, config: &McpLocalConfig) -> McpServerConfig {
-    // Parse command - first element is the command, rest are args
-    let (command, args) = if config.command.is_empty() {
-        (String::new(), Vec::new())
-    } else {
-        (config.command[0].clone(), config.command[1..].to_vec())
-    };
+/// Convert wonopcode McpRemoteConfig to wonopcode_mcp ServerConfig.
+fn convert_mcp_remote_config(name: &str, config: &McpRemoteConfig) -> McpServerConfig {
+    let mut server_config = McpServerConfig::sse(name, &config.url);
 
-    let mut server_config = McpServerConfig::stdio(name, &command, args);
-
-    // Add environment variables if specified
-    if let Some(env) = &config.environment {
-        for (key, value) in env {
-            server_config = server_config.with_env(key, value);
+    // Add headers if specified
+    if let Some(headers) = &config.headers {
+        for (key, value) in headers {
+            server_config = server_config.with_header(key, value);
         }
     }
 

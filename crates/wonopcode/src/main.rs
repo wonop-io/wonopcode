@@ -217,19 +217,6 @@ enum Commands {
         #[command(subcommand)]
         command: AgentCommands,
     },
-    /// Run as MCP server (for Claude CLI integration)
-    #[command(name = "mcp-serve")]
-    McpServe {
-        /// Working directory
-        #[arg(short, long)]
-        cwd: Option<std::path::PathBuf>,
-        /// Session ID for tool context
-        #[arg(long)]
-        session_id: Option<String>,
-        /// Allow all tool executions without permission checks (use in trusted environments)
-        #[arg(long, default_value = "false")]
-        allow_all: bool,
-    },
 }
 
 #[derive(Subcommand)]
@@ -426,14 +413,6 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         Some(Commands::Agent { command }) => handle_agent(command, &cwd).await,
-        Some(Commands::McpServe {
-            cwd: mcp_cwd,
-            session_id,
-            allow_all,
-        }) => {
-            let working_dir = mcp_cwd.unwrap_or_else(|| cwd.clone());
-            run_mcp_server(&working_dir, session_id, allow_all).await
-        }
         None => {
             // Check for headless or connect mode
             if cli.headless {
@@ -644,7 +623,7 @@ async fn run_command(
         doom_loop: wonopcode_core::permission::Decision::Ask,
         test_provider_settings: None,
         allow_all: false,
-        mcp_url: None, // Use stdio transport for normal TUI mode
+        mcp_url: None, // No custom MCP tools in TUI mode
     };
 
     // Create runner with snapshot support
@@ -1666,7 +1645,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         doom_loop: wonopcode_core::permission::Decision::Ask,
         test_provider_settings: None,
         allow_all: false,
-        mcp_url: None, // Use stdio transport for normal TUI mode
+        mcp_url: None, // No custom MCP tools in TUI mode
     };
 
     // Get MCP config from config file
@@ -2887,279 +2866,7 @@ async fn run_acp(cwd: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run MCP server for Claude CLI integration.
-///
-/// This exposes wonopcode's tools via the MCP protocol, allowing Claude CLI
-/// to use our custom tools instead of its built-in ones.
-async fn run_mcp_server(
-    cwd: &std::path::Path,
-    session_id: Option<String>,
-    allow_all: bool,
-) -> anyhow::Result<()> {
-    use std::sync::Arc;
-    use tokio_util::sync::CancellationToken;
-    use tracing::{info, warn};
-    use wonopcode_core::bus::Bus;
-    use wonopcode_core::permission::{PermissionManager, PermissionRule};
-    use wonopcode_mcp::{McpServer, McpToolContext};
-    use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
-    use wonopcode_tools::ToolRegistry;
-    use wonopcode_util::FileTimeState;
-
-    // Get session ID from arg or environment
-    let session_id = session_id
-        .or_else(|| std::env::var("WONOPCODE_SESSION_ID").ok())
-        .unwrap_or_else(|| "mcp-default".to_string());
-
-    // Get root dir from environment or use cwd
-    let root_dir = std::env::var("WONOPCODE_ROOT_DIR")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| cwd.to_path_buf());
-
-    // Create tool context
-    let mcp_context = McpToolContext {
-        session_id: session_id.clone(),
-        cwd: cwd.to_path_buf(),
-        root_dir: root_dir.clone(),
-    };
-
-    // Initialize permission manager
-    // In MCP mode, we can't prompt the user, so we use rules-based decisions only.
-    // If allow_all is set, we allow everything. Otherwise, we use default rules
-    // and deny anything that would require user prompting.
-    let bus = Bus::new();
-    let permission_manager = Arc::new(PermissionManager::new(bus));
-
-    // Add default rules for safe tools (read-only operations)
-    for rule in PermissionManager::default_rules() {
-        permission_manager.add_rule(rule).await;
-    }
-
-    // If allow_all is set, add a wildcard allow rule at the end
-    if allow_all {
-        permission_manager
-            .add_rule(PermissionRule::allow("*"))
-            .await;
-        info!("MCP server running with --allow-all: all tools permitted");
-    } else {
-        // For write operations, allow within the project directory
-        let project_path = format!("{}/**", root_dir.display());
-        permission_manager
-            .add_rule(PermissionRule::allow("write").with_path(&project_path))
-            .await;
-        permission_manager
-            .add_rule(PermissionRule::allow("edit").with_path(&project_path))
-            .await;
-        permission_manager
-            .add_rule(PermissionRule::allow("multiedit").with_path(&project_path))
-            .await;
-        permission_manager
-            .add_rule(PermissionRule::allow("patch").with_path(&project_path))
-            .await;
-        // Allow todowrite (no path needed)
-        permission_manager
-            .add_rule(PermissionRule::allow("todowrite"))
-            .await;
-        // Allow bash with limited scope (project directory)
-        permission_manager
-            .add_rule(PermissionRule::allow("bash").with_path(&project_path))
-            .await;
-        info!(
-            project_dir = %root_dir.display(),
-            "MCP server running with project-scoped permissions"
-        );
-    }
-
-    // Initialize snapshot store
-    let snapshot_dir = root_dir.join(".wonopcode").join("snapshots");
-    let snapshot_store =
-        SnapshotStore::new(snapshot_dir, root_dir.clone(), SnapshotConfig::default())
-            .await
-            .ok()
-            .map(Arc::new);
-
-    // Initialize file time tracker
-    let file_time = Arc::new(FileTimeState::new());
-
-    // Initialize sandbox if configured
-    // Keep the manager for cleanup on exit
-    let (sandbox_runtime, sandbox_manager): (
-        Option<Arc<dyn wonopcode_sandbox::SandboxRuntime>>,
-        Option<Arc<wonopcode_sandbox::SandboxManager>>,
-    ) = {
-        use wonopcode_core::Instance;
-        use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntimeType};
-
-        // Check if sandbox is explicitly enabled/disabled via environment variable
-        // This allows the parent process to override the config file setting
-        let sandbox_env_var = std::env::var("WONOPCODE_SANDBOX_ENABLED").ok();
-        let sandbox_env_override = sandbox_env_var.as_ref().map(|v| v == "true" || v == "1");
-
-        info!(
-            sandbox_env_var = ?sandbox_env_var,
-            sandbox_env_override = ?sandbox_env_override,
-            "MCP server checking sandbox env override"
-        );
-
-        // Load config to check sandbox settings
-        let instance = Instance::new(cwd).await.ok();
-        let sandbox_config = instance
-            .as_ref()
-            .map(|i| futures::executor::block_on(i.config()));
-
-        if let Some(config) = sandbox_config {
-            if let Some(sandbox_cfg) = &config.sandbox {
-                // Use env override if set, otherwise use config file setting
-                let sandbox_enabled =
-                    sandbox_env_override.unwrap_or_else(|| sandbox_cfg.enabled.unwrap_or(false));
-
-                info!(
-                    sandbox_enabled = sandbox_enabled,
-                    config_enabled = ?sandbox_cfg.enabled,
-                    "MCP server sandbox decision"
-                );
-
-                if sandbox_enabled {
-                    // Convert core config to sandbox config
-                    let runtime = match sandbox_cfg.runtime.as_deref() {
-                        Some("docker") => SandboxRuntimeType::Docker,
-                        Some("podman") => SandboxRuntimeType::Podman,
-                        Some("lima") => SandboxRuntimeType::Lima,
-                        Some("none") => SandboxRuntimeType::None,
-                        _ => SandboxRuntimeType::Auto,
-                    };
-
-                    let sandbox_config = SandboxConfig {
-                        enabled: true,
-                        runtime,
-                        image: sandbox_cfg.image.clone(),
-                        ..SandboxConfig::default()
-                    };
-
-                    match SandboxManager::new(sandbox_config, root_dir.clone()).await {
-                        Ok(manager) => {
-                            let manager = Arc::new(manager);
-                            if manager.is_available() {
-                                // Start the sandbox
-                                if let Err(e) = manager.start().await {
-                                    warn!(error = %e, "Failed to start sandbox in MCP server");
-                                    (None, Some(manager))
-                                } else {
-                                    info!("Sandbox started in MCP server");
-                                    let runtime = manager.runtime().await.ok();
-                                    (runtime, Some(manager))
-                                }
-                            } else {
-                                warn!("Sandbox enabled but no runtime available");
-                                (None, None)
-                            }
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Failed to initialize sandbox in MCP server");
-                            (None, None)
-                        }
-                    }
-                } else {
-                    (None, None)
-                }
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        }
-    };
-
-    // Use shared file todo store - reads path from WONOPCODE_TODO_FILE env var set by TUI.
-    // This enables cross-process communication between MCP server and TUI.
-    let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> =
-        if let Some(store) = wonopcode_tools::todo::SharedFileTodoStore::from_env() {
-            Arc::new(store)
-        } else {
-            // Fallback to in-memory if env var not set (shouldn't happen in normal usage)
-            Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
-        };
-
-    // Create tool registry with all tools
-    let mut tools = ToolRegistry::with_builtins();
-    tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-    tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoWriteTool::new(
-        todo_store.clone(),
-    )));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoReadTool::new(
-        todo_store,
-    )));
-    tools.register(Arc::new(wonopcode_tools::lsp::LspTool::new()));
-    // Note: TaskTool and SkillTool require more complex setup, skipping for now
-
-    // Create MCP server
-    let mut server = McpServer::new("wonopcode-tools", env!("CARGO_PKG_VERSION"))
-        .with_context(mcp_context.clone());
-
-    // Register all tools from the registry
-    let cancel = CancellationToken::new();
-    for tool in tools.all() {
-        let tool_clone = tool.clone();
-        let snapshot = snapshot_store.clone();
-        let ft = file_time.clone();
-        let ctx_clone = mcp_context.clone();
-        let cancel_clone = cancel.clone();
-        let perm = permission_manager.clone();
-        let sandbox = sandbox_runtime.clone();
-
-        // Create an executor that wraps the wonopcode tool
-        let has_sandbox = sandbox.is_some();
-        let executor = ToolExecutorWrapper {
-            tool: tool_clone,
-            snapshot,
-            file_time: ft,
-            cancel: cancel_clone,
-            permissions: perm,
-            sandbox,
-        };
-        // Note: ctx_clone is not used as execute() receives context as parameter
-        let _ = ctx_clone;
-
-        if has_sandbox {
-            info!(tool = tool.id(), "Registered tool with sandbox support");
-        }
-
-        server.register(wonopcode_mcp::McpServerTool {
-            name: tool.id().to_string(),
-            description: tool.description().to_string(),
-            parameters: tool.parameters_schema(),
-            executor: Arc::new(executor),
-        });
-    }
-
-    info!(
-        cwd = %cwd.display(),
-        session_id = %session_id,
-        tools = server.tool_count(),
-        "Starting MCP server"
-    );
-
-    // Run the server on stdio (async version since we're in an async context)
-    server.serve_stdio().await?;
-
-    // Cleanup: stop sandbox on exit
-    if let Some(ref manager) = sandbox_manager {
-        if manager.is_ready().await {
-            info!("Stopping sandbox container on MCP server exit");
-            if let Err(e) = manager.stop().await {
-                warn!(error = %e, "Failed to stop sandbox on MCP server exit");
-            } else {
-                info!("Sandbox container stopped");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Wrapper to execute wonopcode tools via MCP.
+/// Wrapper to execute wonopcode tools via MCP HTTP server.
 struct ToolExecutorWrapper {
     tool: Arc<dyn wonopcode_tools::Tool>,
     snapshot: Option<Arc<wonopcode_snapshot::SnapshotStore>>,
@@ -3176,6 +2883,8 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
         args: serde_json::Value,
         ctx: &wonopcode_mcp::McpToolContext,
     ) -> Result<String, String> {
+        use wonopcode_tools::ToolContext;
+
         let tool_name = self.tool.id();
 
         // Extract path from args for file-related tools
@@ -3186,24 +2895,24 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        // Check permission using rules only (no user prompting in MCP mode)
-        let allowed = self
+        // Check permission using rules (HTTP mode allows all by default)
+        let allowed_by_rules = self
             .permissions
             .check_rules_only(&ctx.session_id, tool_name, Some("execute"), path.as_deref())
             .await;
 
-        if !allowed {
+        if !allowed_by_rules {
             return Err(format!(
-                "Permission denied for tool '{}'. Path: {:?}. \
-                Use --allow-all flag when starting the MCP server to permit all operations.",
-                tool_name, path
+                "Permission denied for tool '{}'. HTTP MCP mode requires explicit permission rules.",
+                tool_name
             ));
         }
 
-        let tool_ctx = wonopcode_tools::ToolContext {
+        // Create tool context
+        let tool_ctx = ToolContext {
             session_id: ctx.session_id.clone(),
             message_id: "mcp".to_string(),
-            agent: "claude-cli".to_string(),
+            agent: "mcp-http".to_string(),
             abort: self.cancel.clone(),
             root_dir: ctx.root_dir.clone(),
             cwd: ctx.cwd.clone(),
@@ -3213,11 +2922,11 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
         };
 
         let has_sandbox = self.sandbox.is_some();
-        info!(
+        tracing::info!(
             tool = %tool_name,
             path = ?path,
             has_sandbox = has_sandbox,
-            "MCP tool execution permitted"
+            "MCP HTTP tool execution"
         );
 
         let _timing = wonopcode_util::TimingGuard::mcp_tool(tool_name);

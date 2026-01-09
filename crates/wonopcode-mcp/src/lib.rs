@@ -14,21 +14,19 @@
 //!
 //! # Supported Transports
 //!
-//! - **stdio**: Local servers via stdin/stdout
-//! - **SSE**: Remote servers via Server-Sent Events (HTTP)
+//! - **SSE**: Servers via Server-Sent Events (HTTP)
 //! - **OAuth**: Authentication for remote servers
 //!
 //! # Example
 //!
 //! ```no_run
-//! use wonopcode_mcp::{McpClient, ServerConfig, Transport};
+//! use wonopcode_mcp::{McpClient, ServerConfig};
 //!
 //! # async fn example() -> anyhow::Result<()> {
-//! // Configure a local MCP server
-//! let config = ServerConfig::stdio(
-//!     "filesystem",
-//!     "npx",
-//!     vec!["-y", "@modelcontextprotocol/server-filesystem"],
+//! // Configure an MCP server via HTTP/SSE
+//! let config = ServerConfig::sse(
+//!     "my-server",
+//!     "http://localhost:3000/mcp/sse",
 //! );
 //!
 //! // Create client and connect
@@ -64,8 +62,13 @@ pub use http_serve::{create_mcp_router, McpHttpState};
 pub use oauth::{
     OAuthConfig, OAuthProvider, OAuthTokens, OAUTH_CALLBACK_PATH, OAUTH_CALLBACK_PORT,
 };
-pub use protocol::{McpTool, ToolCallResult, ToolContent};
-pub use serve::{McpServer, McpServerTool, McpToolContext, McpToolExecutor};
+pub use protocol::{
+    McpTool, PermissionRequestParams, PermissionResponseParams, ToolCallResult, ToolContent,
+    METHOD_PERMISSION_REQUEST, METHOD_PERMISSION_RESPONSE,
+};
+pub use serve::{
+    McpServerTool, McpToolContext, McpToolExecutor, PendingPermissions, PERMISSION_TIMEOUT_SECS,
+};
 pub use server::ServerConfig;
 pub use sse::{SseConfig, SseTransport};
 pub use transport::Transport;

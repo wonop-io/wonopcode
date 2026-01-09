@@ -255,6 +255,67 @@ pub struct ResourceContent {
     pub blob: Option<String>,
 }
 
+// ============================================================================
+// Permission Protocol Extension (wonopcode-specific)
+// ============================================================================
+
+/// Permission request parameters.
+///
+/// Sent from server to client when a tool execution requires user approval.
+/// The client should present this to the user and respond with `PermissionResponseParams`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRequestParams {
+    /// Unique identifier for this permission request.
+    pub request_id: String,
+    /// Name of the tool requesting permission.
+    pub tool: String,
+    /// Action being performed (e.g., "execute", "read", "write").
+    pub action: String,
+    /// Human-readable description of what the tool wants to do.
+    pub description: String,
+    /// File path involved (for file operations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Additional details about the operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+/// Permission response parameters.
+///
+/// Sent from client to server in response to a permission request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionResponseParams {
+    /// The request_id from the corresponding PermissionRequestParams.
+    pub request_id: String,
+    /// Whether the permission is granted.
+    pub allow: bool,
+    /// If true, remember this decision for future requests to the same tool.
+    #[serde(default)]
+    pub remember: bool,
+}
+
+/// Permission response result.
+///
+/// Returned by the server after processing a permission response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionResponseResult {
+    /// Whether the response was processed successfully.
+    pub success: bool,
+    /// Optional message (e.g., error details).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Method name for permission request notifications.
+pub const METHOD_PERMISSION_REQUEST: &str = "wonopcode/permissionRequest";
+
+/// Method name for permission response requests.
+pub const METHOD_PERMISSION_RESPONSE: &str = "wonopcode/permissionResponse";
+
 #[cfg(test)]
 mod tests {
     use super::*;

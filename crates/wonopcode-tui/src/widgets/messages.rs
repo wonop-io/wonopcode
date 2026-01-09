@@ -2203,8 +2203,9 @@ impl MessagesWidget {
             let content = line
                 .trim_start_matches(&['+', '-', '@', ' '][..])
                 .to_string();
-            let truncated = if content.len() > 70 && !tool.expanded {
-                format!("{}...", &content[..67])
+            let truncated = if content.chars().count() > 70 && !tool.expanded {
+                let truncated_content: String = content.chars().take(67).collect();
+                format!("{}...", truncated_content)
             } else {
                 content
             };

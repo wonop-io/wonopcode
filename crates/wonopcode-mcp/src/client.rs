@@ -5,9 +5,9 @@ use crate::protocol::{
     CallToolParams, InitializeParams, InitializeResult, JsonRpcNotification, JsonRpcRequest,
     ListToolsResult, McpTool, ToolCallResult,
 };
-use crate::server::{ServerConfig, ServerState, TransportType};
+use crate::server::{ServerConfig, ServerState};
 use crate::sse::{SseConfig, SseTransport};
-use crate::transport::{StdioTransport, Transport};
+use crate::transport::Transport;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,40 +67,21 @@ impl McpClient {
         let name = config.name.clone();
         info!(server = %name, "Connecting to MCP server");
 
-        // Create transport based on config
-        let transport: Arc<dyn Transport> = match config.transport {
-            TransportType::Stdio => {
-                let command = config.command.as_ref().ok_or_else(|| {
-                    McpError::connection_failed("stdio transport requires command")
-                })?;
+        // Create SSE transport
+        // Extract auth token from headers if present
+        let auth_token = config
+            .headers
+            .get("Authorization")
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(|s| s.to_string());
 
-                Arc::new(
-                    StdioTransport::new(command, &config.args, &config.env, config.cwd.as_deref())
-                        .await?,
-                )
-            }
-            TransportType::Sse => {
-                let url = config
-                    .url
-                    .as_ref()
-                    .ok_or_else(|| McpError::connection_failed("SSE transport requires URL"))?;
-
-                // Extract auth token from headers if present
-                let auth_token = config
-                    .headers
-                    .get("Authorization")
-                    .and_then(|v| v.strip_prefix("Bearer "))
-                    .map(|s| s.to_string());
-
-                let sse_config = SseConfig {
-                    url: url.clone(),
-                    auth_token,
-                    timeout_secs: 60,
-                };
-
-                Arc::new(SseTransport::new(sse_config)?)
-            }
+        let sse_config = SseConfig {
+            url: config.url.clone(),
+            auth_token,
+            timeout_secs: 60,
         };
+
+        let transport: Arc<dyn Transport> = Arc::new(SseTransport::new(sse_config)?);
 
         // Initialize the connection
         let init_params = InitializeParams::default();

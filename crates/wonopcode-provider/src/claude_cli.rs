@@ -59,40 +59,45 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tracing::{debug, info, warn};
 
-/// MCP transport type.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum McpTransport {
-    /// Use stdio transport (spawns MCP server as child process).
-    #[default]
-    Stdio,
-    /// Use HTTP/SSE transport (connects to running HTTP server).
-    Http {
-        /// URL for the MCP SSE endpoint (e.g., "http://localhost:3000/mcp/sse").
-        url: String,
-    },
+/// MCP transport configuration.
+///
+/// MCP servers are connected via HTTP/SSE.
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpTransport {
+    /// URL for the MCP SSE endpoint (e.g., "http://localhost:3000/mcp/sse").
+    pub url: String,
 }
 
 /// Configuration for MCP (Model Context Protocol) integration.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct McpCliConfig {
-    /// Working directory for the MCP server.
-    pub cwd: Option<PathBuf>,
-    /// Session ID for tool context.
-    pub session_id: Option<String>,
     /// Whether to use custom tools via MCP.
     pub use_custom_tools: bool,
-    /// Whether sandbox is enabled. If None, MCP server will use its own config.
-    pub sandbox_enabled: Option<bool>,
-    /// Whether to allow all tool executions without permission checks.
-    /// When false, the MCP server will use project-scoped permissions
-    /// and deny operations that would require user prompting.
-    pub allow_all: bool,
-    /// Additional environment variables for the MCP server.
-    pub env: HashMap<String, String>,
+    /// MCP transport configuration (HTTP/SSE URL).
+    pub transport: McpTransport,
     /// External MCP servers to pass through.
     pub external_servers: HashMap<String, ExternalMcpServer>,
-    /// Transport type for MCP communication.
-    pub transport: McpTransport,
+}
+
+impl McpCliConfig {
+    /// Create a new MCP config with HTTP transport.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            use_custom_tools: true,
+            transport: McpTransport { url: url.into() },
+            external_servers: HashMap::new(),
+        }
+    }
+
+    /// Add an external MCP server.
+    pub fn with_external_server(
+        mut self,
+        name: impl Into<String>,
+        server: ExternalMcpServer,
+    ) -> Self {
+        self.external_servers.insert(name.into(), server);
+        self
+    }
 }
 
 /// Configuration for an external MCP server.
@@ -119,7 +124,8 @@ pub struct ExternalMcpServer {
 /// output and can reuse it for subsequent calls via `--resume`.
 pub struct ClaudeCliProvider {
     model: ModelInfo,
-    mcp_config: McpCliConfig,
+    /// MCP configuration, if using custom tools.
+    mcp_config: Option<McpCliConfig>,
     /// Captured session ID from the CLI for resumption.
     /// Protected by RwLock for interior mutability.
     session_id: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
@@ -135,11 +141,11 @@ impl ClaudeCliProvider {
         // Verify CLI is available
         Self::check_cli_available()?;
 
-        info!(model = %model.id, "Created Claude CLI provider");
+        info!(model = %model.id, "Created Claude CLI provider (no custom tools)");
 
         Ok(Self {
             model,
-            mcp_config: McpCliConfig::default(),
+            mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
@@ -156,7 +162,7 @@ impl ClaudeCliProvider {
 
         Ok(Self {
             model,
-            mcp_config,
+            mcp_config: Some(mcp_config),
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
@@ -320,103 +326,31 @@ impl ClaudeCliProvider {
     /// Generate MCP configuration file for custom tools.
     ///
     /// Returns the path to the generated config file.
+    /// Panics if mcp_config is None (should only be called when use_custom_tools is true).
     fn generate_mcp_config(&self) -> Result<PathBuf, ProviderError> {
-        let cwd = self
-            .mcp_config
-            .cwd
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let mcp_config = self.mcp_config.as_ref().ok_or_else(|| {
+            ProviderError::internal("MCP config required but not set".to_string())
+        })?;
 
         // Build MCP servers configuration
         let mut mcp_servers = serde_json::Map::new();
 
-        // Add our tools server based on transport type
-        match &self.mcp_config.transport {
-            McpTransport::Http { url } => {
-                // HTTP/SSE transport - connect to running server
-                mcp_servers.insert(
-                    "wonopcode-tools".to_string(),
-                    serde_json::json!({
-                        "type": "sse",
-                        "url": url
-                    }),
-                );
+        // Add our tools server via HTTP/SSE
+        mcp_servers.insert(
+            "wonopcode-tools".to_string(),
+            serde_json::json!({
+                "type": "sse",
+                "url": mcp_config.transport.url
+            }),
+        );
 
-                info!(
-                    url = %url,
-                    "Generated MCP HTTP config"
-                );
-            }
-            McpTransport::Stdio => {
-                // Stdio transport - spawn child process
-                let session_id = self
-                    .mcp_config
-                    .session_id
-                    .clone()
-                    .unwrap_or_else(|| "cli-default".to_string());
-
-                // Find the wonopcode executable
-                let wonopcode_exe =
-                    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("wonopcode"));
-
-                let mut env_vars = serde_json::Map::new();
-                env_vars.insert(
-                    "WONOPCODE_SESSION_ID".to_string(),
-                    serde_json::Value::String(session_id),
-                );
-                env_vars.insert(
-                    "WONOPCODE_ROOT_DIR".to_string(),
-                    serde_json::Value::String(cwd.to_string_lossy().to_string()),
-                );
-
-                // Pass sandbox enabled state to MCP server
-                // IMPORTANT: Always set this explicitly to prevent MCP server from falling back to config file.
-                // If sandbox_enabled is None, we default to false (sandbox must be explicitly started).
-                let sandbox_enabled = self.mcp_config.sandbox_enabled.unwrap_or(false);
-                env_vars.insert(
-                    "WONOPCODE_SANDBOX_ENABLED".to_string(),
-                    serde_json::Value::String(sandbox_enabled.to_string()),
-                );
-
-                // Add any additional env vars
-                for (k, v) in &self.mcp_config.env {
-                    env_vars.insert(k.clone(), serde_json::Value::String(v.clone()));
-                }
-
-                // Build MCP server args
-                let mut mcp_args: Vec<serde_json::Value> = vec![
-                    "mcp-serve".into(),
-                    "--cwd".into(),
-                    cwd.to_string_lossy().into_owned().into(),
-                ];
-
-                // Only add --allow-all if explicitly requested
-                // When false, the MCP server uses project-scoped permissions
-                if self.mcp_config.allow_all {
-                    mcp_args.push("--allow-all".into());
-                }
-
-                mcp_servers.insert(
-                    "wonopcode-tools".to_string(),
-                    serde_json::json!({
-                        "type": "stdio",
-                        "command": wonopcode_exe.to_string_lossy(),
-                        "args": mcp_args,
-                        "env": env_vars
-                    }),
-                );
-
-                info!(
-                    command = %wonopcode_exe.display(),
-                    cwd = %cwd.display(),
-                    allow_all = self.mcp_config.allow_all,
-                    "Generated MCP stdio config"
-                );
-            }
-        }
+        info!(
+            url = %mcp_config.transport.url,
+            "Generated MCP HTTP config"
+        );
 
         // Add external MCP servers
-        for (name, server) in &self.mcp_config.external_servers {
+        for (name, server) in &mcp_config.external_servers {
             let mut server_env = serde_json::Map::new();
             for (k, v) in &server.env {
                 server_env.insert(k.clone(), serde_json::Value::String(v.clone()));
@@ -425,10 +359,9 @@ impl ClaudeCliProvider {
             mcp_servers.insert(
                 name.clone(),
                 serde_json::json!({
-                    "type": "stdio",
-                    "command": server.command,
-                    "args": server.args,
-                    "env": server_env
+                    "type": "sse",
+                    "url": server.command,
+                    "headers": server_env
                 }),
             );
         }
@@ -460,8 +393,10 @@ impl ClaudeCliProvider {
         let mut patterns = vec!["mcp__wonopcode-tools__*".to_string()];
 
         // Add patterns for external servers
-        for name in self.mcp_config.external_servers.keys() {
-            patterns.push(format!("mcp__{}__*", name));
+        if let Some(mcp_config) = &self.mcp_config {
+            for name in mcp_config.external_servers.keys() {
+                patterns.push(format!("mcp__{}__*", name));
+            }
         }
 
         patterns.join(",")
@@ -644,10 +579,14 @@ impl LanguageModel for ClaudeCliProvider {
         // Check if we should use custom tools
         // Always use custom tools if configured, regardless of whether tools were passed
         // This ensures Claude CLI uses our MCP tools instead of its built-in tools
-        let use_custom_tools = self.mcp_config.use_custom_tools;
+        let use_custom_tools = self
+            .mcp_config
+            .as_ref()
+            .map(|c| c.use_custom_tools)
+            .unwrap_or(false);
 
         debug!(
-            mcp_use_custom_tools = self.mcp_config.use_custom_tools,
+            mcp_use_custom_tools = use_custom_tools,
             tools_count = options.tools.len(),
             use_custom_tools = use_custom_tools,
             "Checking custom tools config"
@@ -989,9 +928,14 @@ impl LanguageModel for ClaudeCliProvider {
 
 impl std::fmt::Debug for ClaudeCliProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let use_custom_tools = self
+            .mcp_config
+            .as_ref()
+            .map(|c| c.use_custom_tools)
+            .unwrap_or(false);
         f.debug_struct("ClaudeCliProvider")
             .field("model", &self.model.id)
-            .field("use_custom_tools", &self.mcp_config.use_custom_tools)
+            .field("use_custom_tools", &use_custom_tools)
             .finish()
     }
 }
@@ -1016,85 +960,15 @@ pub fn with_subscription_pricing(model: ModelInfo) -> ProviderResult<ClaudeCliPr
 ///
 /// This enables Claude CLI to use wonopcode's custom tools instead of
 /// its built-in tools. The tools are executed by our MCP server.
-///
-/// # Arguments
-/// * `model` - Model information
-/// * `cwd` - Working directory for the MCP server
-/// * `session_id` - Optional session ID for tool context
-/// * `sandbox_enabled` - Whether sandbox is enabled. If None, MCP server uses its own config.
-/// * `allow_all` - Whether to allow all tool executions without permission checks
-pub fn with_custom_tools(
-    model: ModelInfo,
-    cwd: Option<PathBuf>,
-    session_id: Option<String>,
-    sandbox_enabled: Option<bool>,
-    allow_all: bool,
-) -> ProviderResult<ClaudeCliProvider> {
-    with_custom_tools_and_env(
-        model,
-        cwd,
-        session_id,
-        sandbox_enabled,
-        allow_all,
-        HashMap::new(),
-    )
-}
-
-/// Create a ClaudeCliProvider with custom tools and additional environment variables.
-///
-/// This enables Claude CLI to use wonopcode's custom tools instead of
-/// its built-in tools. The tools are executed by our MCP server.
-///
-/// # Arguments
-/// * `model` - Model information
-/// * `cwd` - Working directory for the MCP server
-/// * `session_id` - Optional session ID for tool context
-/// * `sandbox_enabled` - Whether sandbox is enabled. If None, MCP server uses its own config.
-/// * `allow_all` - Whether to allow all tool executions without permission checks
-/// * `env` - Additional environment variables to pass to the MCP server
-pub fn with_custom_tools_and_env(
-    model: ModelInfo,
-    cwd: Option<PathBuf>,
-    session_id: Option<String>,
-    sandbox_enabled: Option<bool>,
-    allow_all: bool,
-    env: HashMap<String, String>,
-) -> ProviderResult<ClaudeCliProvider> {
-    let mut model = model;
-    // Zero out all costs since subscription covers usage
-    model.cost = ModelCost {
-        input: 0.0,
-        output: 0.0,
-        cache_read: 0.0,
-        cache_write: 0.0,
-    };
-
-    let mcp_config = McpCliConfig {
-        cwd,
-        session_id,
-        use_custom_tools: true,
-        sandbox_enabled,
-        allow_all,
-        env,
-        external_servers: HashMap::new(),
-        transport: McpTransport::Stdio,
-    };
-
-    ClaudeCliProvider::with_mcp_config(model, mcp_config)
-}
-
 /// Create a ClaudeCliProvider with custom tools over HTTP transport.
 ///
-/// This enables Claude CLI to connect to a running MCP HTTP server instead of
-/// spawning a child process. Use this when running in headless server mode.
+/// This enables Claude CLI to connect to a running MCP HTTP server.
+/// The tools are executed by our MCP server via HTTP/SSE.
 ///
 /// # Arguments
 /// * `model` - Model information
 /// * `mcp_url` - URL for the MCP SSE endpoint (e.g., "http://localhost:3000/mcp/sse")
-pub fn with_custom_tools_http(
-    model: ModelInfo,
-    mcp_url: String,
-) -> ProviderResult<ClaudeCliProvider> {
+pub fn with_custom_tools(model: ModelInfo, mcp_url: String) -> ProviderResult<ClaudeCliProvider> {
     let mut model = model;
     // Zero out all costs since subscription covers usage
     model.cost = ModelCost {
@@ -1104,16 +978,7 @@ pub fn with_custom_tools_http(
         cache_write: 0.0,
     };
 
-    let mcp_config = McpCliConfig {
-        cwd: None,
-        session_id: None,
-        use_custom_tools: true,
-        sandbox_enabled: None,
-        allow_all: true, // HTTP transport implies allow_all since permissions are server-side
-        env: HashMap::new(),
-        external_servers: HashMap::new(),
-        transport: McpTransport::Http { url: mcp_url },
-    };
+    let mcp_config = McpCliConfig::new(mcp_url);
 
     ClaudeCliProvider::with_mcp_config(model, mcp_config)
 }
@@ -1141,9 +1006,9 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_config_default() {
-        let config = McpCliConfig::default();
-        assert!(!config.use_custom_tools);
-        assert!(config.cwd.is_none());
+    fn test_mcp_config_new() {
+        let config = McpCliConfig::new("http://localhost:3000/mcp/sse");
+        assert!(config.use_custom_tools);
+        assert_eq!(config.transport.url, "http://localhost:3000/mcp/sse");
     }
 }

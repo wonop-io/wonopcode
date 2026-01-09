@@ -1,7 +1,7 @@
 //! HTTP/SSE transport for MCP server.
 //!
 //! This module implements the MCP protocol over HTTP using Server-Sent Events (SSE),
-//! allowing remote clients (like Claude CLI) to connect via HTTP instead of stdio.
+//! allowing clients (like Claude CLI) to connect to the MCP server.
 //!
 //! # Protocol
 //!
