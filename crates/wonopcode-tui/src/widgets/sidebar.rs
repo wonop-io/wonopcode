@@ -900,12 +900,14 @@ fn render_hyperlink(buffer: &mut Buffer, x: u16, y: u16, text: &str, url: &str) 
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
     } else if max_len <= 3 {
         ".".repeat(max_len)
     } else {
-        format!("{}...", &s[..max_len - 3])
+        let t: String = s.chars().take(max_len - 3).collect();
+        format!("{}...", t)
     }
 }
 

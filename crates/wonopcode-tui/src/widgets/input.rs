@@ -941,10 +941,11 @@ impl InputWidget {
 
         // Debug: log when we have paste regions
         if !paste_regions.is_empty() {
+            let preview: String = display_text.chars().take(100).collect();
             tracing::debug!(
                 "render_wrapped_text: {} paste regions, display_text={:?}",
                 paste_regions.len(),
-                &display_text[..display_text.len().min(100)]
+                preview
             );
         }
 

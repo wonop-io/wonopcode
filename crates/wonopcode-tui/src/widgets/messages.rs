@@ -622,8 +622,9 @@ fn shorten_url(url: &str) -> String {
     let url = url
         .trim_start_matches("https://")
         .trim_start_matches("http://");
-    if url.len() > 40 {
-        format!("{}...", &url[..37])
+    if url.chars().count() > 40 {
+        let truncated: String = url.chars().take(37).collect();
+        format!("{}...", truncated)
     } else {
         url.to_string()
     }
@@ -842,8 +843,9 @@ impl MessagesWidget {
                 if let Some(output) = &tool.output {
                     transcript.push_str("\n**Output:**\n```\n");
                     // Truncate long outputs
-                    if output.len() > 1000 {
-                        transcript.push_str(&output[..1000]);
+                    if output.chars().count() > 1000 {
+                        let truncated: String = output.chars().take(1000).collect();
+                        transcript.push_str(&truncated);
                         transcript.push_str("\n... (truncated)");
                     } else {
                         transcript.push_str(output);
@@ -2359,8 +2361,9 @@ impl MessagesWidget {
         } else {
             // Fallback to plain code style (no syntax highlighting)
             for content in content_lines {
-                let truncated = if content.len() > 70 && !tool.expanded {
-                    format!("{}...", &content[..67])
+                let truncated = if content.chars().count() > 70 && !tool.expanded {
+                    let t: String = content.chars().take(67).collect();
+                    format!("{}...", t)
                 } else {
                     content
                 };
@@ -2397,8 +2400,9 @@ impl MessagesWidget {
         let total = output_lines.len();
 
         for line in output_lines.iter().take(max_lines) {
-            let truncated = if line.len() > 70 && !tool.expanded {
-                format!("{}...", &line[..67])
+            let truncated = if line.chars().count() > 70 && !tool.expanded {
+                let t: String = line.chars().take(67).collect();
+                format!("{}...", t)
             } else {
                 line.to_string()
             };
@@ -2466,8 +2470,9 @@ impl MessagesWidget {
                 } else {
                     // Fallback to plain code style
                     for line in preview_lines.iter().take(max_lines) {
-                        let truncated = if line.len() > 70 && !tool.expanded {
-                            format!("{}...", &line[..67])
+                        let truncated = if line.chars().count() > 70 && !tool.expanded {
+                            let t: String = line.chars().take(67).collect();
+                            format!("{}...", t)
                         } else {
                             line.to_string()
                         };
@@ -2516,8 +2521,10 @@ impl MessagesWidget {
 
         let truncate_line = |line: &str, expanded: bool| -> String {
             let max_len = if expanded { 200 } else { 70 };
-            if line.len() > max_len {
-                format!("{}...", &line[..max_len.saturating_sub(3)])
+            let char_count = line.chars().count();
+            if char_count > max_len {
+                let truncated: String = line.chars().take(max_len.saturating_sub(3)).collect();
+                format!("{}...", truncated)
             } else {
                 line.to_string()
             }

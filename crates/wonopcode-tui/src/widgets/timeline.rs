@@ -75,8 +75,9 @@ impl TimelineEntry {
     /// Truncate preview to max length.
     fn truncated_preview(&self, max_len: usize) -> String {
         let preview = self.preview.replace('\n', " ");
-        if preview.len() > max_len {
-            format!("{}...", &preview[..max_len.saturating_sub(3)])
+        if preview.chars().count() > max_len {
+            let t: String = preview.chars().take(max_len.saturating_sub(3)).collect();
+            format!("{}...", t)
         } else {
             preview
         }
