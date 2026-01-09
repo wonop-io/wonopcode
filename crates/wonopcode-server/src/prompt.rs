@@ -374,7 +374,9 @@ impl ServerPromptRunner {
                     let base_name = name.split("__").last().unwrap_or(&name);
                     if base_name == "todowrite" {
                         if let Some(store) = &self.todo_store {
-                            if let Some(todos_array) = input_value.get("todos").and_then(|v| v.as_array()) {
+                            if let Some(todos_array) =
+                                input_value.get("todos").and_then(|v| v.as_array())
+                            {
                                 let todos: Vec<TodoItem> = todos_array
                                     .iter()
                                     .filter_map(|item| {
@@ -393,14 +395,22 @@ impl ServerPromptRunner {
                                             "low" => TodoPriority::Low,
                                             _ => TodoPriority::Medium,
                                         };
-                                        Some(TodoItem { id, content, status, priority })
+                                        Some(TodoItem {
+                                            id,
+                                            content,
+                                            status,
+                                            priority,
+                                        })
                                     })
                                     .collect();
 
                                 // Update the shared todo store
                                 let mut store_guard = store.blocking_write();
                                 *store_guard = todos;
-                                debug!("Updated shared todo store with {} items", store_guard.len());
+                                debug!(
+                                    "Updated shared todo store with {} items",
+                                    store_guard.len()
+                                );
                             }
                         }
                     }

@@ -1,6 +1,5 @@
 //! Service discovery (browsing) via mDNS using native Bonjour/Avahi.
 
-
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -31,7 +30,10 @@ impl Browser {
     /// # Arguments
     /// * `timeout` - How long to wait for responses
     pub fn browse(&self, timeout: Duration) -> Result<Vec<ServerInfo>, DiscoverError> {
-        info!(timeout_secs = timeout.as_secs_f32(), "Browsing for wonopcode servers");
+        info!(
+            timeout_secs = timeout.as_secs_f32(),
+            "Browsing for wonopcode servers"
+        );
 
         let service_type = ServiceType::new("wonopcode", "tcp")
             .map_err(|e| DiscoverError::ServiceInfo(e.to_string()))?;
@@ -62,12 +64,7 @@ impl Browser {
         }
 
         // Extract results
-        let result: Vec<ServerInfo> = servers
-            .lock()
-            .unwrap()
-            .values()
-            .cloned()
-            .collect();
+        let result: Vec<ServerInfo> = servers.lock().unwrap().values().cloned().collect();
 
         info!(count = result.len(), "Browse completed");
 
@@ -78,7 +75,10 @@ impl Browser {
     ///
     /// Returns as soon as a server is found, or None if timeout expires.
     pub fn browse_one(&self, timeout: Duration) -> Result<Option<ServerInfo>, DiscoverError> {
-        debug!(timeout_secs = timeout.as_secs_f32(), "Browsing for first wonopcode server");
+        debug!(
+            timeout_secs = timeout.as_secs_f32(),
+            "Browsing for first wonopcode server"
+        );
 
         let service_type = ServiceType::new("wonopcode", "tcp")
             .map_err(|e| DiscoverError::ServiceInfo(e.to_string()))?;
@@ -165,7 +165,7 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
 
     // Parse the address - if it's 0.0.0.0, we'll try to use the hostname
     let ip: IpAddr = address_str.parse().ok()?;
-    
+
     // For 0.0.0.0, use 127.0.0.1 for local connections
     // (The service is advertising on all interfaces, so localhost will work)
     let ip = if ip.is_unspecified() {
@@ -173,11 +173,11 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
     } else {
         ip
     };
-    
+
     let address = SocketAddr::new(ip, port);
 
     let name = discovery.name().to_string();
-    
+
     // Get the hostname for potential use in connections
     let hostname = {
         let h = discovery.host_name().trim_end_matches('.');
@@ -190,10 +190,22 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
 
     // Parse TXT record for properties
     let txt = discovery.txt();
-    let version = txt.as_ref().and_then(|t| t.get("version")).map(|s| s.to_string());
-    let model = txt.as_ref().and_then(|t| t.get("model")).map(|s| s.to_string());
-    let project = txt.as_ref().and_then(|t| t.get("project")).map(|s| s.to_string());
-    let cwd = txt.as_ref().and_then(|t| t.get("cwd")).map(|s| s.to_string());
+    let version = txt
+        .as_ref()
+        .and_then(|t| t.get("version"))
+        .map(|s| s.to_string());
+    let model = txt
+        .as_ref()
+        .and_then(|t| t.get("model"))
+        .map(|s| s.to_string());
+    let project = txt
+        .as_ref()
+        .and_then(|t| t.get("project"))
+        .map(|s| s.to_string());
+    let cwd = txt
+        .as_ref()
+        .and_then(|t| t.get("cwd"))
+        .map(|s| s.to_string());
     let auth_required = txt
         .as_ref()
         .and_then(|t| t.get("auth"))

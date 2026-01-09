@@ -907,7 +907,7 @@ fn truncate(s: &str, max_len: usize) -> String {
         ".".repeat(max_len)
     } else {
         let t: String = s.chars().take(max_len - 3).collect();
-        format!("{}...", t)
+        format!("{t}...")
     }
 }
 

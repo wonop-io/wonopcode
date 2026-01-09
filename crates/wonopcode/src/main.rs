@@ -573,6 +573,7 @@ async fn run_server(address: SocketAddr, cwd: &std::path::Path) -> anyhow::Resul
 }
 
 /// Run command - execute a single prompt and exit.
+#[allow(clippy::too_many_arguments)]
 async fn run_command(
     cwd: &std::path::Path,
     message: Vec<String>,
@@ -660,12 +661,7 @@ async fn run_command(
     // Priority: CLI arg > environment variable > config file
     let secret = cli_secret
         .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
-        .or_else(|| {
-            core_config
-                .server
-                .as_ref()
-                .and_then(|s| s.api_key.clone())
-        });
+        .or_else(|| core_config.server.as_ref().and_then(|s| s.api_key.clone()));
 
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
@@ -1746,12 +1742,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         .secret
         .clone()
         .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
-        .or_else(|| {
-            config_file
-                .server
-                .as_ref()
-                .and_then(|s| s.api_key.clone())
-        });
+        .or_else(|| config_file.server.as_ref().and_then(|s| s.api_key.clone()));
 
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
@@ -2832,10 +2823,11 @@ async fn run_headless(
                 });
 
                 // Build advertise config with metadata
-                let mut config = AdvertiseConfig::new(&name, address.port(), env!("CARGO_PKG_VERSION"))
-                    .with_model(&model_id)
-                    .with_cwd(cwd.display().to_string())
-                    .with_auth(secret.is_some());
+                let mut config =
+                    AdvertiseConfig::new(&name, address.port(), env!("CARGO_PKG_VERSION"))
+                        .with_model(&model_id)
+                        .with_cwd(cwd.display().to_string())
+                        .with_auth(secret.is_some());
 
                 // Add project name from the worktree directory name
                 if let Some(project_name) = cwd.file_name().and_then(|n| n.to_str()) {
@@ -2844,7 +2836,7 @@ async fn run_headless(
 
                 match advertiser.advertise(config) {
                     Ok(_) => {
-                        println!("mDNS: advertising as '{}'", name);
+                        println!("mDNS: advertising as '{name}'");
                         Some(advertiser)
                     }
                     Err(e) => {
@@ -2884,10 +2876,11 @@ async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
 
     println!("Discovering wonopcode servers on the local network...\n");
 
-    let browser = Browser::new().map_err(|e| anyhow::anyhow!("Failed to create mDNS browser: {}", e))?;
+    let browser =
+        Browser::new().map_err(|e| anyhow::anyhow!("Failed to create mDNS browser: {e}"))?;
     let servers = browser
         .browse(Duration::from_secs(3))
-        .map_err(|e| anyhow::anyhow!("Failed to browse for servers: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to browse for servers: {e}"))?;
 
     if servers.is_empty() {
         println!("No servers found.");
@@ -2902,10 +2895,10 @@ async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
         println!("  {}. {}", i + 1, server.name);
         println!("     Address: {}", server.address);
         if let Some(ref project) = server.project {
-            println!("     Project: {}", project);
+            println!("     Project: {project}");
         }
         if let Some(ref model) = server.model {
-            println!("     Model: {}", model);
+            println!("     Model: {model}");
         }
         if server.auth_required {
             println!("     Auth: required");

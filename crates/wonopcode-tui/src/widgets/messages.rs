@@ -624,7 +624,7 @@ fn shorten_url(url: &str) -> String {
         .trim_start_matches("http://");
     if url.chars().count() > 40 {
         let truncated: String = url.chars().take(37).collect();
-        format!("{}...", truncated)
+        format!("{truncated}...")
     } else {
         url.to_string()
     }
@@ -2363,7 +2363,7 @@ impl MessagesWidget {
             for content in content_lines {
                 let truncated = if content.chars().count() > 70 && !tool.expanded {
                     let t: String = content.chars().take(67).collect();
-                    format!("{}...", t)
+                    format!("{t}...")
                 } else {
                     content
                 };
@@ -2402,7 +2402,7 @@ impl MessagesWidget {
         for line in output_lines.iter().take(max_lines) {
             let truncated = if line.chars().count() > 70 && !tool.expanded {
                 let t: String = line.chars().take(67).collect();
-                format!("{}...", t)
+                format!("{t}...")
             } else {
                 line.to_string()
             };
@@ -2472,7 +2472,7 @@ impl MessagesWidget {
                     for line in preview_lines.iter().take(max_lines) {
                         let truncated = if line.chars().count() > 70 && !tool.expanded {
                             let t: String = line.chars().take(67).collect();
-                            format!("{}...", t)
+                            format!("{t}...")
                         } else {
                             line.to_string()
                         };
@@ -2524,7 +2524,7 @@ impl MessagesWidget {
             let char_count = line.chars().count();
             if char_count > max_len {
                 let truncated: String = line.chars().take(max_len.saturating_sub(3)).collect();
-                format!("{}...", truncated)
+                format!("{truncated}...")
             } else {
                 line.to_string()
             }

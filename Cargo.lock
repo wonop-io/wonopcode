@@ -4116,7 +4116,6 @@ dependencies = [
 name = "wonopcode-discover"
 version = "0.1.0"
 dependencies = [
- "hostname",
  "thiserror 1.0.69",
  "tracing",
  "zeroconf",

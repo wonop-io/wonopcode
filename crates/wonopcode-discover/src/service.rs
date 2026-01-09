@@ -30,7 +30,7 @@ impl std::fmt::Display for ServerInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} ({})", self.name, self.address)?;
         if let Some(ref project) = self.project {
-            write!(f, " [{}]", project)?;
+            write!(f, " [{project}]")?;
         }
         if self.auth_required {
             write!(f, " 🔒")?;

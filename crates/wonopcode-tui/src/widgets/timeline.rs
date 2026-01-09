@@ -77,7 +77,7 @@ impl TimelineEntry {
         let preview = self.preview.replace('\n', " ");
         if preview.chars().count() > max_len {
             let t: String = preview.chars().take(max_len.saturating_sub(3)).collect();
-            format!("{}...", t)
+            format!("{t}...")
         } else {
             preview
         }

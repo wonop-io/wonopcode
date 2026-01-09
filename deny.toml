@@ -30,6 +30,28 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# Clarify licenses for zeroconf crates that don't declare licenses in Cargo.toml
+# These are all MIT licensed per their repository LICENSE files
+[[licenses.clarify]]
+crate = "zeroconf"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+crate = "zeroconf-macros"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+crate = "bonjour-sys"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+crate = "avahi-sys"
+expression = "MIT"
+license-files = []
+
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"

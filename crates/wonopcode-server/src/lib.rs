@@ -8,7 +8,10 @@ pub mod routes;
 pub mod sse;
 pub mod state;
 
-pub use headless::{create_headless_router, create_headless_router_with_mcp, create_headless_router_with_options, HeadlessState};
+pub use headless::{
+    create_headless_router, create_headless_router_with_mcp, create_headless_router_with_options,
+    HeadlessState,
+};
 pub use prompt::{PromptEvent, PromptRequest, PromptResponse, ServerPromptRunner};
 pub use routes::create_router;
 pub use state::AppState;

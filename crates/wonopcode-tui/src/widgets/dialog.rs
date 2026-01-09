@@ -1879,8 +1879,12 @@ impl TimelineDialog {
                 // Truncate preview if needed
                 let max_preview = (dialog_width as usize).saturating_sub(20);
                 let preview = if item.preview.chars().count() > max_preview {
-                    let t: String = item.preview.chars().take(max_preview.saturating_sub(3)).collect();
-                    format!("{}...", t)
+                    let t: String = item
+                        .preview
+                        .chars()
+                        .take(max_preview.saturating_sub(3))
+                        .collect();
+                    format!("{t}...")
                 } else {
                     item.preview.clone()
                 };

@@ -535,7 +535,8 @@ async fn session_prompt(
     // Create runner with agent configuration and shared todo store
     let cwd = instance.directory().to_path_buf();
     let todo_store = Some(state.todo_store.clone());
-    let runner = ServerPromptRunner::with_agent(provider, cwd, cancel.clone(), agent_config, todo_store);
+    let runner =
+        ServerPromptRunner::with_agent(provider, cwd, cancel.clone(), agent_config, todo_store);
 
     // Clone state for cleanup
     let state_clone = state.clone();
