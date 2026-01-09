@@ -200,6 +200,7 @@ pub struct Runner {
 
 impl Runner {
     /// Create a new runner.
+    #[allow(dead_code)]
     pub fn new(
         config: RunnerConfig,
         instance: Instance,
@@ -244,7 +245,7 @@ impl Runner {
         // Note: skill and batch tools require async initialization, done in new_with_features
 
         // Use shared bus/permission_manager or create new ones
-        let bus = shared_bus.unwrap_or_else(Bus::new);
+        let bus = shared_bus.unwrap_or_default();
         let permission_manager = shared_permission_manager
             .unwrap_or_else(|| Arc::new(PermissionManager::new(bus.clone())));
 
@@ -272,6 +273,7 @@ impl Runner {
     }
 
     /// Create a new runner with snapshot support.
+    #[allow(dead_code)]
     pub async fn new_with_snapshots(
         config: RunnerConfig,
         instance: Instance,
@@ -280,6 +282,7 @@ impl Runner {
     }
 
     /// Create a new runner with full feature support (snapshots, MCP, skills).
+    #[allow(dead_code)]
     pub async fn new_with_features(
         config: RunnerConfig,
         instance: Instance,
@@ -303,7 +306,8 @@ impl Runner {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
 
-        let mut runner = Self::new_with_bus(config, instance, shared_bus, shared_permission_manager)?;
+        let mut runner =
+            Self::new_with_bus(config, instance, shared_bus, shared_permission_manager)?;
 
         // Load core config for permission and sandbox initialization
         let core_config = runner.instance.config().await;
@@ -790,8 +794,11 @@ impl Runner {
                     self.permission_manager.set_sandbox_running(true);
                     // Share sandbox runtime with permission manager for MCP tools
                     if let Ok(runtime) = manager.runtime().await {
-                        let wrapper: Arc<dyn std::any::Any + Send + Sync> = Arc::new(SandboxRuntimeWrapper(runtime));
-                        self.permission_manager.set_sandbox_runtime_any(Some(wrapper)).await;
+                        let wrapper: Arc<dyn std::any::Any + Send + Sync> =
+                            Arc::new(SandboxRuntimeWrapper(runtime));
+                        self.permission_manager
+                            .set_sandbox_runtime_any(Some(wrapper))
+                            .await;
                     }
                     (
                         wonopcode_tui::SandboxStatusUpdate {
@@ -1440,8 +1447,11 @@ impl Runner {
 
                     // Share sandbox runtime with permission manager for MCP tools
                     if let Ok(runtime) = manager.runtime().await {
-                        let wrapper: Arc<dyn std::any::Any + Send + Sync> = Arc::new(SandboxRuntimeWrapper(runtime));
-                        self.permission_manager.set_sandbox_runtime_any(Some(wrapper)).await;
+                        let wrapper: Arc<dyn std::any::Any + Send + Sync> =
+                            Arc::new(SandboxRuntimeWrapper(runtime));
+                        self.permission_manager
+                            .set_sandbox_runtime_any(Some(wrapper))
+                            .await;
                     }
 
                     self.bus

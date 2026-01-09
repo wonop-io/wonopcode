@@ -618,7 +618,8 @@ async fn run_command(
     // Create shared Bus and PermissionManager for MCP server and Runner
     // For 'run' command (non-interactive), we allow all operations since there's no TUI to prompt
     let shared_bus = wonopcode_core::bus::Bus::new();
-    let shared_permission_manager = Arc::new(wonopcode_core::PermissionManager::new(shared_bus.clone()));
+    let shared_permission_manager =
+        Arc::new(wonopcode_core::PermissionManager::new(shared_bus.clone()));
 
     // Initialize permission rules (allow-all for non-interactive mode)
     for rule in wonopcode_core::PermissionManager::default_rules() {
@@ -630,14 +631,18 @@ async fn run_command(
     }
 
     // Start background MCP HTTP server for Claude CLI integration
-    let (mcp_url, mcp_server_handle) =
-        match start_mcp_server(cwd, shared_permission_manager.clone()).await {
-            Ok((url, handle)) => (Some(url), Some(handle)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
-                (None, None)
-            }
-        };
+    let (mcp_url, mcp_server_handle) = match start_mcp_server(
+        cwd,
+        shared_permission_manager.clone(),
+    )
+    .await
+    {
+        Ok((url, handle)) => (Some(url), Some(handle)),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
+            (None, None)
+        }
+    };
 
     // Create runner config
     let allow_all_in_sandbox = core_config
@@ -660,7 +665,15 @@ async fn run_command(
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)
-    let runner = match Runner::new_with_shared(config.clone(), instance.clone(), None, Some(shared_bus), Some(shared_permission_manager)).await {
+    let runner = match Runner::new_with_shared(
+        config.clone(),
+        instance.clone(),
+        None,
+        Some(shared_bus),
+        Some(shared_permission_manager),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error creating runner: {e}");
@@ -1666,7 +1679,8 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     // Create shared Bus and PermissionManager for MCP server and Runner
     // This allows permission requests from MCP tools to reach the TUI for user prompts
     let shared_bus = wonopcode_core::bus::Bus::new();
-    let shared_permission_manager = Arc::new(wonopcode_core::PermissionManager::new(shared_bus.clone()));
+    let shared_permission_manager =
+        Arc::new(wonopcode_core::PermissionManager::new(shared_bus.clone()));
 
     // Initialize default permission rules
     for rule in wonopcode_core::PermissionManager::default_rules() {
@@ -1684,14 +1698,18 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     }
 
     // Start background MCP HTTP server for Claude CLI integration
-    let (mcp_url, mcp_server_handle) =
-        match start_mcp_server(cwd, shared_permission_manager.clone()).await {
-            Ok((url, handle)) => (Some(url), Some(handle)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
-                (None, None)
-            }
-        };
+    let (mcp_url, mcp_server_handle) = match start_mcp_server(
+        cwd,
+        shared_permission_manager.clone(),
+    )
+    .await
+    {
+        Ok((url, handle)) => (Some(url), Some(handle)),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to start MCP server, Claude CLI will not use custom tools");
+            (None, None)
+        }
+    };
 
     // Create runner config
     let allow_all_in_sandbox = config_file
@@ -1734,7 +1752,15 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         for rule in wonopcode_core::PermissionManager::sandbox_allow_all_rules() {
             shared_permission_manager.add_rule(rule).await;
         }
-        run_basic_mode(&instance, &config, cli.prompt, mcp_configs, shared_bus, shared_permission_manager).await?;
+        run_basic_mode(
+            &instance,
+            &config,
+            cli.prompt,
+            mcp_configs,
+            shared_bus,
+            shared_permission_manager,
+        )
+        .await?;
     } else {
         // TUI mode - pass shared permission manager for prompting
         run_tui_mode(
@@ -1780,14 +1806,21 @@ async fn run_basic_mode(
     println!();
 
     // Create runner with shared permission manager
-    let runner =
-        match Runner::new_with_shared(config.clone(), instance.clone(), mcp_configs, Some(shared_bus), Some(shared_permission_manager)).await {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Error creating runner: {e}");
-                return Ok(());
-            }
-        };
+    let runner = match Runner::new_with_shared(
+        config.clone(),
+        instance.clone(),
+        mcp_configs,
+        Some(shared_bus),
+        Some(shared_permission_manager),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error creating runner: {e}");
+            return Ok(());
+        }
+    };
 
     // Create channels
     let (action_tx, action_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1905,6 +1938,7 @@ async fn run_basic_mode(
 }
 
 /// Run in TUI mode.
+#[allow(clippy::too_many_arguments)]
 async fn run_tui_mode(
     instance: &wonopcode_core::Instance,
     config: RunnerConfig,
@@ -1939,7 +1973,15 @@ async fn run_tui_mode(
 
     // Create runner with shared Bus and PermissionManager
     // This allows MCP tools to send permission requests to the TUI for user prompts
-    let runner = match Runner::new_with_shared(config, instance.clone(), mcp_configs, Some(shared_bus), Some(shared_permission_manager)).await {
+    let runner = match Runner::new_with_shared(
+        config,
+        instance.clone(),
+        mcp_configs,
+        Some(shared_bus),
+        Some(shared_permission_manager),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error creating runner: {e}");
@@ -3034,9 +3076,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             .await;
 
         if !allowed {
-            return Err(format!(
-                "Permission denied for tool '{tool_name}'."
-            ));
+            return Err(format!("Permission denied for tool '{tool_name}'."));
         }
 
         // Get sandbox runtime from permission manager if sandbox is running
@@ -3137,7 +3177,8 @@ async fn start_mcp_server(
     let mcp_message_url = format!("http://{local_addr}/mcp/message");
 
     // Create MCP state with shared permission manager
-    let mcp_state = create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager)).await?;
+    let mcp_state =
+        create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager)).await?;
 
     // Create router with just MCP endpoints (no CORS needed for localhost)
     let mcp_router = create_mcp_router(mcp_state);

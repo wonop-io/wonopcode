@@ -190,7 +190,10 @@ impl PermissionManager {
     pub fn set_sandbox_running(&self, running: bool) {
         self.sandbox_running
             .store(running, std::sync::atomic::Ordering::SeqCst);
-        tracing::info!(sandbox_running = running, "Sandbox state updated in permission manager");
+        tracing::info!(
+            sandbox_running = running,
+            "Sandbox state updated in permission manager"
+        );
     }
 
     /// Set the sandbox runtime (for MCP tools to use).
