@@ -66,6 +66,26 @@ impl PermissionRule {
         }
     }
 
+    /// Create a new rule that asks the user.
+    pub fn ask(tool: impl Into<String>) -> Self {
+        Self {
+            tool: tool.into(),
+            action: None,
+            path: None,
+            decision: Decision::Ask,
+        }
+    }
+
+    /// Create a rule with a specific decision.
+    pub fn with_decision(tool: impl Into<String>, decision: Decision) -> Self {
+        Self {
+            tool: tool.into(),
+            action: None,
+            path: None,
+            decision,
+        }
+    }
+
     /// Add a path pattern to the rule.
     pub fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
@@ -122,16 +142,35 @@ pub struct PermissionCheck {
     pub details: serde_json::Value,
 }
 
+/// Pending permission request info, stored while waiting for user response.
+struct PendingRequest {
+    /// Response channel.
+    tx: oneshot::Sender<bool>,
+    /// Session ID for the request.
+    session_id: String,
+    /// Tool name.
+    tool: String,
+    /// Action being performed.
+    action: String,
+    /// Path involved (for file operations).
+    path: Option<String>,
+}
+
 /// Permission manager.
 pub struct PermissionManager {
     /// Global rules (from config).
     rules: RwLock<Vec<PermissionRule>>,
     /// Session-specific rules.
     session_rules: RwLock<HashMap<String, Vec<PermissionRule>>>,
-    /// Pending permission requests.
-    pending: RwLock<HashMap<String, oneshot::Sender<bool>>>,
+    /// Pending permission requests (keyed by request ID).
+    pending: RwLock<HashMap<String, PendingRequest>>,
     /// Event bus for permission events.
     bus: Bus,
+    /// Whether sandbox is currently running (shared state for MCP tools).
+    sandbox_running: std::sync::atomic::AtomicBool,
+    /// Shared sandbox runtime (set when sandbox starts).
+    /// Stored as Any so we can downcast to the concrete type when needed.
+    sandbox_runtime: RwLock<Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
 impl PermissionManager {
@@ -142,7 +181,44 @@ impl PermissionManager {
             session_rules: RwLock::new(HashMap::new()),
             pending: RwLock::new(HashMap::new()),
             bus,
+            sandbox_running: std::sync::atomic::AtomicBool::new(false),
+            sandbox_runtime: RwLock::new(None),
         }
+    }
+
+    /// Set sandbox running state and optionally the runtime.
+    pub fn set_sandbox_running(&self, running: bool) {
+        self.sandbox_running
+            .store(running, std::sync::atomic::Ordering::SeqCst);
+        tracing::info!(
+            sandbox_running = running,
+            "Sandbox state updated in permission manager"
+        );
+    }
+
+    /// Set the sandbox runtime (for MCP tools to use).
+    /// The runtime is stored as `Arc<dyn Any + Send + Sync>` to avoid circular dependencies.
+    pub async fn set_sandbox_runtime_any(
+        &self,
+        runtime: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) {
+        let mut sandbox = self.sandbox_runtime.write().await;
+        *sandbox = runtime;
+    }
+
+    /// Get the sandbox runtime (if running) as `Arc<dyn Any>`.
+    /// The caller is responsible for downcasting to the correct type.
+    pub async fn sandbox_runtime_any(
+        &self,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        let sandbox = self.sandbox_runtime.read().await;
+        sandbox.clone()
+    }
+
+    /// Check if sandbox is running.
+    pub fn is_sandbox_running(&self) -> bool {
+        self.sandbox_running
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Add a global rule.
@@ -166,9 +242,61 @@ impl PermissionManager {
         session_rules.remove(session_id);
     }
 
+    /// Clear all global rules.
+    pub async fn clear_rules(&self) {
+        let mut rules = self.rules.write().await;
+        rules.clear();
+    }
+
+    /// Reload rules from config.
+    ///
+    /// This clears existing rules and reloads them from the provided config.
+    /// Call this when settings are changed at runtime.
+    pub async fn reload_from_config(&self, config: &crate::config::PermissionConfig) {
+        // Clear existing rules
+        self.clear_rules().await;
+
+        // Re-add default rules (safe read-only operations)
+        for rule in Self::default_rules() {
+            self.add_rule(rule).await;
+        }
+
+        // Add config-based rules (these take precedence as they're added last)
+        for rule in Self::rules_from_config(config) {
+            self.add_rule(rule).await;
+        }
+
+        tracing::info!("Permission rules reloaded from config");
+    }
+
     /// Check permission for an action.
     /// Returns true if allowed, false if denied.
     pub async fn check(&self, session_id: &str, check: PermissionCheck) -> bool {
+        self.check_with_sandbox(session_id, check, false).await
+    }
+
+    /// Check permission for an action, considering sandbox state.
+    /// When `sandbox_running` is true, sandbox allow rules are applied.
+    /// Returns true if allowed, false if denied.
+    pub async fn check_with_sandbox(
+        &self,
+        session_id: &str,
+        check: PermissionCheck,
+        sandbox_running: bool,
+    ) -> bool {
+        // If sandbox is running, check sandbox rules first
+        if sandbox_running {
+            for rule in Self::sandbox_allow_all_rules() {
+                if rule.matches(&check.tool, Some(&check.action), check.path.as_deref()) {
+                    match rule.decision {
+                        Decision::Allow => return true,
+                        Decision::Deny => return false,
+                        Decision::Ask => break,
+                    }
+                }
+            }
+        }
+
         // First check session-specific rules
         let session_rules = self.session_rules.read().await;
         if let Some(rules) = session_rules.get(session_id) {
@@ -247,10 +375,19 @@ impl PermissionManager {
     async fn ask_user(&self, session_id: &str, check: PermissionCheck) -> bool {
         let (tx, rx) = oneshot::channel();
 
-        // Store the pending request
+        // Store the pending request with all info needed for "remember" functionality
         {
             let mut pending = self.pending.write().await;
-            pending.insert(check.id.clone(), tx);
+            pending.insert(
+                check.id.clone(),
+                PendingRequest {
+                    tx,
+                    session_id: session_id.to_string(),
+                    tool: check.tool.clone(),
+                    action: check.action.clone(),
+                    path: check.path.clone(),
+                },
+            );
         }
 
         // Log that we're waiting for user permission
@@ -265,8 +402,10 @@ impl PermissionManager {
             .publish(PermissionRequest {
                 id: check.id.clone(),
                 session_id: session_id.to_string(),
-                tool: check.tool,
-                action: check.action,
+                tool: check.tool.clone(),
+                action: check.action.clone(),
+                description: check.description,
+                path: check.path,
                 details: check.details,
             })
             .await;
@@ -287,14 +426,49 @@ impl PermissionManager {
 
     /// Respond to a permission request.
     pub async fn respond(&self, request_id: &str, allowed: bool, remember: bool) {
-        // Remove the pending request and send response
-        let tx = {
+        // Remove the pending request and get its info
+        let pending_req = {
             let mut pending = self.pending.write().await;
             pending.remove(request_id)
         };
 
-        if let Some(tx) = tx {
-            let _ = tx.send(allowed);
+        if let Some(req) = pending_req {
+            // Send response to the waiting task
+            let _ = req.tx.send(allowed);
+
+            // If "remember" is set, create a session rule for future requests
+            if remember {
+                let decision = if allowed {
+                    Decision::Allow
+                } else {
+                    Decision::Deny
+                };
+
+                let mut rule = PermissionRule {
+                    tool: req.tool.clone(),
+                    action: Some(req.action.clone()),
+                    path: None,
+                    decision,
+                };
+
+                // If the request had a path, create a pattern for it
+                // For now, we match the exact tool+action without path restriction
+                // A more sophisticated approach could create path-specific rules
+                if req.path.is_some() {
+                    // We could use: rule.path = Some(format!("{}*", path_dir));
+                    // But for simplicity, we'll just remember the tool+action
+                    rule.path = None;
+                }
+
+                tracing::info!(
+                    tool = %req.tool,
+                    action = %req.action,
+                    allowed = allowed,
+                    "Created session rule for remembered permission"
+                );
+
+                self.add_session_rule(&req.session_id, rule).await;
+            }
         }
 
         // Publish response event
@@ -360,6 +534,83 @@ impl PermissionManager {
             self.add_rule(rule).await;
         }
     }
+
+    /// Convert a config Permission to a permission Decision.
+    fn config_permission_to_decision(perm: crate::config::Permission) -> Decision {
+        match perm {
+            crate::config::Permission::Allow => Decision::Allow,
+            crate::config::Permission::Deny => Decision::Deny,
+            crate::config::Permission::Ask => Decision::Ask,
+        }
+    }
+
+    /// Create permission rules from config settings.
+    ///
+    /// This converts the user's permission settings from the config file
+    /// into permission rules that will be checked during tool execution.
+    /// These rules take precedence over default rules when added after them.
+    pub fn rules_from_config(config: &crate::config::PermissionConfig) -> Vec<PermissionRule> {
+        let mut rules = Vec::new();
+
+        // Edit permission - applies to file modification tools
+        if let Some(edit_perm) = config.edit {
+            let decision = Self::config_permission_to_decision(edit_perm);
+            // Apply to all file editing tools
+            rules.push(PermissionRule::with_decision("edit", decision));
+            rules.push(PermissionRule::with_decision("write", decision));
+            rules.push(PermissionRule::with_decision("multiedit", decision));
+            rules.push(PermissionRule::with_decision("patch", decision));
+        }
+
+        // Bash permission - applies to shell command execution
+        if let Some(bash_config) = &config.bash {
+            match bash_config {
+                crate::config::PermissionOrMap::Single(perm) => {
+                    let decision = Self::config_permission_to_decision(*perm);
+                    rules.push(PermissionRule::with_decision("bash", decision));
+                }
+                crate::config::PermissionOrMap::Map(map) => {
+                    // For pattern maps, we create rules for each pattern
+                    // The wildcard "*" pattern is the default
+                    for (pattern, perm) in map {
+                        let decision = Self::config_permission_to_decision(*perm);
+                        let mut rule = PermissionRule::with_decision("bash", decision);
+                        // Use the pattern as the action (command pattern)
+                        rule.action = Some(pattern.clone());
+                        rules.push(rule);
+                    }
+                }
+            }
+        }
+
+        // Webfetch permission - applies to web access tools
+        if let Some(webfetch_perm) = config.webfetch {
+            let decision = Self::config_permission_to_decision(webfetch_perm);
+            rules.push(PermissionRule::with_decision("webfetch", decision));
+            rules.push(PermissionRule::with_decision("websearch", decision));
+        }
+
+        // External directory permission - applies to file operations outside project
+        if let Some(ext_dir_perm) = config.external_directory {
+            let decision = Self::config_permission_to_decision(ext_dir_perm);
+            // These rules apply to file tools when accessing external paths
+            // The path pattern will be checked by the permission manager
+            // For now, we set up general rules; specific path checks happen during execution
+            let mut read_rule = PermissionRule::with_decision("read", decision);
+            read_rule.action = Some("external".to_string());
+            rules.push(read_rule);
+
+            let mut edit_rule = PermissionRule::with_decision("edit", decision);
+            edit_rule.action = Some("external".to_string());
+            rules.push(edit_rule);
+
+            let mut write_rule = PermissionRule::with_decision("write", decision);
+            write_rule.action = Some("external".to_string());
+            rules.push(write_rule);
+        }
+
+        rules
+    }
 }
 
 #[cfg(test)]
@@ -401,5 +652,94 @@ mod tests {
 
         // This would normally need a responder, but with the allow rule it should pass
         // We can't easily test the full flow without mocking
+    }
+
+    #[test]
+    fn test_rules_from_config() {
+        use crate::config::{Permission, PermissionConfig, PermissionOrMap};
+
+        // Test with edit permission set to Ask
+        let config = PermissionConfig {
+            edit: Some(Permission::Ask),
+            bash: None,
+            webfetch: None,
+            external_directory: None,
+            allow_all_in_sandbox: None,
+        };
+
+        let rules = PermissionManager::rules_from_config(&config);
+        assert_eq!(rules.len(), 4); // edit, write, multiedit, patch
+        assert!(rules.iter().all(|r| r.decision == Decision::Ask));
+        assert!(rules.iter().any(|r| r.tool == "edit"));
+        assert!(rules.iter().any(|r| r.tool == "write"));
+        assert!(rules.iter().any(|r| r.tool == "multiedit"));
+        assert!(rules.iter().any(|r| r.tool == "patch"));
+
+        // Test with webfetch permission set to Deny
+        let config = PermissionConfig {
+            edit: None,
+            bash: None,
+            webfetch: Some(Permission::Deny),
+            external_directory: None,
+            allow_all_in_sandbox: None,
+        };
+
+        let rules = PermissionManager::rules_from_config(&config);
+        assert_eq!(rules.len(), 2); // webfetch, websearch
+        assert!(rules.iter().all(|r| r.decision == Decision::Deny));
+        assert!(rules.iter().any(|r| r.tool == "webfetch"));
+        assert!(rules.iter().any(|r| r.tool == "websearch"));
+
+        // Test with bash permission as single value
+        let config = PermissionConfig {
+            edit: None,
+            bash: Some(PermissionOrMap::Single(Permission::Allow)),
+            webfetch: None,
+            external_directory: None,
+            allow_all_in_sandbox: None,
+        };
+
+        let rules = PermissionManager::rules_from_config(&config);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].tool, "bash");
+        assert_eq!(rules[0].decision, Decision::Allow);
+
+        // Test with bash permission as map
+        let mut bash_map = std::collections::HashMap::new();
+        bash_map.insert("ls*".to_string(), Permission::Allow);
+        bash_map.insert("rm*".to_string(), Permission::Ask);
+
+        let config = PermissionConfig {
+            edit: None,
+            bash: Some(PermissionOrMap::Map(bash_map)),
+            webfetch: None,
+            external_directory: None,
+            allow_all_in_sandbox: None,
+        };
+
+        let rules = PermissionManager::rules_from_config(&config);
+        assert_eq!(rules.len(), 2);
+        assert!(rules.iter().all(|r| r.tool == "bash"));
+        // Check that action patterns are set
+        assert!(rules.iter().any(|r| r.action == Some("ls*".to_string())));
+        assert!(rules.iter().any(|r| r.action == Some("rm*".to_string())));
+    }
+
+    #[tokio::test]
+    async fn test_config_rules_take_precedence() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Add default rule that allows webfetch
+        manager.add_rule(PermissionRule::allow("webfetch")).await;
+
+        // Add config rule that asks for webfetch (should take precedence)
+        manager.add_rule(PermissionRule::ask("webfetch")).await;
+
+        // Check that the rules are in the expected order
+        let rules = manager.rules.read().await;
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].decision, Decision::Allow); // Default rule
+        assert_eq!(rules[1].decision, Decision::Ask); // Config rule (takes precedence when checked in reverse)
     }
 }

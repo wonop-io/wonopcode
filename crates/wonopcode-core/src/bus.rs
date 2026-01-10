@@ -324,6 +324,11 @@ pub struct PermissionRequest {
     pub session_id: String,
     pub tool: String,
     pub action: String,
+    /// Human-readable description of what the tool wants to do.
+    pub description: String,
+    /// Path involved (for file operations).
+    pub path: Option<String>,
+    /// Additional details (JSON).
     pub details: serde_json::Value,
 }
 
