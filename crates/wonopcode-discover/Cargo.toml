@@ -7,5 +7,5 @@ license = "MIT"
 
 [dependencies]
 zeroconf = "0.17"
-thiserror = "1.0"
+thiserror = "2.0"
 tracing = "0.1"
