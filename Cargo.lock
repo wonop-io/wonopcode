@@ -4181,7 +4181,7 @@ dependencies = [
 name = "wonopcode-discover"
 version = "0.1.0"
 dependencies = [
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
  "zeroconf",
 ]
@@ -4267,7 +4267,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "uuid",
