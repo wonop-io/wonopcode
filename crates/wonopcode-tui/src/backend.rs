@@ -3,7 +3,9 @@
 //! This module provides a trait for backend communication, allowing the TUI
 //! to work with either a local runner (direct channels) or a remote server (HTTP/SSE).
 
-use crate::{AppAction, AppUpdate};
+use crate::{
+    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate,
+};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
@@ -80,6 +82,8 @@ pub struct RemoteBackend {
     base_url: String,
     api_key: Option<String>,
     connected: std::sync::atomic::AtomicBool,
+    /// Sender for updates (used for git operations that need to send updates back).
+    update_tx: Option<mpsc::UnboundedSender<AppUpdate>>,
 }
 
 impl RemoteBackend {
@@ -106,6 +110,7 @@ impl RemoteBackend {
             base_url,
             api_key,
             connected: std::sync::atomic::AtomicBool::new(false),
+            update_tx: None,
         })
     }
 
@@ -231,11 +236,271 @@ impl RemoteBackend {
 
         Ok(())
     }
+
+    /// Set the update sender for git operations.
+    pub fn set_update_sender(&mut self, update_tx: mpsc::UnboundedSender<AppUpdate>) {
+        self.update_tx = Some(update_tx);
+    }
+
+    /// Send an update via the update channel.
+    fn send_update(&self, update: AppUpdate) {
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(update);
+        }
+    }
+
+    /// Handle git status request.
+    async fn handle_git_status(&self) -> BackendResult<()> {
+        let url = format!("{}/git/status", self.base_url);
+        let resp = self
+            .add_auth(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let status: GitStatusResponse = resp
+                .json()
+                .await
+                .map_err(|e| BackendError::SerializationError(e.to_string()))?;
+
+            self.send_update(AppUpdate::GitStatusUpdated(GitStatusUpdate {
+                branch: status.branch,
+                ahead: status.ahead,
+                behind: status.behind,
+                files: status
+                    .files
+                    .into_iter()
+                    .map(|f| GitFileUpdate {
+                        path: f.path,
+                        status: f.status,
+                        staged: f.staged,
+                    })
+                    .collect(),
+            }));
+        } else {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            self.send_update(AppUpdate::GitOperationResult {
+                success: false,
+                message: error,
+            });
+        }
+        Ok(())
+    }
+
+    /// Handle git stage request.
+    async fn handle_git_stage(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/stage", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after staging
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git unstage request.
+    async fn handle_git_unstage(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/unstage", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after unstaging
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git checkout request.
+    async fn handle_git_checkout(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/checkout", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after checkout
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git commit request.
+    async fn handle_git_commit(&self, message: String) -> BackendResult<()> {
+        let url = format!("{}/git/commit", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "message": message }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let result_message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult {
+            success,
+            message: result_message,
+        });
+
+        // Refresh status after commit
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git history request.
+    async fn handle_git_history(&self) -> BackendResult<()> {
+        let url = format!("{}/git/history", self.base_url);
+        let resp = self
+            .add_auth(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let commits: Vec<GitCommitResponse> = resp
+                .json()
+                .await
+                .map_err(|e| BackendError::SerializationError(e.to_string()))?;
+
+            self.send_update(AppUpdate::GitHistoryUpdated(
+                commits
+                    .into_iter()
+                    .map(|c| GitCommitUpdate {
+                        id: c.id,
+                        message: c.message,
+                        author: c.author,
+                        date: c.date,
+                    })
+                    .collect(),
+            ));
+        } else {
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            self.send_update(AppUpdate::GitOperationResult {
+                success: false,
+                message: error,
+            });
+        }
+        Ok(())
+    }
+
+    /// Handle git push request.
+    async fn handle_git_push(&self) -> BackendResult<()> {
+        let url = format!("{}/git/push", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after push
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git pull request.
+    async fn handle_git_pull(&self) -> BackendResult<()> {
+        let url = format!("{}/git/pull", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after pull
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+}
+
+/// Response structure for git status endpoint.
+#[derive(Debug, serde::Deserialize)]
+struct GitStatusResponse {
+    branch: String,
+    ahead: usize,
+    behind: usize,
+    files: Vec<GitFileResponse>,
+}
+
+/// Response structure for individual git file.
+#[derive(Debug, serde::Deserialize)]
+struct GitFileResponse {
+    path: String,
+    status: String,
+    staged: bool,
+}
+
+/// Response structure for git commit info.
+#[derive(Debug, serde::Deserialize)]
+struct GitCommitResponse {
+    id: String,
+    message: String,
+    author: String,
+    date: String,
 }
 
 #[async_trait]
 impl Backend for RemoteBackend {
     async fn send_action(&self, action: AppAction) -> BackendResult<()> {
+        // Handle git actions specially via direct HTTP calls
+        match action {
+            AppAction::GitStatus => return self.handle_git_status().await,
+            AppAction::GitStage { paths } => return self.handle_git_stage(paths).await,
+            AppAction::GitUnstage { paths } => return self.handle_git_unstage(paths).await,
+            AppAction::GitCheckout { paths } => return self.handle_git_checkout(paths).await,
+            AppAction::GitCommit { message } => return self.handle_git_commit(message).await,
+            AppAction::GitHistory => return self.handle_git_history().await,
+            AppAction::GitPush => return self.handle_git_push().await,
+            AppAction::GitPull => return self.handle_git_pull().await,
+            _ => {}
+        }
+
+        // Handle other actions via protocol conversion
         let protocol_action = app_action_to_protocol(action)?;
         self.send_protocol_action(protocol_action).await
     }
@@ -311,6 +576,19 @@ fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol
         AppAction::OpenEditor { .. } => {
             return Err(BackendError::RequestFailed(
                 "OpenEditor is not supported for remote backend".to_string(),
+            ));
+        }
+        // Git actions are handled specially via HTTP, should not reach here
+        AppAction::GitStatus
+        | AppAction::GitStage { .. }
+        | AppAction::GitUnstage { .. }
+        | AppAction::GitCheckout { .. }
+        | AppAction::GitCommit { .. }
+        | AppAction::GitHistory
+        | AppAction::GitPush
+        | AppAction::GitPull => {
+            return Err(BackendError::RequestFailed(
+                "Git actions should be handled via HTTP endpoints".to_string(),
             ));
         }
     })

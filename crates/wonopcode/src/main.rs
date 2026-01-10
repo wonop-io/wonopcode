@@ -70,6 +70,16 @@ struct Cli {
     #[arg(long)]
     secret: Option<String>,
 
+    /// Project ID (e.g., organization project identifier) for tracking.
+    /// This is stored in the agent state and can be queried via /info endpoint.
+    #[arg(long)]
+    project_id: Option<String>,
+
+    /// Work ID (e.g., ticket ID, issue number) for tracking.
+    /// This is stored in the agent state and can be queried via /info endpoint.
+    #[arg(long)]
+    work_id: Option<String>,
+
     /// Advertise the server via mDNS for local network discovery (headless mode only).
     #[cfg(feature = "discover")]
     #[arg(long)]
@@ -2160,8 +2170,11 @@ async fn run_headless(
     let (app_action_tx, app_action_rx) = mpsc::unbounded_channel::<wonopcode_tui::AppAction>();
     let (app_update_tx, mut app_update_rx) = mpsc::unbounded_channel::<wonopcode_tui::AppUpdate>();
 
-    // Create headless state
-    let headless_state = HeadlessState::new(protocol_action_tx);
+    // Create shutdown channel for graceful server shutdown
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
+    // Create headless state with shutdown channel
+    let headless_state = HeadlessState::new(protocol_action_tx).with_shutdown_tx(shutdown_tx);
     let update_broadcast = headless_state.update_tx.clone();
     let state_handle = headless_state.current_state.clone();
     let _shutdown_flag = headless_state.shutdown.clone();
@@ -2171,6 +2184,8 @@ async fn run_headless(
         let mut state = state_handle.write().await;
         state.project = cwd.display().to_string();
         state.model = format!("{provider}/{model_id}");
+        state.project_id = cli.project_id.clone();
+        state.work_id = cli.work_id.clone();
 
         // Set initial sandbox state based on config
         if let Some(sandbox_cfg) = &config_file.sandbox {
@@ -2768,6 +2783,12 @@ async fn run_headless(
                     // it doesn't need to be broadcast from the headless server
                     continue;
                 }
+                // Git updates are handled via dedicated HTTP endpoints, not SSE
+                wonopcode_tui::AppUpdate::GitStatusUpdated(_)
+                | wonopcode_tui::AppUpdate::GitHistoryUpdated(_)
+                | wonopcode_tui::AppUpdate::GitOperationResult { .. } => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);
@@ -2846,8 +2867,20 @@ async fn run_headless(
 
     println!("Press Ctrl+C to stop");
 
-    // Run server until shutdown
-    axum::serve(listener, app).await?;
+    // Run server until shutdown (graceful shutdown on channel signal or Ctrl+C)
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            // Wait for either shutdown signal or Ctrl+C
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("Shutdown signal received");
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Ctrl+C received");
+                }
+            }
+        })
+        .await?;
 
     // Wait for runner to complete
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), runner_handle).await;

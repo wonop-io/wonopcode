@@ -8,11 +8,12 @@ use crate::{
     widgets::{
         autocomplete::{AutocompleteAction, FileAutocomplete},
         dialog::{
-            AgentDialog, AgentInfo, CommandPalette, HelpDialog, InputDialog, InputDialogResult,
-            McpDialog, McpServerInfo, McpStatus as DialogMcpStatus, ModelDialog, PerfDialog,
-            PermissionDialog, PermissionResult, SandboxAction, SandboxDialog,
-            SandboxState as DialogSandboxState, SessionDialog, SettingsDialog, SettingsResult,
-            StatusDialog, ThemeDialog, TimelineDialog, TimelineItem,
+            AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
+            GitFileDisplay, HelpDialog, InputDialog, InputDialogResult, McpDialog, McpServerInfo,
+            McpStatus as DialogMcpStatus, ModelDialog, PerfDialog, PermissionDialog,
+            PermissionResult, SandboxAction, SandboxDialog, SandboxState as DialogSandboxState,
+            SessionDialog, SettingsDialog, SettingsResult, StatusDialog, ThemeDialog,
+            TimelineDialog, TimelineItem,
         },
         footer::{FooterStatus, FooterWidget},
         help_overlay::{HelpContext, HelpOverlay},
@@ -111,6 +112,7 @@ pub enum ActiveDialog {
     Sandbox,
     Settings,
     Permission,
+    Git,
 }
 
 /// State of the application.
@@ -205,6 +207,22 @@ pub enum AppAction {
         /// Remember this decision for future requests.
         remember: bool,
     },
+    /// Git: Get repository status.
+    GitStatus,
+    /// Git: Stage files.
+    GitStage { paths: Vec<String> },
+    /// Git: Unstage files.
+    GitUnstage { paths: Vec<String> },
+    /// Git: Checkout (discard changes to) files.
+    GitCheckout { paths: Vec<String> },
+    /// Git: Create commit with message.
+    GitCommit { message: String },
+    /// Git: Get commit history.
+    GitHistory,
+    /// Git: Push to remote.
+    GitPush,
+    /// Git: Pull from remote.
+    GitPull,
 }
 
 /// Result from opening external editor.
@@ -286,6 +304,49 @@ pub enum AppUpdate {
         title: String,
         messages: Vec<DisplayMessage>,
     },
+    /// Git status update.
+    GitStatusUpdated(GitStatusUpdate),
+    /// Git history update.
+    GitHistoryUpdated(Vec<GitCommitUpdate>),
+    /// Git operation result (success/error).
+    GitOperationResult { success: bool, message: String },
+}
+
+/// Git status update from the runner.
+#[derive(Debug, Clone)]
+pub struct GitStatusUpdate {
+    /// Current branch name.
+    pub branch: String,
+    /// Commits ahead of upstream.
+    pub ahead: usize,
+    /// Commits behind upstream.
+    pub behind: usize,
+    /// Files with changes.
+    pub files: Vec<GitFileUpdate>,
+}
+
+/// Git file update.
+#[derive(Debug, Clone)]
+pub struct GitFileUpdate {
+    /// File path.
+    pub path: String,
+    /// Status indicator (M, A, D, R, ?, C).
+    pub status: String,
+    /// Whether file is staged.
+    pub staged: bool,
+}
+
+/// Git commit update.
+#[derive(Debug, Clone)]
+pub struct GitCommitUpdate {
+    /// Short commit hash.
+    pub id: String,
+    /// Commit message.
+    pub message: String,
+    /// Author name.
+    pub author: String,
+    /// Formatted date.
+    pub date: String,
 }
 
 /// Sandbox status update.
@@ -398,6 +459,8 @@ pub struct App {
     permission_dialog: Option<PermissionDialog>,
     /// Queue of pending permission requests (when dialog is already showing).
     permission_queue: std::collections::VecDeque<PermissionRequestUpdate>,
+    /// Git dialog.
+    git_dialog: Option<GitDialog>,
     /// Mode indicator.
     mode_indicator: ModeIndicator,
     /// Which-key overlay.
@@ -493,6 +556,7 @@ impl App {
             perf_dialog: None,
             permission_dialog: None,
             permission_queue: std::collections::VecDeque::new(),
+            git_dialog: None,
             mode_indicator: ModeIndicator::new(),
             which_key: WhichKeyOverlay::new(),
             help_overlay: HelpOverlay::new(),
@@ -962,6 +1026,49 @@ impl App {
             self.dialog = ActiveDialog::None;
             self.footer.set_pending_permissions(0);
         }
+    }
+
+    /// Handle git dialog result.
+    fn handle_git_dialog_result(&mut self, result: GitDialogResult) {
+        match result {
+            GitDialogResult::None => {}
+            GitDialogResult::RefreshStatus => {
+                let _ = self.action_tx.send(AppAction::GitStatus);
+            }
+            GitDialogResult::RefreshHistory => {
+                let _ = self.action_tx.send(AppAction::GitHistory);
+            }
+            GitDialogResult::Stage(paths) => {
+                let _ = self.action_tx.send(AppAction::GitStage { paths });
+            }
+            GitDialogResult::Unstage(paths) => {
+                let _ = self.action_tx.send(AppAction::GitUnstage { paths });
+            }
+            GitDialogResult::Checkout(paths) => {
+                let _ = self.action_tx.send(AppAction::GitCheckout { paths });
+            }
+            GitDialogResult::Commit(message) => {
+                let _ = self.action_tx.send(AppAction::GitCommit { message });
+            }
+            GitDialogResult::Push => {
+                let _ = self.action_tx.send(AppAction::GitPush);
+            }
+            GitDialogResult::Pull => {
+                let _ = self.action_tx.send(AppAction::GitPull);
+            }
+            GitDialogResult::Close => {
+                self.dialog = ActiveDialog::None;
+                self.git_dialog = None;
+            }
+        }
+    }
+
+    /// Show the git dialog.
+    pub fn show_git_dialog(&mut self) {
+        self.git_dialog = Some(GitDialog::new());
+        self.dialog = ActiveDialog::Git;
+        // Request initial status
+        let _ = self.action_tx.send(AppAction::GitStatus);
     }
 
     /// Show the settings dialog.
@@ -1934,6 +2041,11 @@ async function fetchUserData(userId) {
                     dialog.render(frame, area, &self.theme);
                 }
             }
+            ActiveDialog::Git => {
+                if let Some(dialog) = &mut self.git_dialog {
+                    dialog.render(frame, area, &self.theme);
+                }
+            }
         }
     }
 
@@ -2597,6 +2709,12 @@ async function fetchUserData(userId) {
                     }
                 }
             }
+            ActiveDialog::Git => {
+                if let Some(dialog) = &mut self.git_dialog {
+                    let result = dialog.handle_key(key);
+                    self.handle_git_dialog_result(result);
+                }
+            }
             ActiveDialog::Help | ActiveDialog::Status | ActiveDialog::None => {
                 // These dialogs close on any key press (already handled escape above)
             }
@@ -2634,6 +2752,10 @@ async function fetchUserData(userId) {
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 // Toggle sidebar
                 self.sidebar.toggle();
+            }
+            KeyCode::Char('g') | KeyCode::Char('G') => {
+                // Git dialog
+                self.show_git_dialog();
             }
             KeyCode::Char('t') | KeyCode::Char('T') => {
                 // Theme select
@@ -2802,6 +2924,10 @@ async function fetchUserData(userId) {
             }
             "sandbox" => {
                 self.show_sandbox_dialog();
+                return;
+            }
+            "git" => {
+                self.show_git_dialog();
                 return;
             }
             "add_test_messages" => {
@@ -3108,6 +3234,46 @@ async function fetchUserData(userId) {
                 // Move to session view if we have messages
                 if self.messages.message_count() > 0 {
                     self.route = Route::Session;
+                }
+            }
+            AppUpdate::GitStatusUpdated(status) => {
+                if let Some(dialog) = &mut self.git_dialog {
+                    let files: Vec<GitFileDisplay> = status
+                        .files
+                        .iter()
+                        .map(|f| GitFileDisplay {
+                            path: f.path.clone(),
+                            status: f.status.clone(),
+                            staged: f.staged,
+                        })
+                        .collect();
+                    dialog.set_status(status.branch, status.ahead, status.behind, files);
+                }
+            }
+            AppUpdate::GitHistoryUpdated(commits) => {
+                if let Some(dialog) = &mut self.git_dialog {
+                    let commits: Vec<GitCommitDisplay> = commits
+                        .iter()
+                        .map(|c| GitCommitDisplay {
+                            id: c.id.clone(),
+                            message: c.message.clone(),
+                            author: c.author.clone(),
+                            date: c.date.clone(),
+                        })
+                        .collect();
+                    dialog.set_history(commits);
+                }
+            }
+            AppUpdate::GitOperationResult { success, message } => {
+                if success {
+                    self.toasts.push(Toast::success(&message));
+                    // Refresh status after successful operation
+                    let _ = self.action_tx.send(AppAction::GitStatus);
+                } else {
+                    self.toasts.push(Toast::error(&message));
+                }
+                if let Some(dialog) = &mut self.git_dialog {
+                    dialog.set_message(&message);
                 }
             }
         }

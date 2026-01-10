@@ -14,7 +14,7 @@
 //! the key via `X-API-Key` header or `Authorization: Bearer <key>` header.
 
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{
@@ -26,6 +26,8 @@ use axum::{
 };
 use futures::stream::Stream;
 use serde::Deserialize;
+
+use crate::git::GitOperations;
 use std::{convert::Infallible, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -48,6 +50,8 @@ pub struct HeadlessState {
     pub current_state: Arc<RwLock<ProtocolState>>,
     /// Flag to track if server should shutdown.
     pub shutdown: Arc<RwLock<bool>>,
+    /// Sender to trigger server shutdown.
+    pub shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
 impl HeadlessState {
@@ -59,7 +63,14 @@ impl HeadlessState {
             update_tx,
             current_state: Arc::new(RwLock::new(ProtocolState::default())),
             shutdown: Arc::new(RwLock::new(false)),
+            shutdown_tx: None,
         }
+    }
+
+    /// Set the shutdown sender for graceful server shutdown.
+    pub fn with_shutdown_tx(mut self, tx: mpsc::Sender<()>) -> Self {
+        self.shutdown_tx = Some(tx);
+        self
     }
 
     /// Send an update to all connected clients.
@@ -186,6 +197,8 @@ pub fn create_headless_router_with_options(
 
     // Protected routes that require authentication
     let mut protected_router = Router::new()
+        // Info endpoint for quick agent identification
+        .route("/info", get(get_info))
         // State endpoint for initial sync
         .route("/state", get(get_state))
         // SSE events stream
@@ -215,6 +228,16 @@ pub fn create_headless_router_with_options(
         .route("/action/settings", post(action_settings))
         .route("/action/permission", post(action_permission))
         .route("/action/quit", post(action_quit))
+        .route("/action/shutdown", post(action_shutdown))
+        // Git operations
+        .route("/git/status", get(git_status))
+        .route("/git/stage", post(git_stage))
+        .route("/git/unstage", post(git_unstage))
+        .route("/git/checkout", post(git_checkout))
+        .route("/git/commit", post(git_commit))
+        .route("/git/history", get(git_history))
+        .route("/git/push", post(git_push))
+        .route("/git/pull", post(git_pull))
         .with_state(state);
 
     // Add MCP routes if state is provided (with API key auth applied via MCP's own middleware)
@@ -278,6 +301,19 @@ pub fn create_headless_router_with_options(
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+/// Get basic agent info (name, working directory, project_id, work_id).
+/// This is a lightweight endpoint for quick identification.
+async fn get_info(State(state): State<HeadlessState>) -> impl IntoResponse {
+    let current = state.current_state.read().await;
+    Json(serde_json::json!({
+        "name": current.agent,
+        "project": current.project,
+        "model": current.model,
+        "project_id": current.project_id,
+        "work_id": current.work_id,
+    }))
 }
 
 async fn get_state(State(state): State<HeadlessState>) -> impl IntoResponse {
@@ -643,5 +679,299 @@ async fn action_quit(State(state): State<HeadlessState>) -> impl IntoResponse {
     match state.action_tx.send(Action::Quit) {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// Shutdown endpoint - triggers graceful server shutdown.
+/// This is used by WARP to stop agents it has spawned.
+async fn action_shutdown(State(state): State<HeadlessState>) -> impl IntoResponse {
+    info!("Received shutdown request");
+    *state.shutdown.write().await = true;
+
+    // Try to send quit action to runner
+    let _ = state.action_tx.send(Action::Quit);
+
+    // Trigger server shutdown if channel is configured
+    if let Some(ref tx) = state.shutdown_tx {
+        if tx.send(()).await.is_ok() {
+            info!("Server shutdown initiated");
+            return Json(serde_json::json!({ "status": "shutting_down" }));
+        }
+    }
+
+    // Even without shutdown channel, mark as shutting down
+    Json(serde_json::json!({ "status": "shutdown_requested" }))
+}
+
+// ============================================================================
+// Git Operations Endpoints
+// ============================================================================
+
+/// Get git repository status.
+async fn git_status(
+    State(state): State<HeadlessState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.status() {
+        Ok(status) => Ok(Json(status)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct GitStageRequest {
+    /// Paths to stage. If empty, stages all modified files.
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
+/// Stage files in the git index.
+async fn git_stage(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitStageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.stage(&req.paths) {
+        Ok(()) => Ok(Json(serde_json::json!({ "success": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct GitUnstageRequest {
+    /// Paths to unstage. If empty, unstages all staged files.
+    #[serde(default)]
+    paths: Vec<String>,
+}
+
+/// Unstage files from the git index.
+async fn git_unstage(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitUnstageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.unstage(&req.paths) {
+        Ok(()) => Ok(Json(serde_json::json!({ "success": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct GitCheckoutRequest {
+    /// Paths to checkout (discard changes). Required - must specify files.
+    paths: Vec<String>,
+}
+
+/// Checkout (discard changes to) files.
+async fn git_checkout(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitCheckoutRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    if req.paths.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Must specify files to checkout" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.checkout(&req.paths) {
+        Ok(()) => Ok(Json(serde_json::json!({ "success": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct GitCommitRequest {
+    /// Commit message.
+    message: String,
+}
+
+/// Create a git commit.
+async fn git_commit(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitCommitRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    if req.message.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Commit message cannot be empty" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.commit(&req.message) {
+        Ok(commit) => Ok(Json(serde_json::json!({
+            "success": true,
+            "commit": commit,
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct GitHistoryQuery {
+    /// Maximum number of commits to return (default: 50).
+    #[serde(default = "default_history_limit")]
+    limit: usize,
+}
+
+fn default_history_limit() -> usize {
+    50
+}
+
+/// Get git commit history.
+async fn git_history(
+    State(state): State<HeadlessState>,
+    Query(query): Query<GitHistoryQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.history(query.limit) {
+        Ok(history) => Ok(Json(history)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct GitPushRequest {
+    /// Remote name (default: "origin").
+    remote: Option<String>,
+    /// Branch name (default: current branch).
+    branch: Option<String>,
+}
+
+/// Push to remote.
+async fn git_push(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitPushRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.push(req.remote.as_deref(), req.branch.as_deref()) {
+        Ok(()) => Ok(Json(serde_json::json!({ "success": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct GitPullRequest {
+    /// Remote name (default: "origin").
+    remote: Option<String>,
+    /// Branch name (default: current branch).
+    branch: Option<String>,
+}
+
+/// Pull from remote.
+async fn git_pull(
+    State(state): State<HeadlessState>,
+    Json(req): Json<GitPullRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let current = state.current_state.read().await;
+    let working_dir = &current.project;
+
+    if working_dir.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No working directory set" })),
+        ));
+    }
+
+    let ops = GitOperations::new(working_dir);
+    match ops.pull(req.remote.as_deref(), req.branch.as_deref()) {
+        Ok(()) => Ok(Json(serde_json::json!({ "success": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
     }
 }

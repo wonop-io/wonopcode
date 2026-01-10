@@ -37,6 +37,10 @@ tower-http.workspace = true
 # For secure API key comparison
 subtle = "2.5"
 
+# Git operations
+git2.workspace = true
+chrono.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 
