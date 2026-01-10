@@ -104,6 +104,7 @@ impl SlashCommandAutocomplete {
             SlashCommand::new("mcp", "Toggle MCP servers"),
             SlashCommand::new("sandbox", "Manage sandbox"),
             SlashCommand::new("connect", "Connect to a provider"),
+            SlashCommand::new("git", "Git operations (stage, commit, push, pull)"),
             // UI commands
             SlashCommand::new("editor", "Open input in external editor"),
             SlashCommand::new("sidebar", "Toggle the sidebar"),

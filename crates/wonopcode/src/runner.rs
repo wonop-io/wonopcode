@@ -27,11 +27,12 @@ use wonopcode_provider::{
     BoxedLanguageModel, GenerateOptions, Message as ProviderMessage, ToolDefinition,
 };
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
+use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
 use wonopcode_tools::{mcp::McpToolsBuilder, task, todo, ToolRegistry};
 use wonopcode_tui::{
-    AppAction, AppUpdate, LspStatusUpdate, McpStatusUpdate, ModifiedFileUpdate,
-    PermissionRequestUpdate, SaveScope, TodoUpdate,
+    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate,
+    McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, SaveScope, TodoUpdate,
 };
 use wonopcode_util::perf;
 use wonopcode_util::FileTimeState;
@@ -1372,6 +1373,30 @@ impl Runner {
                         .respond(&request_id, allow, remember)
                         .await;
                 }
+                AppAction::GitStatus => {
+                    self.handle_git_status(&update_tx).await;
+                }
+                AppAction::GitStage { paths } => {
+                    self.handle_git_stage(&update_tx, paths).await;
+                }
+                AppAction::GitUnstage { paths } => {
+                    self.handle_git_unstage(&update_tx, paths).await;
+                }
+                AppAction::GitCheckout { paths } => {
+                    self.handle_git_checkout(&update_tx, paths).await;
+                }
+                AppAction::GitCommit { message } => {
+                    self.handle_git_commit(&update_tx, message).await;
+                }
+                AppAction::GitHistory => {
+                    self.handle_git_history(&update_tx).await;
+                }
+                AppAction::GitPush => {
+                    self.handle_git_push(&update_tx).await;
+                }
+                AppAction::GitPull => {
+                    self.handle_git_pull(&update_tx).await;
+                }
             }
         }
 
@@ -2690,6 +2715,230 @@ impl Runner {
         }
 
         Ok(final_text)
+    }
+
+    /// Handle git status action.
+    async fn handle_git_status(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.status() {
+            Ok(status) => {
+                let _ = update_tx.send(AppUpdate::GitStatusUpdated(GitStatusUpdate {
+                    branch: status.branch,
+                    ahead: status.ahead,
+                    behind: status.behind,
+                    files: status
+                        .files
+                        .into_iter()
+                        .map(|f| GitFileUpdate {
+                            path: f.path,
+                            status: match f.status {
+                                wonopcode_server::GitFileState::Modified => "modified".to_string(),
+                                wonopcode_server::GitFileState::Added => "added".to_string(),
+                                wonopcode_server::GitFileState::Deleted => "deleted".to_string(),
+                                wonopcode_server::GitFileState::Renamed => "renamed".to_string(),
+                                wonopcode_server::GitFileState::Untracked => {
+                                    "untracked".to_string()
+                                }
+                                wonopcode_server::GitFileState::Conflicted => {
+                                    "conflicted".to_string()
+                                }
+                            },
+                            staged: f.staged,
+                        })
+                        .collect(),
+                }));
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git stage action.
+    async fn handle_git_stage(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.stage(&paths) {
+            Ok(()) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: format!("Staged {} file(s)", paths.len()),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git unstage action.
+    async fn handle_git_unstage(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.unstage(&paths) {
+            Ok(()) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: format!("Unstaged {} file(s)", paths.len()),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git checkout action.
+    async fn handle_git_checkout(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.checkout(&paths) {
+            Ok(()) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: format!("Discarded changes to {} file(s)", paths.len()),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git commit action.
+    async fn handle_git_commit(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        message: String,
+    ) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.commit(&message) {
+            Ok(commit_info) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: format!("Committed: {}", commit_info.id),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git history action.
+    async fn handle_git_history(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.history(50) {
+            Ok(commits) => {
+                let _ = update_tx.send(AppUpdate::GitHistoryUpdated(
+                    commits
+                        .into_iter()
+                        .map(|c| GitCommitUpdate {
+                            id: c.id,
+                            message: c.message,
+                            author: c.author,
+                            date: c.timestamp,
+                        })
+                        .collect(),
+                ));
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git push action.
+    async fn handle_git_push(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.push(None, None) {
+            Ok(()) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: "Push successful".to_string(),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Handle git pull action.
+    async fn handle_git_pull(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
+        let cwd = self.instance.directory();
+        let git = GitOperations::new(cwd);
+
+        match git.pull(None, None) {
+            Ok(()) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: true,
+                    message: "Pull successful".to_string(),
+                });
+                // Refresh status
+                self.handle_git_status(update_tx).await;
+            }
+            Err(e) => {
+                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                    success: false,
+                    message: e.to_string(),
+                });
+            }
+        }
     }
 }
 

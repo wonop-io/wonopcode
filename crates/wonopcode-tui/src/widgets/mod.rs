@@ -24,8 +24,9 @@ pub mod which_key;
 
 pub use autocomplete::{AutocompleteAction, FileAutocomplete};
 pub use dialog::{
-    CommandPalette, DialogItem, HelpDialog, ModelDialog, PerfDialog, SelectDialog, SessionDialog,
-    ThemeDialog, TimelineDialog, TimelineItem,
+    CommandPalette, DialogItem, GitCommitDisplay, GitDialog, GitDialogResult, GitFileDisplay,
+    GitView, HelpDialog, ModelDialog, PerfDialog, SelectDialog, SessionDialog, ThemeDialog,
+    TimelineDialog, TimelineItem,
 };
 pub use diff::{simple_diff, DiffHunk, DiffLine, DiffNavAction, DiffWidget, FileDiff};
 pub use footer::{FooterStatus, FooterWidget};

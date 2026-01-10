@@ -92,8 +92,8 @@ globwalk = "0.9"
 ignore = "0.4"
 similar = "2"
 
-# Git
-git2 = "0.20"
+# Git (vendored-openssl for cross-compilation support)
+git2 = { version = "0.20", features = ["vendored-openssl"] }
 
 # Parsing
 tree-sitter = "0.24"

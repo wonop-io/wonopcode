@@ -16,6 +16,14 @@ pub struct State {
     /// Current agent name.
     pub agent: String,
 
+    /// Optional project ID (e.g., organization project identifier).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+
+    /// Optional work ID (e.g., ticket ID, issue number).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_id: Option<String>,
+
     /// Current session state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionState>,
@@ -225,6 +233,8 @@ impl Default for State {
             project: String::new(),
             model: String::new(),
             agent: "default".to_string(),
+            project_id: None,
+            work_id: None,
             session: None,
             sandbox: SandboxState::default(),
             mcp_servers: Vec::new(),
