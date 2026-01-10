@@ -667,7 +667,6 @@ async fn run_command(
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
         shared_permission_manager.clone(),
-        secret.clone(),
     )
     .await
     {
@@ -1763,8 +1762,8 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         test_provider_settings: None,
         allow_all: false,
         allow_all_in_sandbox,
-        mcp_url, // Use background MCP server for custom tools
-        mcp_secret: secret,
+        mcp_url,          // Use background MCP server for custom tools
+        mcp_secret: None, // No auth needed for local MCP server in TUI mode
     };
 
     // Get MCP config from config file
@@ -2780,6 +2779,7 @@ async fn run_headless(
 
     // Create router with MCP support and secret authentication
     // The secret is passed separately so it can be applied to all endpoints
+    let has_auth = secret.is_some();
     let app = create_headless_router_with_options(headless_state, mcp_state, secret.clone());
 
     // Start server

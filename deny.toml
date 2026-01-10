@@ -22,11 +22,9 @@ allow = [
     "ISC",
     "Zlib",
     "MPL-2.0",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
     "CC0-1.0",
     "BSL-1.0",
-    "OpenSSL",
 ]
 confidence-threshold = 0.8
 
@@ -60,10 +58,10 @@ highlight = "all"
 # Specific crate bans or allows
 deny = []
 
-# Skip duplicate version checks for windows-* crates
-# These are transitive dependencies from different crates (dirs, crossterm, etc.)
-# that require different versions of the windows-sys ecosystem
+# Skip duplicate version checks for transitive dependencies
+# These are indirect dependencies from different crates that require different versions
 skip = [
+    # Windows crates - from dirs, crossterm, etc.
     { crate = "windows-sys", reason = "transitive dependency version mismatch" },
     { crate = "windows-targets", reason = "transitive dependency version mismatch" },
     { crate = "windows_aarch64_gnullvm", reason = "transitive dependency version mismatch" },
@@ -74,6 +72,29 @@ skip = [
     { crate = "windows_x86_64_gnu", reason = "transitive dependency version mismatch" },
     { crate = "windows_x86_64_gnullvm", reason = "transitive dependency version mismatch" },
     { crate = "windows_x86_64_msvc", reason = "transitive dependency version mismatch" },
+    # Build dependencies - from zeroconf (bonjour-sys, avahi-sys)
+    { crate = "bindgen", reason = "build dependency from zeroconf ecosystem" },
+    # Common utility crates with version splits across ecosystem
+    { crate = "bitflags", reason = "v1 vs v2 split across ecosystem (lsp-types uses v1)" },
+    { crate = "darling", reason = "transitive from zeroconf and ratatui" },
+    { crate = "darling_core", reason = "transitive from zeroconf and ratatui" },
+    { crate = "darling_macro", reason = "transitive from zeroconf and ratatui" },
+    { crate = "dirs", reason = "v5 vs v6 split (wonopcode-auth uses v5)" },
+    { crate = "dirs-sys", reason = "transitive from dirs version split" },
+    { crate = "getrandom", reason = "v0.2 vs v0.3 split across ecosystem" },
+    { crate = "hashbrown", reason = "transitive dependency version mismatch" },
+    { crate = "itertools", reason = "transitive dependency version mismatch" },
+    { crate = "rand", reason = "v0.8 vs v0.9 split across ecosystem" },
+    { crate = "rand_chacha", reason = "transitive from rand version split" },
+    { crate = "rand_core", reason = "transitive from rand version split" },
+    { crate = "redox_users", reason = "transitive from dirs version split" },
+    { crate = "rustix", reason = "transitive dependency version mismatch" },
+    { crate = "strsim", reason = "transitive from darling version split" },
+    { crate = "thiserror", reason = "v1 vs v2 split (some deps still on v1)" },
+    { crate = "thiserror-impl", reason = "transitive from thiserror version split" },
+    { crate = "unicode-width", reason = "transitive from ratatui ecosystem" },
+    { crate = "linux-raw-sys", reason = "transitive from rustix version split" },
+    { crate = "syn", reason = "v1 vs v2 split (zeroconf uses v1 via derive_builder)" },
 ]
 skip-tree = []
 
