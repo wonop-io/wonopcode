@@ -14,7 +14,7 @@ description = "Authentication storage and OAuth support for wonopcode"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["fs", "sync"] }
-dirs = "5.0"
+dirs = "6.0"
 thiserror = "2.0"
 tracing = "0.1"
 
