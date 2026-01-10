@@ -226,12 +226,14 @@ impl GitOperations {
         let upstream_name = upstream.name()?.map(|s| s.to_string());
 
         // Get ahead/behind counts
-        let local_oid = repo.head()?.target().ok_or_else(|| {
-            git2::Error::from_str("HEAD has no target")
-        })?;
-        let upstream_oid = upstream.get().target().ok_or_else(|| {
-            git2::Error::from_str("Upstream has no target")
-        })?;
+        let local_oid = repo
+            .head()?
+            .target()
+            .ok_or_else(|| git2::Error::from_str("HEAD has no target"))?;
+        let upstream_oid = upstream
+            .get()
+            .target()
+            .ok_or_else(|| git2::Error::from_str("Upstream has no target"))?;
 
         let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_oid)?;
 
@@ -254,11 +256,10 @@ impl GitOperations {
                 let full_path = self.working_dir.join(path);
                 if !full_path.starts_with(&self.working_dir) {
                     return Err(GitError::Path(format!(
-                        "Path '{}' is outside repository",
-                        path
+                        "Path '{path}' is outside repository"
                     )));
                 }
-                
+
                 // Check if file was deleted
                 if full_path.exists() {
                     index.add_path(Path::new(path))?;
@@ -278,7 +279,7 @@ impl GitOperations {
     /// If paths is empty, unstages all staged files.
     pub fn unstage(&self, paths: &[String]) -> Result<(), GitError> {
         let repo = self.open_repo()?;
-        
+
         // Get HEAD commit
         let head = match repo.head() {
             Ok(h) => Some(h.peel_to_commit()?),
@@ -288,17 +289,25 @@ impl GitOperations {
         if paths.is_empty() {
             // Unstage all - reset index to HEAD
             if let Some(commit) = head {
-                repo.reset(
-                    commit.as_object(),
-                    git2::ResetType::Mixed,
-                    None,
-                )?;
+                repo.reset(commit.as_object(), git2::ResetType::Mixed, None)?;
+            } else {
+                // Empty repository - clear the entire index
+                let mut index = repo.index()?;
+                index.clear()?;
+                index.write()?;
             }
         } else {
             // Unstage specific files
             if let Some(commit) = head {
                 let paths_iter = paths.iter().map(|p| Path::new(p.as_str()));
                 repo.reset_default(Some(&commit.into_object()), paths_iter)?;
+            } else {
+                // Empty repository - remove specific files from index
+                let mut index = repo.index()?;
+                for path in paths {
+                    index.remove_path(Path::new(path))?;
+                }
+                index.write()?;
             }
         }
 
@@ -312,9 +321,7 @@ impl GitOperations {
         let repo = self.open_repo()?;
 
         if paths.is_empty() {
-            return Err(GitError::Path(
-                "Must specify files to checkout".to_string(),
-            ));
+            return Err(GitError::Path("Must specify files to checkout".to_string()));
         }
 
         let mut opts = git2::build::CheckoutBuilder::new();
@@ -325,8 +332,7 @@ impl GitOperations {
             let full_path = self.working_dir.join(path);
             if !full_path.starts_with(&self.working_dir) {
                 return Err(GitError::Path(format!(
-                    "Path '{}' is outside repository",
-                    path
+                    "Path '{path}' is outside repository"
                 )));
             }
             opts.path(path);
@@ -372,14 +378,7 @@ impl GitOperations {
 
         let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
 
-        let commit_id = repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &parent_refs,
-        )?;
+        let commit_id = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
 
         let commit = repo.find_commit(commit_id)?;
         Ok(GitCommitInfo::from_commit(&commit))
@@ -404,9 +403,13 @@ impl GitOperations {
     }
 
     /// Push to remote.
-    pub fn push(&self, remote_name: Option<&str>, branch_name: Option<&str>) -> Result<(), GitError> {
+    pub fn push(
+        &self,
+        remote_name: Option<&str>,
+        branch_name: Option<&str>,
+    ) -> Result<(), GitError> {
         let repo = self.open_repo()?;
-        
+
         let remote_name = remote_name.unwrap_or("origin");
         let branch = match branch_name {
             Some(b) => b.to_string(),
@@ -415,12 +418,14 @@ impl GitOperations {
                 repo.head()?
                     .shorthand()
                     .map(|s| s.to_string())
-                    .ok_or_else(|| GitError::NotSupported("Cannot determine current branch".to_string()))?
+                    .ok_or_else(|| {
+                        GitError::NotSupported("Cannot determine current branch".to_string())
+                    })?
             }
         };
 
         let mut remote = repo.find_remote(remote_name)?;
-        let refspec = format!("refs/heads/{0}:refs/heads/{0}", branch);
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
 
         // Configure callbacks for authentication
         let mut callbacks = git2::RemoteCallbacks::new();
@@ -441,9 +446,13 @@ impl GitOperations {
     }
 
     /// Pull from remote (fetch + fast-forward merge).
-    pub fn pull(&self, remote_name: Option<&str>, branch_name: Option<&str>) -> Result<(), GitError> {
+    pub fn pull(
+        &self,
+        remote_name: Option<&str>,
+        branch_name: Option<&str>,
+    ) -> Result<(), GitError> {
         let repo = self.open_repo()?;
-        
+
         let remote_name = remote_name.unwrap_or("origin");
         let branch = match branch_name {
             Some(b) => b.to_string(),
@@ -452,7 +461,9 @@ impl GitOperations {
                 repo.head()?
                     .shorthand()
                     .map(|s| s.to_string())
-                    .ok_or_else(|| GitError::NotSupported("Cannot determine current branch".to_string()))?
+                    .ok_or_else(|| {
+                        GitError::NotSupported("Cannot determine current branch".to_string())
+                    })?
             }
         };
 
@@ -484,7 +495,7 @@ impl GitOperations {
 
         if analysis.is_fast_forward() {
             // Fast-forward merge
-            let ref_name = format!("refs/heads/{}", branch);
+            let ref_name = format!("refs/heads/{branch}");
             let mut reference = repo.find_reference(&ref_name)?;
             reference.set_target(fetch_commit.id(), "Fast-forward")?;
             repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
@@ -501,8 +512,8 @@ impl GitOperations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn setup_test_repo() -> (TempDir, Repository) {
         let temp_dir = TempDir::new().unwrap();

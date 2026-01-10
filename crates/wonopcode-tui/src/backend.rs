@@ -3,9 +3,7 @@
 //! This module provides a trait for backend communication, allowing the TUI
 //! to work with either a local runner (direct channels) or a remote server (HTTP/SSE).
 
-use crate::{
-    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate,
-};
+use crate::{AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
@@ -279,7 +277,10 @@ impl RemoteBackend {
                     .collect(),
             }));
         } else {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             self.send_update(AppUpdate::GitOperationResult {
                 success: false,
                 message: error,
@@ -406,7 +407,10 @@ impl RemoteBackend {
                     .collect(),
             ));
         } else {
-            let error = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             self.send_update(AppUpdate::GitOperationResult {
                 success: false,
                 message: error,

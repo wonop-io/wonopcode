@@ -27,9 +27,9 @@ use wonopcode_provider::{
     BoxedLanguageModel, GenerateOptions, Message as ProviderMessage, ToolDefinition,
 };
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
+use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
 use wonopcode_tools::{mcp::McpToolsBuilder, task, todo, ToolRegistry};
-use wonopcode_server::GitOperations;
 use wonopcode_tui::{
     AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate,
     McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, SaveScope, TodoUpdate,
@@ -2738,8 +2738,12 @@ impl Runner {
                                 wonopcode_server::GitFileState::Added => "added".to_string(),
                                 wonopcode_server::GitFileState::Deleted => "deleted".to_string(),
                                 wonopcode_server::GitFileState::Renamed => "renamed".to_string(),
-                                wonopcode_server::GitFileState::Untracked => "untracked".to_string(),
-                                wonopcode_server::GitFileState::Conflicted => "conflicted".to_string(),
+                                wonopcode_server::GitFileState::Untracked => {
+                                    "untracked".to_string()
+                                }
+                                wonopcode_server::GitFileState::Conflicted => {
+                                    "conflicted".to_string()
+                                }
                             },
                             staged: f.staged,
                         })
@@ -2756,7 +2760,11 @@ impl Runner {
     }
 
     /// Handle git stage action.
-    async fn handle_git_stage(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>, paths: Vec<String>) {
+    async fn handle_git_stage(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
         let cwd = self.instance.directory();
         let git = GitOperations::new(cwd);
 
@@ -2779,7 +2787,11 @@ impl Runner {
     }
 
     /// Handle git unstage action.
-    async fn handle_git_unstage(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>, paths: Vec<String>) {
+    async fn handle_git_unstage(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
         let cwd = self.instance.directory();
         let git = GitOperations::new(cwd);
 
@@ -2802,7 +2814,11 @@ impl Runner {
     }
 
     /// Handle git checkout action.
-    async fn handle_git_checkout(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>, paths: Vec<String>) {
+    async fn handle_git_checkout(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        paths: Vec<String>,
+    ) {
         let cwd = self.instance.directory();
         let git = GitOperations::new(cwd);
 
@@ -2825,7 +2841,11 @@ impl Runner {
     }
 
     /// Handle git commit action.
-    async fn handle_git_commit(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>, message: String) {
+    async fn handle_git_commit(
+        &self,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        message: String,
+    ) {
         let cwd = self.instance.directory();
         let git = GitOperations::new(cwd);
 

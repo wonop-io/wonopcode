@@ -5336,20 +5336,17 @@ impl GitDialog {
         // Show status message if any
         if let Some(ref msg) = self.status_message {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(msg.clone(), theme.highlight_style())));
+            lines.push(Line::from(Span::styled(
+                msg.clone(),
+                theme.highlight_style(),
+            )));
         }
 
         let paragraph = Paragraph::new(lines);
         frame.render_widget(paragraph, inner);
     }
 
-    fn render_file_list(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        theme: &Theme,
-        is_stage: bool,
-    ) {
+    fn render_file_list(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_stage: bool) {
         let title = if is_stage {
             " Stage Files (unstaged) "
         } else {
@@ -5459,7 +5456,9 @@ impl GitDialog {
             Span::styled(&self.commit_message, theme.text_style())
         };
 
-        let msg_para = Paragraph::new(msg_text).block(msg_block).wrap(Wrap { trim: false });
+        let msg_para = Paragraph::new(msg_text)
+            .block(msg_block)
+            .wrap(Wrap { trim: false });
         frame.render_widget(msg_para, chunks[0]);
 
         // Help
