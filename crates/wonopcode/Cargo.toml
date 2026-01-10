@@ -15,9 +15,11 @@ name = "wonopcode"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["discover"]
 # GitHub Actions integration (experimental)
 github = []
+# mDNS service discovery (requires Bonjour SDK on Windows, libavahi on Linux)
+discover = ["dep:wonopcode-discover"]
 
 [dependencies]
 wonopcode-util.workspace = true
@@ -33,7 +35,7 @@ wonopcode-mcp.workspace = true
 wonopcode-lsp.workspace = true
 wonopcode-acp.workspace = true
 wonopcode-protocol.workspace = true
-wonopcode-discover.workspace = true
+wonopcode-discover = { workspace = true, optional = true }
 
 thiserror.workspace = true
 anyhow.workspace = true

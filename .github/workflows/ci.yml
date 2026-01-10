@@ -48,8 +48,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
       - uses: Swatinem/rust-cache@v2
-      - name: Run tests
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
         run: cargo test --all-features --workspace
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        # Skip discover feature on Windows as it requires Bonjour SDK
+        run: cargo test --workspace --exclude wonopcode-discover
 
   build:
     name: Build
@@ -77,8 +82,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Build
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
         run: cargo build --release --target ${{ matrix.target }}
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        # Skip discover feature on Windows as it requires Bonjour SDK
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features
 
   docs:
     name: Documentation

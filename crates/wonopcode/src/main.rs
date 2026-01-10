@@ -71,14 +71,17 @@ struct Cli {
     secret: Option<String>,
 
     /// Advertise the server via mDNS for local network discovery (headless mode only).
+    #[cfg(feature = "discover")]
     #[arg(long)]
     advertise: bool,
 
     /// Custom name for mDNS advertisement (default: hostname).
+    #[cfg(feature = "discover")]
     #[arg(long)]
     name: Option<String>,
 
     /// Discover servers on the local network via mDNS instead of specifying an address.
+    #[cfg(feature = "discover")]
     #[arg(long, conflicts_with = "connect")]
     discover: bool,
 
@@ -436,11 +439,13 @@ async fn main() -> anyhow::Result<()> {
             // Check for headless, discover, or connect mode
             if cli.headless {
                 run_headless(&cwd, cli.address, &cli).await
-            } else if cli.discover {
-                run_discover(&cli).await
             } else if let Some(ref address) = cli.connect {
                 run_connect(address, &cli).await
             } else {
+                #[cfg(feature = "discover")]
+                if cli.discover {
+                    return run_discover(&cli).await;
+                }
                 // Default behavior: interactive mode
                 run_interactive(&cwd, cli).await
             }
@@ -2793,6 +2798,7 @@ async fn run_headless(
     }
 
     // Start mDNS advertisement if enabled
+    #[cfg(feature = "discover")]
     let _advertiser = if cli.advertise {
         use wonopcode_discover::{AdvertiseConfig, Advertiser};
 
@@ -2853,6 +2859,7 @@ async fn run_headless(
 }
 
 /// Discover and connect to a server on the local network via mDNS.
+#[cfg(feature = "discover")]
 async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
     use std::io::Write;
     use std::time::Duration;
