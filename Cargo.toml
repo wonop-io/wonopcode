@@ -16,6 +16,7 @@ members = [
     "crates/wonopcode-auth",
     "crates/wonopcode-sandbox",
     "crates/wonopcode-protocol",
+    "crates/wonopcode-discover",
 ]
 
 [workspace.package]
@@ -45,6 +46,7 @@ wonopcode-acp = { path = "crates/wonopcode-acp" }
 wonopcode-auth = { path = "crates/wonopcode-auth" }
 wonopcode-sandbox = { path = "crates/wonopcode-sandbox" }
 wonopcode-protocol = { path = "crates/wonopcode-protocol" }
+wonopcode-discover = { path = "crates/wonopcode-discover" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

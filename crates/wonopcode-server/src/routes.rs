@@ -532,9 +532,11 @@ async fn session_prompt(
     // Create event channel
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PromptEvent>();
 
-    // Create runner with agent configuration
+    // Create runner with agent configuration and shared todo store
     let cwd = instance.directory().to_path_buf();
-    let runner = ServerPromptRunner::with_agent(provider, cwd, cancel.clone(), agent_config);
+    let todo_store = Some(state.todo_store.clone());
+    let runner =
+        ServerPromptRunner::with_agent(provider, cwd, cancel.clone(), agent_config, todo_store);
 
     // Clone state for cleanup
     let state_clone = state.clone();
@@ -650,9 +652,10 @@ async fn session_prompt_async(
     let message_id = format!("msg_{}", generate_id());
     let message_id_clone = message_id;
 
-    // Create runner with agent configuration
+    // Create runner with agent configuration and shared todo store
     let cwd = instance.directory().to_path_buf();
-    let runner = ServerPromptRunner::with_agent(provider, cwd, cancel, agent_config);
+    let todo_store = Some(state.todo_store.clone());
+    let runner = ServerPromptRunner::with_agent(provider, cwd, cancel, agent_config, todo_store);
 
     // Create event channel for internal use
     let (event_tx, _event_rx) = mpsc::unbounded_channel::<PromptEvent>();
@@ -808,25 +811,42 @@ async fn session_status(
 }
 
 async fn session_todo(State(state): State<AppState>, Path(_id): Path<String>) -> impl IntoResponse {
-    // Get todos from the project directory using file-based storage
-    // Note: This uses FileTodoStore for the REST API to support external access
-    let instance = state.instance.read().await;
-    let root_dir = instance.directory();
-    let store = wonopcode_tools::todo::FileTodoStore::new();
-    let todos = wonopcode_tools::todo::get_todos(&store, root_dir);
+    // Get todos from the shared server state
+    // The todo store is held by the server and updated by the prompt runner
+    // Falls back to file-based storage if shared store is empty (for REST API mode)
+    let todos = state.get_todos().await;
 
-    // Convert to JSON-serializable format
-    let todos_json: Vec<serde_json::Value> = todos
-        .iter()
-        .map(|todo| {
-            serde_json::json!({
-                "id": todo.id,
-                "content": todo.content,
-                "status": format!("{:?}", todo.status).to_lowercase(),
-                "priority": format!("{:?}", todo.priority).to_lowercase(),
+    let todos_json: Vec<serde_json::Value> = if todos.is_empty() {
+        // Fallback: read from file-based storage for REST API mode
+        let instance = state.instance.read().await;
+        let root_dir = instance.directory();
+        let store = wonopcode_tools::todo::FileTodoStore::new();
+        let file_todos = wonopcode_tools::todo::get_todos(&store, root_dir);
+        file_todos
+            .iter()
+            .map(|todo| {
+                serde_json::json!({
+                    "id": todo.id,
+                    "content": todo.content,
+                    "status": format!("{:?}", todo.status).to_lowercase(),
+                    "priority": format!("{:?}", todo.priority).to_lowercase(),
+                })
             })
-        })
-        .collect();
+            .collect()
+    } else {
+        // Use shared store (updated by prompt runner)
+        todos
+            .iter()
+            .map(|todo| {
+                serde_json::json!({
+                    "id": todo.id,
+                    "content": todo.content,
+                    "status": format!("{:?}", todo.status).to_lowercase(),
+                    "priority": format!("{:?}", todo.priority).to_lowercase(),
+                })
+            })
+            .collect()
+    };
 
     Json(serde_json::json!({
         "todos": todos_json

@@ -146,6 +146,9 @@ pub struct RunnerConfig {
     /// When set, the Claude CLI provider will connect to this URL instead of
     /// spawning a child process for MCP tools.
     pub mcp_url: Option<String>,
+    /// Secret for MCP server authentication.
+    /// When set, the Claude CLI provider will include this in requests to the MCP server.
+    pub mcp_secret: Option<String>,
 }
 
 impl Default for RunnerConfig {
@@ -162,6 +165,7 @@ impl Default for RunnerConfig {
             allow_all: false,
             allow_all_in_sandbox: true,
             mcp_url: None,
+            mcp_secret: None,
         }
     }
 }
@@ -669,6 +673,7 @@ impl Runner {
                 allow_all: old_config.allow_all,
                 allow_all_in_sandbox: old_config.allow_all_in_sandbox,
                 mcp_url: old_config.mcp_url.clone(),
+                mcp_secret: old_config.mcp_secret.clone(),
             }
         };
 
@@ -3083,10 +3088,11 @@ fn create_provider(
                         info!("Using Claude CLI for subscription-based access with custom tools");
                         // MCP requires HTTP transport - mcp_url must be provided
                         if let Some(ref mcp_url) = config.mcp_url {
-                            info!(mcp_url = %mcp_url, "Using MCP HTTP transport");
+                            info!(mcp_url = %mcp_url, has_secret = config.mcp_secret.is_some(), "Using MCP HTTP transport");
                             let provider = wonopcode_provider::claude_cli::with_custom_tools(
                                 model_info,
                                 mcp_url.clone(),
+                                config.mcp_secret.clone(),
                             )?;
                             Ok(Arc::new(provider))
                         } else {

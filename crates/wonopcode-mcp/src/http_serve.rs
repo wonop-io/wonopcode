@@ -28,11 +28,12 @@ use crate::protocol::{
 };
 use crate::serve::{McpServerTool, McpToolContext};
 use axum::{
-    extract::{Query, State},
-    http::StatusCode,
+    extract::{Query, Request, State},
+    http::{HeaderMap, StatusCode},
+    middleware::Next,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse, Json,
+        IntoResponse, Json, Response,
     },
     routing::{get, post},
     Router,
@@ -44,6 +45,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 use tokio::sync::{mpsc, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, info, warn};
@@ -63,6 +65,10 @@ pub struct McpHttpState {
     pub context: McpToolContext,
     /// Base URL for message endpoint (used in endpoint event).
     pub message_url: String,
+    /// Optional API key for authentication.
+    /// If set, clients must provide this key in the `X-API-Key` header
+    /// or `Authorization: Bearer <key>` header.
+    api_key: Option<String>,
 }
 
 /// An active MCP session.
@@ -90,7 +96,23 @@ impl McpHttpState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             context,
             message_url: message_url.into(),
+            api_key: None,
         }
+    }
+
+    /// Set the API key for authentication.
+    ///
+    /// When set, all requests must include a valid API key in either:
+    /// - `X-API-Key` header
+    /// - `Authorization: Bearer <key>` header
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Check if authentication is enabled.
+    pub fn has_auth(&self) -> bool {
+        self.api_key.is_some()
     }
 
     /// Register a new session.
@@ -279,18 +301,101 @@ impl McpHttpState {
     }
 }
 
+// ============================================================================
+// Authentication
+// ============================================================================
+
+/// Extract API key from request headers.
+///
+/// Supports both `X-API-Key` header and `Authorization: Bearer <key>` format.
+fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
+    // Check X-API-Key header first (case-insensitive in HTTP)
+    if let Some(key) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        return Some(key);
+    }
+
+    // Check Authorization header for Bearer token
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if let Some(key) = auth.strip_prefix("Bearer ") {
+            return Some(key.trim());
+        }
+    }
+
+    None
+}
+
+/// Constant-time comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.ct_eq(b).into()
+}
+
+/// Middleware to validate API key.
+async fn api_key_auth(
+    State(state): State<McpHttpState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // If no API key is configured, allow all requests
+    let Some(ref expected_key) = state.api_key else {
+        return Ok(next.run(request).await);
+    };
+
+    // Extract and validate API key
+    let provided_key = extract_api_key(request.headers());
+
+    match provided_key {
+        Some(key) if constant_time_eq(key.as_bytes(), expected_key.as_bytes()) => {
+            Ok(next.run(request).await)
+        }
+        Some(_) => {
+            warn!("Invalid API key provided for MCP endpoint");
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "Invalid API key" })),
+            ))
+        }
+        None => {
+            warn!("Missing API key for MCP endpoint");
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "Authentication required" })),
+            ))
+        }
+    }
+}
+
+// ============================================================================
+// Router
+// ============================================================================
+
 /// Create the MCP HTTP router.
+///
+/// If the state has an API key configured, all requests will require authentication
+/// via `X-API-Key` header or `Authorization: Bearer <key>` header.
 pub fn create_mcp_router(state: McpHttpState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    let has_auth = state.has_auth();
+
+    let router = Router::new()
         .route("/sse", get(mcp_sse))
-        .route("/message", post(mcp_message))
-        .layer(cors)
-        .with_state(state)
+        .route("/message", post(mcp_message));
+
+    // Only add auth middleware if API key is configured
+    let router = if has_auth {
+        info!("MCP API key authentication enabled");
+        router.layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            api_key_auth,
+        ))
+    } else {
+        router
+    };
+
+    router.layer(cors).with_state(state)
 }
 
 /// SSE connection handler.
@@ -488,5 +593,70 @@ mod tests {
         assert_eq!(response.id, 4);
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    // ========================================================================
+    // Authentication Tests
+    // ========================================================================
+
+    #[test]
+    fn test_state_has_auth() {
+        let state = create_test_state();
+        assert!(!state.has_auth());
+
+        let state_with_key = state.with_api_key("test-secret");
+        assert!(state_with_key.has_auth());
+    }
+
+    #[test]
+    fn test_extract_api_key_from_x_api_key() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "test-key".parse().unwrap());
+        assert_eq!(extract_api_key(&headers), Some("test-key"));
+    }
+
+    #[test]
+    fn test_extract_api_key_from_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer my-token".parse().unwrap());
+        assert_eq!(extract_api_key(&headers), Some("my-token"));
+    }
+
+    #[test]
+    fn test_extract_api_key_bearer_with_whitespace() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer   my-token  ".parse().unwrap());
+        assert_eq!(extract_api_key(&headers), Some("my-token"));
+    }
+
+    #[test]
+    fn test_extract_api_key_missing() {
+        let headers = HeaderMap::new();
+        assert_eq!(extract_api_key(&headers), None);
+    }
+
+    #[test]
+    fn test_extract_api_key_invalid_auth_format() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Basic abc123".parse().unwrap());
+        assert_eq!(extract_api_key(&headers), None);
+    }
+
+    #[test]
+    fn test_extract_api_key_x_api_key_takes_precedence() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "key-from-header".parse().unwrap());
+        headers.insert("authorization", "Bearer key-from-bearer".parse().unwrap());
+        // X-API-Key should be checked first
+        assert_eq!(extract_api_key(&headers), Some("key-from-header"));
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq(b"test", b"test"));
+        assert!(!constant_time_eq(b"test", b"wrong"));
+        assert!(!constant_time_eq(b"test", b"test-longer"));
+        assert!(!constant_time_eq(b"test-longer", b"test"));
+        assert!(constant_time_eq(b"", b""));
     }
 }

@@ -7,13 +7,19 @@
 //!
 //! The headless server can optionally expose MCP (Model Context Protocol) endpoints
 //! at `/mcp/sse` and `/mcp/message`, allowing Claude CLI to connect via HTTP.
+//!
+//! # Authentication
+//!
+//! The server can be protected with an API key. When configured, clients must provide
+//! the key via `X-API-Key` header or `Authorization: Bearer <key>` header.
 
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{Request, State},
+    http::{HeaderMap, StatusCode},
+    middleware::Next,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse, Json,
+        IntoResponse, Json, Response,
     },
     routing::{get, post},
     Router,
@@ -21,12 +27,13 @@ use axum::{
 use futures::stream::Stream;
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc, time::Duration};
+use subtle::ConstantTimeEq;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing::{debug, info, Span};
+use tracing::{debug, info, warn, Span};
 use wonopcode_mcp::{create_mcp_router, McpHttpState};
 use wonopcode_protocol::{Action, State as ProtocolState, Update};
 
@@ -70,9 +77,82 @@ impl HeadlessState {
     }
 }
 
+// ============================================================================
+// Authentication
+// ============================================================================
+
+/// State for API key authentication middleware.
+#[derive(Clone)]
+struct AuthState {
+    api_key: Option<String>,
+}
+
+/// Extract API key from request headers.
+///
+/// Supports both `X-API-Key` header and `Authorization: Bearer <key>` format.
+fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
+    // Check X-API-Key header first (case-insensitive in HTTP)
+    if let Some(key) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        return Some(key);
+    }
+
+    // Check Authorization header for Bearer token
+    if let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if let Some(key) = auth.strip_prefix("Bearer ") {
+            return Some(key.trim());
+        }
+    }
+
+    None
+}
+
+/// Constant-time comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.ct_eq(b).into()
+}
+
+/// Middleware to validate API key.
+async fn api_key_auth(
+    State(auth): State<AuthState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // If no API key is configured, allow all requests
+    let Some(ref expected_key) = auth.api_key else {
+        return Ok(next.run(request).await);
+    };
+
+    // Extract and validate API key
+    let provided_key = extract_api_key(request.headers());
+
+    match provided_key {
+        Some(key) if constant_time_eq(key.as_bytes(), expected_key.as_bytes()) => {
+            Ok(next.run(request).await)
+        }
+        Some(_) => {
+            warn!("Invalid API key provided");
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "Invalid API key" })),
+            ))
+        }
+        None => {
+            warn!("Missing API key");
+            Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "Authentication required" })),
+            ))
+        }
+    }
+}
+
+// ============================================================================
+// Router Creation
+// ============================================================================
+
 /// Create the headless server router.
 pub fn create_headless_router(state: HeadlessState) -> Router {
-    create_headless_router_with_mcp(state, None)
+    create_headless_router_with_options(state, None, None)
 }
 
 /// Create the headless server router with optional MCP support.
@@ -82,14 +162,30 @@ pub fn create_headless_router_with_mcp(
     state: HeadlessState,
     mcp_state: Option<McpHttpState>,
 ) -> Router {
+    create_headless_router_with_options(state, mcp_state, None)
+}
+
+/// Create the headless server router with optional MCP support and API key authentication.
+///
+/// If `mcp_state` is provided, MCP endpoints will be available at `/mcp/sse` and `/mcp/message`.
+/// If `api_key` is provided, all endpoints (except /health) will require authentication.
+pub fn create_headless_router_with_options(
+    state: HeadlessState,
+    mcp_state: Option<McpHttpState>,
+    api_key: Option<String>,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let mut router = Router::new()
-        // Health check
-        .route("/health", get(health))
+    let has_auth = api_key.is_some();
+    let auth_state = AuthState {
+        api_key: api_key.clone(),
+    };
+
+    // Protected routes that require authentication
+    let mut protected_router = Router::new()
         // State endpoint for initial sync
         .route("/state", get(get_state))
         // SSE events stream
@@ -121,12 +217,32 @@ pub fn create_headless_router_with_mcp(
         .route("/action/quit", post(action_quit))
         .with_state(state);
 
-    // Add MCP routes if state is provided
-    if let Some(mcp) = mcp_state {
+    // Add MCP routes if state is provided (with API key auth applied via MCP's own middleware)
+    if let Some(mut mcp) = mcp_state {
+        // Apply the same API key to MCP state if configured
+        if let Some(ref key) = api_key {
+            mcp = mcp.with_api_key(key.clone());
+        }
         let mcp_router = create_mcp_router(mcp);
-        router = router.nest("/mcp", mcp_router);
+        protected_router = protected_router.nest("/mcp", mcp_router);
         info!("MCP HTTP endpoints enabled at /mcp/sse and /mcp/message");
     }
+
+    // Apply auth middleware to protected routes if API key is configured
+    let protected_router = if has_auth {
+        info!("API key authentication enabled for all endpoints");
+        protected_router.layer(axum::middleware::from_fn_with_state(
+            auth_state,
+            api_key_auth,
+        ))
+    } else {
+        protected_router
+    };
+
+    // Combine with public routes (health check remains accessible for monitoring)
+    let router = Router::new()
+        .route("/health", get(health))
+        .merge(protected_router);
 
     router.layer(cors).layer(
         TraceLayer::new_for_http()

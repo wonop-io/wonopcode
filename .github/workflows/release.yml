@@ -45,6 +45,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux' && !matrix.cross
+        run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -57,9 +61,14 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Build (cargo)
-        if: ${{ !matrix.cross }}
+      - name: Build (cargo - Unix)
+        if: ${{ !matrix.cross && runner.os != 'Windows' }}
         run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (cargo - Windows)
+        if: ${{ !matrix.cross && runner.os == 'Windows' }}
+        # Skip discover feature on Windows as it requires Bonjour SDK
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'

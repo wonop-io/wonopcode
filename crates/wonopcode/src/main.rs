@@ -64,6 +64,27 @@ struct Cli {
     #[arg(long)]
     connect: Option<String>,
 
+    /// Secret key for server authentication.
+    /// When set, clients must provide this key via X-API-Key header or Authorization: Bearer header.
+    /// Can also be set via WONOPCODE_SECRET environment variable.
+    #[arg(long)]
+    secret: Option<String>,
+
+    /// Advertise the server via mDNS for local network discovery (headless mode only).
+    #[cfg(feature = "discover")]
+    #[arg(long)]
+    advertise: bool,
+
+    /// Custom name for mDNS advertisement (default: hostname).
+    #[cfg(feature = "discover")]
+    #[arg(long)]
+    name: Option<String>,
+
+    /// Discover servers on the local network via mDNS instead of specifying an address.
+    #[cfg(feature = "discover")]
+    #[arg(long, conflicts_with = "connect")]
+    discover: bool,
+
     /// Subcommand
     #[command(subcommand)]
     command: Option<Commands>,
@@ -346,6 +367,7 @@ async fn main() -> anyhow::Result<()> {
                 session,
                 &format,
                 cli.provider.clone(),
+                cli.secret.clone(),
             )
             .await
         }
@@ -414,12 +436,16 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Agent { command }) => handle_agent(command, &cwd).await,
         None => {
-            // Check for headless or connect mode
+            // Check for headless, discover, or connect mode
             if cli.headless {
                 run_headless(&cwd, cli.address, &cli).await
             } else if let Some(ref address) = cli.connect {
                 run_connect(address, &cli).await
             } else {
+                #[cfg(feature = "discover")]
+                if cli.discover {
+                    return run_discover(&cli).await;
+                }
                 // Default behavior: interactive mode
                 run_interactive(&cwd, cli).await
             }
@@ -552,6 +578,7 @@ async fn run_server(address: SocketAddr, cwd: &std::path::Path) -> anyhow::Resul
 }
 
 /// Run command - execute a single prompt and exit.
+#[allow(clippy::too_many_arguments)]
 async fn run_command(
     cwd: &std::path::Path,
     message: Vec<String>,
@@ -560,6 +587,7 @@ async fn run_command(
     _session: Option<String>,
     format: &str,
     default_provider: String,
+    cli_secret: Option<String>,
 ) -> anyhow::Result<()> {
     use std::io::{self, Write};
 
@@ -630,6 +658,16 @@ async fn run_command(
         shared_permission_manager.add_rule(rule).await;
     }
 
+    // Initialize shared todo storage early so MCP server and Runner use the same store
+    let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
+    info!(path = %todo_path.display(), "Initialized shared todo storage");
+
+    // Get API key for MCP server authentication
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli_secret
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| core_config.server.as_ref().and_then(|s| s.api_key.clone()));
+
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
@@ -662,6 +700,7 @@ async fn run_command(
         allow_all: false,
         allow_all_in_sandbox,
         mcp_url, // Use background MCP server for custom tools
+        mcp_secret: secret,
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)
@@ -1728,7 +1767,8 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         test_provider_settings: None,
         allow_all: false,
         allow_all_in_sandbox,
-        mcp_url, // Use background MCP server for custom tools
+        mcp_url,          // Use background MCP server for custom tools
+        mcp_secret: None, // No auth needed for local MCP server in TUI mode
     };
 
     // Get MCP config from config file
@@ -2030,7 +2070,7 @@ async fn run_headless(
 ) -> anyhow::Result<()> {
     use tokio::sync::mpsc;
     use wonopcode_protocol::{Action, Update};
-    use wonopcode_server::{create_headless_router_with_mcp, HeadlessState};
+    use wonopcode_server::{create_headless_router_with_options, HeadlessState};
 
     info!("Starting headless server on {}", address);
     println!("Wonopcode headless server v{}", env!("CARGO_PKG_VERSION"));
@@ -2061,6 +2101,14 @@ async fn run_headless(
     // Load API key
     let api_key = runner::load_api_key(&provider).unwrap_or_default();
 
+    // Get secret for server authentication (needed early for runner config)
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| config_file.server.as_ref().and_then(|s| s.api_key.clone()));
+
     // Build MCP HTTP URL for headless mode
     let mcp_sse_url = format!("http://{address}/mcp/sse");
 
@@ -2082,6 +2130,7 @@ async fn run_headless(
         allow_all: false, // Permissions flow from TUI via protocol
         allow_all_in_sandbox,
         mcp_url: Some(mcp_sse_url), // Use HTTP transport for MCP
+        mcp_secret: secret.clone(),
     };
 
     // Get MCP config
@@ -2733,15 +2782,68 @@ async fn run_headless(
         .ok();
     let has_mcp = mcp_state.is_some();
 
-    // Create router with MCP support
-    let app = create_headless_router_with_mcp(headless_state, mcp_state);
+    // Create router with MCP support and secret authentication
+    // The secret is passed separately so it can be applied to all endpoints
+    let has_auth = secret.is_some();
+    let app = create_headless_router_with_options(headless_state, mcp_state, secret.clone());
 
     // Start server
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("Server running on http://{address}");
+    if has_auth {
+        println!("API key authentication: enabled");
+    }
     if has_mcp {
         println!("MCP endpoint: http://{address}/mcp/sse");
     }
+
+    // Start mDNS advertisement if enabled
+    #[cfg(feature = "discover")]
+    let _advertiser = if cli.advertise {
+        use wonopcode_discover::{AdvertiseConfig, Advertiser};
+
+        match Advertiser::new() {
+            Ok(mut advertiser) => {
+                // Determine the display name
+                let name = cli.name.clone().unwrap_or_else(|| {
+                    hostname::get()
+                        .ok()
+                        .and_then(|h| h.into_string().ok())
+                        .unwrap_or_else(|| "wonopcode".to_string())
+                });
+
+                // Build advertise config with metadata
+                let mut config =
+                    AdvertiseConfig::new(&name, address.port(), env!("CARGO_PKG_VERSION"))
+                        .with_model(&model_id)
+                        .with_cwd(cwd.display().to_string())
+                        .with_auth(secret.is_some());
+
+                // Add project name from the worktree directory name
+                if let Some(project_name) = cwd.file_name().and_then(|n| n.to_str()) {
+                    config = config.with_project(project_name);
+                }
+
+                match advertiser.advertise(config) {
+                    Ok(_) => {
+                        println!("mDNS: advertising as '{name}'");
+                        Some(advertiser)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to advertise via mDNS");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to create mDNS advertiser");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     println!("Press Ctrl+C to stop");
 
     // Run server until shutdown
@@ -2750,12 +2852,85 @@ async fn run_headless(
     // Wait for runner to complete
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), runner_handle).await;
 
+    // Advertiser will be dropped here, stopping the mDNS advertisement
+
     instance.dispose().await;
     Ok(())
 }
 
+/// Discover and connect to a server on the local network via mDNS.
+#[cfg(feature = "discover")]
+async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::time::Duration;
+    use wonopcode_discover::{Browser, ServerInfo};
+
+    println!("Discovering wonopcode servers on the local network...\n");
+
+    let browser =
+        Browser::new().map_err(|e| anyhow::anyhow!("Failed to create mDNS browser: {e}"))?;
+    let servers = browser
+        .browse(Duration::from_secs(3))
+        .map_err(|e| anyhow::anyhow!("Failed to browse for servers: {e}"))?;
+
+    if servers.is_empty() {
+        println!("No servers found.");
+        println!("\nMake sure a server is running with:");
+        println!("  wonopcode --headless --advertise");
+        return Ok(());
+    }
+
+    println!("Found {} server(s):\n", servers.len());
+
+    for (i, server) in servers.iter().enumerate() {
+        println!("  {}. {}", i + 1, server.name);
+        println!("     Address: {}", server.address);
+        if let Some(ref project) = server.project {
+            println!("     Project: {project}");
+        }
+        if let Some(ref model) = server.model {
+            println!("     Model: {model}");
+        }
+        if server.auth_required {
+            println!("     Auth: required");
+        }
+        println!();
+    }
+
+    // Select a server
+    let selected: &ServerInfo = if servers.len() == 1 {
+        println!("Connecting to the only available server...\n");
+        &servers[0]
+    } else {
+        print!("Select server (1-{}): ", servers.len());
+        std::io::stdout().flush()?;
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        let idx: usize = input
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid selection"))?;
+
+        if idx < 1 || idx > servers.len() {
+            return Err(anyhow::anyhow!("Selection out of range"));
+        }
+
+        &servers[idx - 1]
+    };
+
+    // Check if auth is required but no secret provided
+    if selected.auth_required && cli.secret.is_none() {
+        println!("Warning: Server requires authentication. Use --secret to provide credentials.\n");
+    }
+
+    // Connect to the selected server
+    run_connect(&selected.address.to_string(), cli).await
+}
+
 /// Connect to a remote headless server.
-async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
+async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     use wonopcode_tui::{App, Backend, RemoteBackend, SandboxStatusUpdate};
 
     // Parse address
@@ -2767,8 +2942,15 @@ async fn run_connect(address: &str, _cli: &Cli) -> anyhow::Result<()> {
 
     println!("Connecting to {address}...");
 
-    // Create remote backend
-    let backend = RemoteBackend::new(&address)?;
+    // Get secret for authentication
+    // Priority: CLI arg > environment variable
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok());
+
+    // Create remote backend with optional secret
+    let backend = RemoteBackend::with_api_key(&address, secret)?;
 
     // Check connection
     backend.connect().await?;
