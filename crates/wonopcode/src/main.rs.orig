@@ -653,6 +653,7 @@ async fn run_command(
         shared_permission_manager.add_rule(rule).await;
     }
 
+<<<<<<< HEAD
     // Initialize shared todo storage early so MCP server and Runner use the same store
     let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
     info!(path = %todo_path.display(), "Initialized shared todo storage");
@@ -663,11 +664,16 @@ async fn run_command(
         .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
         .or_else(|| core_config.server.as_ref().and_then(|s| s.api_key.clone()));
 
+=======
+>>>>>>> main
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
         shared_permission_manager.clone(),
+<<<<<<< HEAD
         secret.clone(),
+=======
+>>>>>>> main
     )
     .await
     {
@@ -1732,10 +1738,29 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         info!("Permission manager initialized with default rules");
     }
 
+<<<<<<< HEAD
+    // Initialize shared todo storage early so MCP server and Runner use the same store
+    let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
+    info!(path = %todo_path.display(), "Initialized shared todo storage");
+
+    // Get secret for server authentication
+    // Priority: CLI arg > environment variable > config file
+    let secret = cli
+        .secret
+        .clone()
+        .or_else(|| std::env::var("WONOPCODE_SECRET").ok())
+        .or_else(|| config_file.server.as_ref().and_then(|s| s.api_key.clone()));
+
+=======
+>>>>>>> main
     // Start background MCP HTTP server for Claude CLI integration
     let (mcp_url, mcp_server_handle) = match start_mcp_server(
         cwd,
         shared_permission_manager.clone(),
+<<<<<<< HEAD
+        secret.clone(),
+=======
+>>>>>>> main
     )
     .await
     {
@@ -2773,6 +2798,12 @@ async fn run_headless(
     // Create MCP HTTP state for tool serving with shared permission manager.
     // This ensures MCP tools use the same sandbox state as the Runner.
     let mcp_message_url = format!("http://{address}/mcp/message");
+<<<<<<< HEAD
+
+    let has_auth = secret.is_some();
+
+=======
+>>>>>>> main
     let mcp_state = create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager))
         .await
         .ok();
@@ -3338,6 +3369,10 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
 async fn start_mcp_server(
     cwd: &std::path::Path,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
+<<<<<<< HEAD
+    api_key: Option<String>,
+=======
+>>>>>>> main
 ) -> anyhow::Result<(String, tokio::task::JoinHandle<()>)> {
     use axum::Router;
     use wonopcode_mcp::create_mcp_router;
@@ -3352,8 +3387,19 @@ async fn start_mcp_server(
     let mcp_message_url = format!("http://{local_addr}/mcp/message");
 
     // Create MCP state with shared permission manager
+<<<<<<< HEAD
+    let mut mcp_state =
+        create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager)).await?;
+
+    // Add API key authentication if configured
+    if let Some(key) = api_key {
+        info!("MCP server API key authentication enabled");
+        mcp_state = mcp_state.with_api_key(key);
+    }
+=======
     let mcp_state =
         create_mcp_http_state(cwd, &mcp_message_url, Some(shared_permission_manager)).await?;
+>>>>>>> main
 
     // Create router with just MCP endpoints (no CORS needed for localhost)
     let mcp_router = create_mcp_router(mcp_state);
