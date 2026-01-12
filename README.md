@@ -52,6 +52,27 @@ Or install individually:
 
 ## Installation
 
+### Quick Install (Recommended)
+
+Install the latest release with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wonop-io/wonopcode/main/install.sh | bash
+```
+
+Or install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wonop-io/wonopcode/main/install.sh | bash -s -- --version v0.1.0
+```
+
+The installer automatically detects your platform and installs to `~/.local/bin` (or `/usr/local/bin` with sudo).
+
+**Supported platforms:**
+- Linux (x86_64, aarch64)
+- macOS (x86_64, Apple Silicon)
+- Windows (x86_64) - use PowerShell or WSL
+
 ### From Source
 
 ```bash
