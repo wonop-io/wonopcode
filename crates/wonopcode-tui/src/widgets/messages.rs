@@ -2343,7 +2343,7 @@ impl MessagesWidget {
                         .unwrap_or(after_pipe)
                         .to_string()
                 } else {
-                    line.to_string()
+                    (*line).to_string()
                 }
             })
             .collect();
@@ -2404,7 +2404,7 @@ impl MessagesWidget {
                 let t: String = line.chars().take(67).collect();
                 format!("{t}...")
             } else {
-                line.to_string()
+                (*line).to_string()
             };
 
             lines.push(Line::from(vec![
@@ -2474,7 +2474,7 @@ impl MessagesWidget {
                             let t: String = line.chars().take(67).collect();
                             format!("{t}...")
                         } else {
-                            line.to_string()
+                            (*line).to_string()
                         };
 
                         lines.push(Line::from(vec![

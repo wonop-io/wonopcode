@@ -771,9 +771,12 @@ impl Runner {
         {
             let provider = self.provider.read().await;
             let model_info = provider.model_info();
-            send_update(&update_tx, AppUpdate::ModelInfo {
-                context_limit: model_info.limit.context,
-            });
+            send_update(
+                &update_tx,
+                AppUpdate::ModelInfo {
+                    context_limit: model_info.limit.context,
+                },
+            );
         }
 
         // Send initial MCP status
@@ -963,11 +966,17 @@ impl Runner {
                     info!(model = %model_spec, "Changing model");
                     match self.change_model(&model_spec).await {
                         Ok(()) => {
-                            send_update(&update_tx, AppUpdate::Status(format!("Model changed to {model_spec}")));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Status(format!("Model changed to {model_spec}")),
+                            );
                         }
                         Err(e) => {
                             error!("Failed to change model: {}", e);
-                            send_update(&update_tx, AppUpdate::Error(format!("Failed to change model: {e}")));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Error(format!("Failed to change model: {e}")),
+                            );
                         }
                     }
                 }
@@ -1001,9 +1010,10 @@ impl Runner {
                 }
                 AppAction::Revert { message_id } => {
                     info!(message_id = %message_id, "Revert requested");
-                    send_update(&update_tx, AppUpdate::Status(format!(
-                        "Reverting to message {message_id}..."
-                    )));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(format!("Reverting to message {message_id}...")),
+                    );
 
                     // Create SessionRevert and perform revert
                     let project_id = self.instance.project_id().await;
@@ -1076,9 +1086,10 @@ impl Runner {
                     };
 
                     if messages.len() < 4 {
-                        send_update(&update_tx, AppUpdate::Status(
-                            "Not enough messages to compact".to_string(),
-                        ));
+                        send_update(
+                            &update_tx,
+                            AppUpdate::Status("Not enough messages to compact".to_string()),
+                        );
                         continue;
                     }
 
@@ -1133,16 +1144,23 @@ impl Runner {
                             send_update(&update_tx, AppUpdate::Status(status));
                         }
                         CompactionResult::NotNeeded => {
-                            send_update(&update_tx, AppUpdate::Status("Compaction not needed".to_string()));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Status("Compaction not needed".to_string()),
+                            );
                         }
                         CompactionResult::InsufficientMessages => {
-                            send_update(&update_tx, AppUpdate::Status(
-                                "Not enough messages to compact".to_string(),
-                            ));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Status("Not enough messages to compact".to_string()),
+                            );
                         }
                         CompactionResult::Failed(err) => {
                             warn!(error = %err, "Compaction failed");
-                            send_update(&update_tx, AppUpdate::Error(format!("Compaction failed: {err}")));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Error(format!("Compaction failed: {err}")),
+                            );
                         }
                     }
                 }
@@ -1169,9 +1187,10 @@ impl Runner {
                         match mcp_client.toggle_server(&name).await {
                             Ok(enabled) => {
                                 let status = if enabled { "enabled" } else { "disabled" };
-                                send_update(&update_tx, AppUpdate::Status(format!(
-                                    "MCP server '{name}' {status}"
-                                )));
+                                send_update(
+                                    &update_tx,
+                                    AppUpdate::Status(format!("MCP server '{name}' {status}")),
+                                );
 
                                 // Send updated MCP status
                                 let mcp_updates: Vec<McpStatusUpdate> = mcp_client
@@ -1188,23 +1207,33 @@ impl Runner {
                             }
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to toggle MCP server");
-                                send_update(&update_tx, AppUpdate::Error(format!(
-                                    "Failed to toggle '{name}': {e}"
-                                )));
+                                send_update(
+                                    &update_tx,
+                                    AppUpdate::Error(format!("Failed to toggle '{name}': {e}")),
+                                );
                             }
                         }
                     } else {
-                        send_update(&update_tx, AppUpdate::Error("No MCP client configured".to_string()));
+                        send_update(
+                            &update_tx,
+                            AppUpdate::Error("No MCP client configured".to_string()),
+                        );
                     }
                 }
                 AppAction::McpReconnect { name } => {
                     info!(server = %name, "MCP reconnect requested");
                     if let Some(ref mcp_client) = self.mcp_client {
-                        send_update(&update_tx, AppUpdate::Status(format!("Reconnecting to '{name}'...")));
+                        send_update(
+                            &update_tx,
+                            AppUpdate::Status(format!("Reconnecting to '{name}'...")),
+                        );
 
                         match mcp_client.reconnect_server(&name).await {
                             Ok(()) => {
-                                send_update(&update_tx, AppUpdate::Status(format!("Reconnected to '{name}'")));
+                                send_update(
+                                    &update_tx,
+                                    AppUpdate::Status(format!("Reconnected to '{name}'")),
+                                );
 
                                 // Send updated MCP status
                                 let mcp_updates: Vec<McpStatusUpdate> = mcp_client
@@ -1221,13 +1250,17 @@ impl Runner {
                             }
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to reconnect MCP server");
-                                send_update(&update_tx, AppUpdate::Error(format!(
-                                    "Failed to reconnect '{name}': {e}"
-                                )));
+                                send_update(
+                                    &update_tx,
+                                    AppUpdate::Error(format!("Failed to reconnect '{name}': {e}")),
+                                );
                             }
                         }
                     } else {
-                        send_update(&update_tx, AppUpdate::Error("No MCP client configured".to_string()));
+                        send_update(
+                            &update_tx,
+                            AppUpdate::Error("No MCP client configured".to_string()),
+                        );
                     }
                 }
                 AppAction::ForkSession { message_id } => {
@@ -1247,10 +1280,13 @@ impl Runner {
                                 let mut history = self.history.write().await;
                                 history.clear();
                             }
-                            send_update(&update_tx, AppUpdate::Status(format!(
-                                "Forked to new session: {}",
-                                forked.title
-                            )));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Status(format!(
+                                    "Forked to new session: {}",
+                                    forked.title
+                                )),
+                            );
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to fork session");
@@ -1274,7 +1310,10 @@ impl Runner {
                     {
                         Ok(share_info) => {
                             info!(url = %share_info.url, "Session shared successfully");
-                            send_update(&update_tx, AppUpdate::Status(format!("Shared at: {}", share_info.url)));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Status(format!("Shared at: {}", share_info.url)),
+                            );
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to share session");
@@ -1286,16 +1325,21 @@ impl Runner {
                     info!("Unshare session requested");
                     // Unsharing requires the share secret which we don't store in the TUI
                     // This would need to be retrieved from session metadata
-                    send_update(&update_tx, AppUpdate::Status(
-                        "Unshare requires share secret - use CLI: wonopcode unshare".to_string(),
-                    ));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(
+                            "Unshare requires share secret - use CLI: wonopcode unshare"
+                                .to_string(),
+                        ),
+                    );
                 }
                 AppAction::GotoMessage { message_id } => {
                     info!(message_id = %message_id, "Go to message requested");
                     // This is handled in the TUI (scroll to message)
-                    send_update(&update_tx, AppUpdate::Status(format!(
-                        "Navigated to message {message_id}"
-                    )));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(format!("Navigated to message {message_id}")),
+                    );
                 }
                 AppAction::SandboxStart => {
                     info!("Sandbox start requested");
@@ -1322,9 +1366,10 @@ impl Runner {
                                 SaveScope::Project => "project config",
                                 SaveScope::Global => "global config",
                             };
-                            send_update(&update_tx, AppUpdate::SystemMessage(format!(
-                                "Settings saved to {location}"
-                            )));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::SystemMessage(format!("Settings saved to {location}")),
+                            );
 
                             // Reload permission rules if permission config changed
                             if let Some(perm_config) = &config.permission {
@@ -1336,7 +1381,10 @@ impl Runner {
                         }
                         Err(e) => {
                             error!("Failed to save settings: {}", e);
-                            send_update(&update_tx, AppUpdate::Error(format!("Failed to save settings: {e}")));
+                            send_update(
+                                &update_tx,
+                                AppUpdate::Error(format!("Failed to save settings: {e}")),
+                            );
                         }
                     }
                 }
@@ -1457,13 +1505,14 @@ impl Runner {
         );
         if let Some(ref manager) = self.sandbox_manager {
             // Send starting status
-            send_update(&update_tx, AppUpdate::SandboxUpdated(
-                wonopcode_tui::SandboxStatusUpdate {
+            send_update(
+                &update_tx,
+                AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                     state: "starting".to_string(),
                     runtime_type: Some(manager.runtime_type_display()),
                     error: None,
-                },
-            ));
+                }),
+            );
 
             match manager.start().await {
                 Ok(()) => {
@@ -1489,13 +1538,14 @@ impl Runner {
                             error: None,
                         })
                         .await;
-                    send_update(&update_tx, AppUpdate::SandboxUpdated(
-                        wonopcode_tui::SandboxStatusUpdate {
+                    send_update(
+                        &update_tx,
+                        AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                             state: "running".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: None,
-                        },
-                    ));
+                        }),
+                    );
 
                     // Send system message about sandbox starting
                     let runtime = manager.runtime_type_display().to_lowercase();
@@ -1515,23 +1565,25 @@ impl Runner {
                             error: Some(e.to_string()),
                         })
                         .await;
-                    send_update(&update_tx, AppUpdate::SandboxUpdated(
-                        wonopcode_tui::SandboxStatusUpdate {
+                    send_update(
+                        &update_tx,
+                        AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: Some(e.to_string()),
-                        },
-                    ));
+                        }),
+                    );
                 }
             }
         } else {
-            send_update(&update_tx, AppUpdate::SandboxUpdated(
-                wonopcode_tui::SandboxStatusUpdate {
+            send_update(
+                &update_tx,
+                AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                     state: "disabled".to_string(),
                     runtime_type: None,
                     error: Some("Sandbox not configured".to_string()),
-                },
-            ));
+                }),
+            );
         }
     }
 
@@ -1614,41 +1666,48 @@ impl Runner {
                             error: None,
                         })
                         .await;
-                    send_update(&update_tx, AppUpdate::SandboxUpdated(
-                        wonopcode_tui::SandboxStatusUpdate {
+                    send_update(
+                        &update_tx,
+                        AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                             state: "stopped".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: None,
-                        },
-                    ));
+                        }),
+                    );
 
                     // Send system message about sandbox stopping
-                    send_update(&update_tx, AppUpdate::SystemMessage(
-                        "◇ Sandbox stopped - commands will execute directly on host".to_string(),
-                    ));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::SystemMessage(
+                            "◇ Sandbox stopped - commands will execute directly on host"
+                                .to_string(),
+                        ),
+                    );
 
                     // Recreate provider with sandbox disabled so MCP server doesn't use sandbox
                     self.recreate_provider_with_sandbox(false).await;
                 }
                 Err(e) => {
                     warn!(error = %e, "Failed to stop sandbox");
-                    send_update(&update_tx, AppUpdate::SandboxUpdated(
-                        wonopcode_tui::SandboxStatusUpdate {
+                    send_update(
+                        &update_tx,
+                        AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: Some(e.to_string()),
-                        },
-                    ));
+                        }),
+                    );
                 }
             }
         } else {
-            send_update(&update_tx, AppUpdate::SandboxUpdated(
-                wonopcode_tui::SandboxStatusUpdate {
+            send_update(
+                &update_tx,
+                AppUpdate::SandboxUpdated(wonopcode_tui::SandboxStatusUpdate {
                     state: "disabled".to_string(),
                     runtime_type: None,
                     error: Some("Sandbox not configured".to_string()),
-                },
-            ));
+                }),
+            );
         }
     }
 
@@ -1711,10 +1770,10 @@ impl Runner {
                 threshold = AUTO_COMPACT_MESSAGE_THRESHOLD,
                 "Message count exceeds threshold, triggering automatic compaction"
             );
-            send_update(&update_tx, AppUpdate::Status(format!(
-                "Auto-compacting {} messages...",
-                messages.len()
-            )));
+            send_update(
+                &update_tx,
+                AppUpdate::Status(format!("Auto-compacting {} messages...", messages.len())),
+            );
 
             let compact_start = Instant::now();
             let messages_before = messages.len();
@@ -1757,11 +1816,14 @@ impl Runner {
                         *history = messages.clone();
                     }
 
-                    send_update(&update_tx, AppUpdate::Status(format!(
-                        "Auto-compacted {} → {} messages",
-                        messages_before,
-                        messages.len()
-                    )));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(format!(
+                            "Auto-compacted {} → {} messages",
+                            messages_before,
+                            messages.len()
+                        )),
+                    );
                 }
                 CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
                     // If AI compaction not possible, do simple truncation
@@ -1791,11 +1853,14 @@ impl Runner {
                             *history = messages.clone();
                         }
 
-                        send_update(&update_tx, AppUpdate::Status(format!(
-                            "Truncated {} → {} messages",
-                            messages_before,
-                            messages.len()
-                        )));
+                        send_update(
+                            &update_tx,
+                            AppUpdate::Status(format!(
+                                "Truncated {} → {} messages",
+                                messages_before,
+                                messages.len()
+                            )),
+                        );
                     }
                 }
                 CompactionResult::Failed(err) => {
@@ -1811,7 +1876,10 @@ impl Runner {
                 context_limit = context_limit,
                 "Context approaching limit, attempting smart compaction"
             );
-            send_update(&update_tx, AppUpdate::Status("Compacting conversation...".to_string()));
+            send_update(
+                &update_tx,
+                AppUpdate::Status("Compacting conversation...".to_string()),
+            );
 
             // Estimate token usage for compaction decision
             let estimated_tokens = compaction::estimate_token_usage(&messages);
@@ -2145,7 +2213,10 @@ impl Runner {
                                                 root,
                                                 connected: true,
                                             };
-                                            send_update(&update_tx, AppUpdate::LspUpdated(vec![lsp_update]));
+                                            send_update(
+                                                &update_tx,
+                                                AppUpdate::LspUpdated(vec![lsp_update]),
+                                            );
                                         }
                                     }
                                 }
@@ -2179,7 +2250,10 @@ impl Runner {
                                         })
                                         .collect();
                                     if !todo_updates.is_empty() {
-                                        send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+                                        send_update(
+                                            &update_tx,
+                                            AppUpdate::TodosUpdated(todo_updates),
+                                        );
                                     }
                                 }
                             }
@@ -2191,7 +2265,10 @@ impl Runner {
                                     tool_name, input, &output,
                                 ) {
                                     debug!(path = %update.path, added = update.added, removed = update.removed, "Sending ModifiedFilesUpdated for observed tool");
-                                    send_update(&update_tx, AppUpdate::ModifiedFilesUpdated(vec![update]));
+                                    send_update(
+                                        &update_tx,
+                                        AppUpdate::ModifiedFilesUpdated(vec![update]),
+                                    );
                                 }
                             }
                         }
@@ -2204,12 +2281,15 @@ impl Runner {
                             })
                             .map(serde_json::Value::Object);
 
-                        send_update(&update_tx, AppUpdate::ToolCompleted {
-                            id,
-                            success,
-                            output,
-                            metadata,
-                        });
+                        send_update(
+                            &update_tx,
+                            AppUpdate::ToolCompleted {
+                                id,
+                                success,
+                                output,
+                                metadata,
+                            },
+                        );
                     }
                     StreamChunk::FinishStep {
                         usage,
@@ -2230,12 +2310,15 @@ impl Runner {
                         };
 
                         // Send token usage update
-                        send_update(&update_tx, AppUpdate::TokenUsage {
-                            input: total_input + step_usage.input_tokens,
-                            output: total_output + step_usage.output_tokens,
-                            cost,
-                            context_limit,
-                        });
+                        send_update(
+                            &update_tx,
+                            AppUpdate::TokenUsage {
+                                input: total_input + step_usage.input_tokens,
+                                output: total_output + step_usage.output_tokens,
+                                cost,
+                                context_limit,
+                            },
+                        );
                     }
                     StreamChunk::Error(e) => {
                         warn!("Stream error: {}", e);
@@ -2374,17 +2457,23 @@ impl Runner {
                         Please try a different approach or use different arguments."
                     );
 
-                    send_update(&update_tx, AppUpdate::ToolStarted {
-                        name: tool_name.clone(),
-                        id: call_id.clone(),
-                        input: "{}".to_string(),
-                    });
-                    send_update(&update_tx, AppUpdate::ToolCompleted {
-                        id: call_id.clone(),
-                        success: false,
-                        output: error_msg.clone(),
-                        metadata: None,
-                    });
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ToolStarted {
+                            name: tool_name.clone(),
+                            id: call_id.clone(),
+                            input: "{}".to_string(),
+                        },
+                    );
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ToolCompleted {
+                            id: call_id.clone(),
+                            success: false,
+                            output: error_msg.clone(),
+                            metadata: None,
+                        },
+                    );
 
                     messages.push(ProviderMessage::tool_result(call_id, &error_msg));
                 }
@@ -2396,17 +2485,23 @@ impl Runner {
                         The user has declined to allow this tool execution."
                     );
 
-                    send_update(&update_tx, AppUpdate::ToolStarted {
-                        name: tool_name.clone(),
-                        id: call_id.clone(),
-                        input: "{}".to_string(),
-                    });
-                    send_update(&update_tx, AppUpdate::ToolCompleted {
-                        id: call_id.clone(),
-                        success: false,
-                        output: error_msg.clone(),
-                        metadata: None,
-                    });
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ToolStarted {
+                            name: tool_name.clone(),
+                            id: call_id.clone(),
+                            input: "{}".to_string(),
+                        },
+                    );
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ToolCompleted {
+                            id: call_id.clone(),
+                            success: false,
+                            output: error_msg.clone(),
+                            metadata: None,
+                        },
+                    );
 
                     messages.push(ProviderMessage::tool_result(call_id, &error_msg));
                 }
@@ -2430,18 +2525,24 @@ impl Runner {
                         "Tool invoked"
                     );
 
-                    send_update(&update_tx, AppUpdate::ToolStarted {
-                        name: tool_name.clone(),
-                        id: call_id.clone(),
-                        input: args_str.clone(),
-                    });
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ToolStarted {
+                            name: tool_name.clone(),
+                            id: call_id.clone(),
+                            input: args_str.clone(),
+                        },
+                    );
                 }
 
                 if tool_calls.len() > 1 {
-                    send_update(&update_tx, AppUpdate::Status(format!(
-                        "Running {} tools in parallel",
-                        tool_calls.len()
-                    )));
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(format!(
+                            "Running {} tools in parallel",
+                            tool_calls.len()
+                        )),
+                    );
                 }
 
                 // Spawn all tools concurrently (Box::pin for select_all compatibility)
@@ -2461,7 +2562,7 @@ impl Runner {
                         // Create event channel for immediate tool event notifications
                         let (tool_event_tx, mut tool_event_rx) = tokio::sync::mpsc::unbounded_channel();
                         let update_tx_for_events = update_tx.clone();
-                        
+
                         // Spawn task to forward tool events to TUI updates
                         tokio::spawn(async move {
                             debug!("Tool event receiver task started");
@@ -2776,7 +2877,8 @@ impl Runner {
                 // Wait for tools to complete, with cancellation support
                 // Use select_all in a loop so we can exit early on cancellation
                 // while preserving results from completed tools
-                let mut tool_results: Vec<(String, String, String, bool, serde_json::Value)> = Vec::new();
+                let mut tool_results: Vec<(String, String, String, bool, serde_json::Value)> =
+                    Vec::new();
                 let mut remaining_futures = tool_futures;
                 let mut cancelled = false;
 
@@ -2872,37 +2974,49 @@ impl Runner {
 
         match git.status() {
             Ok(status) => {
-                send_update(&update_tx, AppUpdate::GitStatusUpdated(GitStatusUpdate {
-                    branch: status.branch,
-                    ahead: status.ahead,
-                    behind: status.behind,
-                    files: status
-                        .files
-                        .into_iter()
-                        .map(|f| GitFileUpdate {
-                            path: f.path,
-                            status: match f.status {
-                                wonopcode_server::GitFileState::Modified => "modified".to_string(),
-                                wonopcode_server::GitFileState::Added => "added".to_string(),
-                                wonopcode_server::GitFileState::Deleted => "deleted".to_string(),
-                                wonopcode_server::GitFileState::Renamed => "renamed".to_string(),
-                                wonopcode_server::GitFileState::Untracked => {
-                                    "untracked".to_string()
-                                }
-                                wonopcode_server::GitFileState::Conflicted => {
-                                    "conflicted".to_string()
-                                }
-                            },
-                            staged: f.staged,
-                        })
-                        .collect(),
-                }));
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitStatusUpdated(GitStatusUpdate {
+                        branch: status.branch,
+                        ahead: status.ahead,
+                        behind: status.behind,
+                        files: status
+                            .files
+                            .into_iter()
+                            .map(|f| GitFileUpdate {
+                                path: f.path,
+                                status: match f.status {
+                                    wonopcode_server::GitFileState::Modified => {
+                                        "modified".to_string()
+                                    }
+                                    wonopcode_server::GitFileState::Added => "added".to_string(),
+                                    wonopcode_server::GitFileState::Deleted => {
+                                        "deleted".to_string()
+                                    }
+                                    wonopcode_server::GitFileState::Renamed => {
+                                        "renamed".to_string()
+                                    }
+                                    wonopcode_server::GitFileState::Untracked => {
+                                        "untracked".to_string()
+                                    }
+                                    wonopcode_server::GitFileState::Conflicted => {
+                                        "conflicted".to_string()
+                                    }
+                                },
+                                staged: f.staged,
+                            })
+                            .collect(),
+                    }),
+                );
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -2918,18 +3032,24 @@ impl Runner {
 
         match git.stage(&paths) {
             Ok(()) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: format!("Staged {} file(s)", paths.len()),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: format!("Staged {} file(s)", paths.len()),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -2945,18 +3065,24 @@ impl Runner {
 
         match git.unstage(&paths) {
             Ok(()) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: format!("Unstaged {} file(s)", paths.len()),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: format!("Unstaged {} file(s)", paths.len()),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -2972,18 +3098,24 @@ impl Runner {
 
         match git.checkout(&paths) {
             Ok(()) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: format!("Discarded changes to {} file(s)", paths.len()),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: format!("Discarded changes to {} file(s)", paths.len()),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -2999,18 +3131,24 @@ impl Runner {
 
         match git.commit(&message) {
             Ok(commit_info) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: format!("Committed: {}", commit_info.id),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: format!("Committed: {}", commit_info.id),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -3022,23 +3160,29 @@ impl Runner {
 
         match git.history(50) {
             Ok(commits) => {
-                send_update(&update_tx, AppUpdate::GitHistoryUpdated(
-                    commits
-                        .into_iter()
-                        .map(|c| GitCommitUpdate {
-                            id: c.id,
-                            message: c.message,
-                            author: c.author,
-                            date: c.timestamp,
-                        })
-                        .collect(),
-                ));
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitHistoryUpdated(
+                        commits
+                            .into_iter()
+                            .map(|c| GitCommitUpdate {
+                                id: c.id,
+                                message: c.message,
+                                author: c.author,
+                                date: c.timestamp,
+                            })
+                            .collect(),
+                    ),
+                );
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -3050,18 +3194,24 @@ impl Runner {
 
         match git.push(None, None) {
             Ok(()) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: "Push successful".to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: "Push successful".to_string(),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }
@@ -3073,18 +3223,24 @@ impl Runner {
 
         match git.pull(None, None) {
             Ok(()) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: true,
-                    message: "Pull successful".to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: true,
+                        message: "Pull successful".to_string(),
+                    },
+                );
                 // Refresh status
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                send_update(&update_tx, AppUpdate::GitOperationResult {
-                    success: false,
-                    message: e.to_string(),
-                });
+                send_update(
+                    &update_tx,
+                    AppUpdate::GitOperationResult {
+                        success: false,
+                        message: e.to_string(),
+                    },
+                );
             }
         }
     }

@@ -128,14 +128,14 @@ impl Bus {
         if let Ok(payload) = serde_json::to_value(&event) {
             let seq = self.inner.sequence.fetch_add(1, Ordering::SeqCst) + 1;
             let timestamp = chrono::Utc::now().timestamp_millis();
-            
+
             let sequenced_event = SequencedEvent {
                 seq,
                 timestamp,
                 event_type: E::event_type().to_string(),
                 payload,
             };
-            
+
             // Add to replay buffer
             {
                 let mut buffer = self.inner.replay_buffer.write().await;
@@ -144,7 +144,7 @@ impl Bus {
                 }
                 buffer.push_back(sequenced_event.clone());
             }
-            
+
             let _ = self.inner.wildcard.send(sequenced_event);
         }
     }

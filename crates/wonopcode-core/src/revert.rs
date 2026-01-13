@@ -88,9 +88,10 @@ impl SessionRevert {
                     }
 
                     // If reverting to an assistant message, actually revert to the user message before it
-                    if !msg.is_user() && last_user_message_id.is_some() && revert_part_id.is_none()
-                    {
-                        revert_message_id = last_user_message_id.clone().unwrap();
+                    if !msg.is_user() && revert_part_id.is_none() {
+                        if let Some(ref user_msg_id) = last_user_message_id {
+                            revert_message_id = user_msg_id.clone();
+                        }
                     }
 
                     found_revert_point = true;

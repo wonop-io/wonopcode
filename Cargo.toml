@@ -68,7 +68,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 # CLI & TUI
 clap = { version = "4", features = ["derive"] }
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
-crossterm = "0.29"
+crossterm = "0.28"
 tui-textarea = { version = "0.7", default-features = false, features = ["crossterm"] }
 
 # Error handling
@@ -120,13 +120,21 @@ bollard = "0.18"
 bytesize = "1"
 
 [workspace.lints.clippy]
-# Note: unwrap_used/expect_used are intentionally not enabled as warnings
-# to avoid noise. Use `cargo clippy -- -W clippy::unwrap_used` to check.
-
-# Encourage better error handling
+# Keep only real bug-catching lints
 result_large_err = "warn"
-# Code quality - these are auto-fixable
 redundant_clone = "warn"
+large_enum_variant = "warn"
+too_many_arguments = "warn"
+
+# Explicitly allow noisy style lints
+needless_borrow = "allow"
+uninlined_format_args = "allow"
+print_literal = "allow"
+
+[workspace.lints.rust]
+# Require documentation on public items
+# missing_docs = "warn"  # Enable this incrementally per-crate
+unsafe_code = "warn"
 
 [profile.release]
 lto = true

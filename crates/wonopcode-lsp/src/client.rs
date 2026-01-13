@@ -213,7 +213,7 @@ impl LspClient {
             {
                 let servers = self.servers.read().await;
                 if let Some(conn) = servers.get(&key) {
-                    result.push(conn.clone());
+                    result.push(Arc::clone(conn));
                     continue;
                 }
             }
@@ -222,7 +222,7 @@ impl LspClient {
             let notify = {
                 let mut spawning = self.spawning.lock().await;
                 if let Some(notify) = spawning.get(&key) {
-                    Some(notify.clone())
+                    Some(Arc::clone(notify))
                 } else {
                     // We'll be the one spawning
                     let notify = Arc::new(tokio::sync::Notify::new());
@@ -238,7 +238,7 @@ impl LspClient {
                 // Check if it succeeded
                 let servers = self.servers.read().await;
                 if let Some(conn) = servers.get(&key) {
-                    result.push(conn.clone());
+                    result.push(Arc::clone(conn));
                 }
                 continue;
             }
@@ -247,7 +247,10 @@ impl LspClient {
             match self.spawn_server(config.clone(), root.clone()).await {
                 Ok(conn) => {
                     let conn = Arc::new(conn);
-                    self.servers.write().await.insert(key.clone(), conn.clone());
+                    self.servers
+                        .write()
+                        .await
+                        .insert(key.clone(), Arc::clone(&conn));
                     result.push(conn);
                     info!(server = %config.language, root = %root.display(), "LSP server connected");
                 }

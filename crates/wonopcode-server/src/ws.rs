@@ -74,10 +74,7 @@ pub struct EventSequenceState {
 }
 
 /// WebSocket upgrade handler.
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
@@ -135,7 +132,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             Err(e) => {
                                 warn!("Invalid client message: {}", e);
                                 let error = ServerMessage::Error {
-                                    message: format!("Invalid message: {}", e),
+                                    message: format!("Invalid message: {e}"),
                                 };
                                 if let Ok(json) = serde_json::to_string(&error) {
                                     let _ = sender.send(Message::Text(json.into())).await;

@@ -272,7 +272,7 @@ async fn get_full_state(State(state): State<AppState>) -> impl IntoResponse {
     let instance = state.instance.read().await;
     let project_id = instance.project_id().await;
     let worktree = instance.worktree().await;
-    
+
     // Get todos
     let todos = state.get_todos().await;
     let todos_json: Vec<serde_json::Value> = todos
@@ -286,15 +286,15 @@ async fn get_full_state(State(state): State<AppState>) -> impl IntoResponse {
             })
         })
         .collect();
-    
+
     // Get active sessions (runners)
     let runners = state.session_runners.read().await;
     let active_sessions: Vec<String> = runners.keys().cloned().collect();
-    
+
     // Get event sequence info
     let current_seq = state.bus.current_sequence();
     let oldest_seq = state.bus.oldest_sequence().await;
-    
+
     Json(serde_json::json!({
         "instance": {
             "directory": instance.directory().display().to_string(),
@@ -339,7 +339,7 @@ async fn events_replay(
 ) -> impl IntoResponse {
     let limit = query.limit.min(1000); // Cap at 1000
     let events = state.bus.replay_from(query.from_seq, limit).await;
-    
+
     Json(serde_json::json!({
         "events": events,
         "count": events.len(),
@@ -351,7 +351,7 @@ async fn events_replay(
 async fn events_sequence(State(state): State<AppState>) -> impl IntoResponse {
     let current_seq = state.bus.current_sequence();
     let oldest_seq = state.bus.oldest_sequence().await;
-    
+
     Json(serde_json::json!({
         "current_seq": current_seq,
         "oldest_seq": oldest_seq,
@@ -1278,8 +1278,8 @@ async fn session_command(
         ));
     };
     let parts: Vec<&str> = stripped.splitn(2, ' ').collect();
-    let cmd_name = parts.first().unwrap_or(&"").to_string();
-    let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+    let cmd_name = (*parts.first().unwrap_or(&"")).to_string();
+    let args = parts.get(1).map(|s| (*s).to_string()).unwrap_or_default();
 
     // Get the command registry
     let registry = wonopcode_core::CommandRegistry::with_builtins();

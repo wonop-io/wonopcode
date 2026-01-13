@@ -66,7 +66,7 @@ impl Default for LogConfig {
 /// Initialize logging with the given configuration.
 ///
 /// This should be called once at application startup.
-pub fn init(config: LogConfig) {
+pub fn init(config: &LogConfig) {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(config.level.as_str()));
 
