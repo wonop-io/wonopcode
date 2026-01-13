@@ -1768,9 +1768,7 @@ async fn run_headless(
                             id: uuid::Uuid::new_v4().to_string(),
                             role: "assistant".to_string(),
                             content: vec![],
-                            timestamp: chrono::Utc::now()
-                                .format("%Y-%m-%d %H:%M:%S")
-                                .to_string(),
+                            timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                             tool_calls: vec![],
                             model,
                             agent,
@@ -2380,24 +2378,23 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     // Apply current session with messages
     if let Some(session) = state.session {
         // Helper to convert protocol ToolCall to TUI DisplayToolCall
-        let convert_tool =
-            |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
-                let status = match tool.status.as_str() {
-                    "completed" => wonopcode_tui::ToolStatus::Success,
-                    "failed" => wonopcode_tui::ToolStatus::Error,
-                    "running" => wonopcode_tui::ToolStatus::Running,
-                    _ => wonopcode_tui::ToolStatus::Pending,
-                };
-                wonopcode_tui::DisplayToolCall {
-                    id: tool.id.clone(),
-                    name: tool.name.clone(),
-                    input: Some(tool.input.clone()),
-                    output: tool.output.clone(),
-                    status,
-                    metadata: None,
-                    expanded: false,
-                }
+        let convert_tool = |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
+            let status = match tool.status.as_str() {
+                "completed" => wonopcode_tui::ToolStatus::Success,
+                "failed" => wonopcode_tui::ToolStatus::Error,
+                "running" => wonopcode_tui::ToolStatus::Running,
+                _ => wonopcode_tui::ToolStatus::Pending,
             };
+            wonopcode_tui::DisplayToolCall {
+                id: tool.id.clone(),
+                name: tool.name.clone(),
+                input: Some(tool.input.clone()),
+                output: tool.output.clone(),
+                status,
+                metadata: None,
+                expanded: false,
+            }
+        };
 
         // Helper to convert a protocol message to display message
         let convert_message = |msg: &wonopcode_protocol::Message| -> wonopcode_tui::DisplayMessage {
@@ -2446,7 +2443,10 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                     }
 
                     // Convert agent string to AgentMode
-                    let agent_mode = msg.agent.as_ref().map(|a| wonopcode_tui::AgentMode::parse(a));
+                    let agent_mode = msg
+                        .agent
+                        .as_ref()
+                        .map(|a| wonopcode_tui::AgentMode::parse(a));
 
                     wonopcode_tui::DisplayMessage::assistant_with_segments(all_segments)
                         .with_model_agent(msg.model.clone(), agent_mode)
