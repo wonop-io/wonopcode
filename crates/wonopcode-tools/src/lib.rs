@@ -33,10 +33,18 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
 use wonopcode_util::FileTimeState;
+
+/// Event that tools can emit to notify listeners of state changes.
+#[derive(Debug, Clone)]
+pub enum ToolEvent {
+    /// Todo list was updated with new items.
+    TodosUpdated(Vec<todo::TodoItem>),
+}
 
 /// Context provided to tools during execution.
 pub struct ToolContext {
@@ -58,6 +66,8 @@ pub struct ToolContext {
     pub file_time: Option<Arc<FileTimeState>>,
     /// Optional sandbox runtime for isolated execution.
     pub sandbox: Option<Arc<dyn SandboxRuntime>>,
+    /// Optional event sender for immediate notifications.
+    pub event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
 }
 
 impl ToolContext {

@@ -201,6 +201,7 @@ Usage notes:
             snapshot: ctx.snapshot.clone(),
             file_time: ctx.file_time.clone(),
             sandbox: ctx.sandbox.clone(),
+            event_tx: ctx.event_tx.clone(),
         };
 
         // Execute the subagent

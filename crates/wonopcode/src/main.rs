@@ -2,6 +2,7 @@
 //!
 //! This is the main entry point for the wonopcode CLI.
 
+mod commands;
 mod compaction;
 #[cfg(feature = "github")]
 mod github;
@@ -10,11 +11,14 @@ mod runner;
 mod stats;
 mod upgrade;
 
+// Re-export command types for use in Commands enum
+use commands::{AuthCommands, McpCommands, SessionCommands};
+
 use clap::{Parser, Subcommand};
 use runner::{Runner, RunnerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Parser)]
 #[command(name = "wonopcode")]
@@ -250,37 +254,7 @@ enum Commands {
     },
 }
 
-#[derive(Subcommand)]
-enum AuthCommands {
-    /// Log in to a provider
-    Login {
-        /// Provider name
-        provider: String,
-    },
-    /// Log out from a provider
-    Logout {
-        /// Provider name
-        provider: String,
-    },
-    /// Show authentication status
-    Status,
-}
-
-#[derive(Subcommand)]
-enum SessionCommands {
-    /// List all sessions
-    List,
-    /// Show session details
-    Show {
-        /// Session ID
-        id: String,
-    },
-    /// Delete a session
-    Delete {
-        /// Session ID
-        id: String,
-    },
-}
+// AuthCommands, SessionCommands, and McpCommands are defined in commands module
 
 #[cfg(feature = "github")]
 #[derive(Subcommand)]
@@ -295,36 +269,6 @@ enum GithubCommands {
         /// GitHub token
         #[arg(long)]
         token: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum McpCommands {
-    /// Add an MCP server
-    Add {
-        /// Server name
-        name: String,
-        /// Server type: local or remote
-        #[arg(short, long, default_value = "local")]
-        server_type: String,
-        /// Command for local servers or URL for remote
-        #[arg(short, long)]
-        command: Option<String>,
-        /// URL for remote servers
-        #[arg(short, long)]
-        url: Option<String>,
-    },
-    /// List MCP servers and their status
-    List,
-    /// Authenticate with an OAuth-enabled MCP server
-    Auth {
-        /// Server name
-        name: String,
-    },
-    /// Remove OAuth credentials for an MCP server
-    Logout {
-        /// Server name
-        name: String,
     },
 }
 
@@ -391,14 +335,14 @@ async fn main() -> anyhow::Result<()> {
             print_version();
             Ok(())
         }
-        Some(Commands::Auth { command }) => handle_auth(command).await,
-        Some(Commands::Session { command }) => handle_session(command, &cwd).await,
+        Some(Commands::Auth { command }) => commands::handle_auth(command).await,
+        Some(Commands::Session { command }) => commands::handle_session(command, &cwd).await,
         Some(Commands::Export {
             session,
             output,
             format,
-        }) => handle_export(&cwd, session, output, &format).await,
-        Some(Commands::Import { input }) => handle_import(&cwd, input).await,
+        }) => commands::handle_export(&cwd, session, output, &format).await,
+        Some(Commands::Import { input }) => commands::handle_import(&cwd, input).await,
         Some(Commands::Acp { cwd: acp_cwd }) => {
             let working_dir = acp_cwd.unwrap_or_else(|| cwd.clone());
             run_acp(&working_dir).await
@@ -413,7 +357,7 @@ async fn main() -> anyhow::Result<()> {
             project,
         }) => handle_stats(&cwd, days, tools, project).await,
         Some(Commands::Web { address, open }) => run_web_server(address, open, &cwd).await,
-        Some(Commands::Mcp { command }) => handle_mcp(command, &cwd).await,
+        Some(Commands::Mcp { command }) => commands::handle_mcp(command, &cwd).await,
         Some(Commands::Check { channel, json }) => {
             let channel = channel.and_then(|s| parse_release_channel(&s));
             upgrade::handle_check(channel, json).await
@@ -970,706 +914,12 @@ fn print_version() {
     println!("https://github.com/wonop-io/wonopcode");
 }
 
-/// Handle authentication commands.
-async fn handle_auth(command: AuthCommands) -> anyhow::Result<()> {
-    match command {
-        AuthCommands::Login { provider } => {
-            auth_login(&provider).await?;
-        }
-        AuthCommands::Logout { provider } => {
-            auth_logout(&provider).await?;
-        }
-        AuthCommands::Status => {
-            auth_status().await?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Log in to a provider.
-async fn auth_login(provider: &str) -> anyhow::Result<()> {
-    use std::io::{self, Write};
-    use wonopcode_provider::claude_cli::ClaudeCliProvider;
-
-    // Validate provider and get key URL
-    let key_url = match provider {
-        "anthropic" => "https://console.anthropic.com/settings/keys",
-        "openai" => "https://platform.openai.com/api-keys",
-        "openrouter" => "https://openrouter.ai/keys",
-        _ => {
-            eprintln!("Unknown provider: {provider}");
-            eprintln!("Supported providers: anthropic, openai, openrouter");
-            return Ok(());
-        }
-    };
-
-    // Special handling for Anthropic - offer subscription option
-    if provider == "anthropic" {
-        println!();
-        println!("Anthropic Authentication");
-        println!("========================");
-        println!();
-
-        // Check if Claude CLI is available
-        if ClaudeCliProvider::is_available() {
-            println!("Choose authentication method:");
-            println!();
-            println!("  1. Claude subscription (via Claude Code CLI)");
-            println!("     - Uses your Claude Max/Pro subscription");
-            println!("     - No per-token usage costs");
-            println!();
-            println!("  2. API key");
-            println!("     - Pay-per-use via Anthropic API");
-            println!("     - Requires API key from console.anthropic.com");
-            println!();
-            print!("Enter choice [1/2]: ");
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-
-            if input.trim() == "1" {
-                // Check if already authenticated before starting setup
-                print!("Checking current authentication status... ");
-                io::stdout().flush()?;
-
-                if ClaudeCliProvider::is_authenticated() {
-                    println!("already authenticated!");
-                    println!();
-                    println!("You are already authenticated via Claude CLI subscription.");
-                    println!("You can use wonopcode with your subscription now.");
-                    return Ok(());
-                }
-                println!("not authenticated.");
-                return auth_login_claude_subscription().await;
-            }
-            // Otherwise fall through to API key
-        }
-    }
-
-    auth_login_api_key(provider, key_url).await
-}
-
-/// Login using Claude CLI subscription.
-async fn auth_login_claude_subscription() -> anyhow::Result<()> {
-    use std::process::Command;
-
-    println!();
-    println!("Claude Subscription Login");
-    println!("=========================");
-    println!();
-    println!("This will open the Claude Code CLI setup-token flow.");
-    println!("You'll be redirected to claude.ai to authenticate.");
-    println!();
-    println!("Note: If this is your first time, you may need to run");
-    println!("      'claude' once interactively to complete initial setup.");
-    println!();
-
-    // Run claude setup-token (the correct command for auth)
-    let status = Command::new("claude").arg("setup-token").status();
-
-    match status {
-        Ok(exit_status) if exit_status.success() => {
-            println!();
-            println!("Authentication successful!");
-            println!();
-            println!("You can now use wonopcode with your Claude subscription.");
-            println!("No API key is required - your subscription covers usage.");
-        }
-        Ok(_) => {
-            eprintln!();
-            eprintln!("Authentication failed or was cancelled.");
-            eprintln!();
-            eprintln!("If this is your first time, try running 'claude' once");
-            eprintln!("to complete the initial setup, then retry:");
-            eprintln!("  wonopcode auth login anthropic");
-        }
-        Err(e) => {
-            eprintln!();
-            eprintln!("Error running Claude CLI: {e}");
-            eprintln!();
-            eprintln!("Make sure Claude Code CLI is installed:");
-            eprintln!("  npm install -g @anthropic-ai/claude-code");
-        }
-    }
-
-    Ok(())
-}
-
-/// Login with a manual API key.
-async fn auth_login_api_key(provider: &str, key_url: &str) -> anyhow::Result<()> {
-    use std::io::{self, Write};
-
-    // Check if already authenticated
-    if let Some(key) = runner::load_api_key(provider) {
-        if !key.is_empty() {
-            println!("Already authenticated with {provider}.");
-            print!("Do you want to replace the existing key? [y/N] ");
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-            if !input.trim().eq_ignore_ascii_case("y") {
-                println!("Cancelled.");
-                return Ok(());
-            }
-        }
-    }
-
-    println!();
-    println!("To get an API key for {provider}, visit:");
-    println!("  {key_url}");
-    println!();
-
-    // Prompt for API key
-    print!("Enter your {provider} API key: ");
-    io::stdout().flush()?;
-
-    // Read API key
-    let api_key = read_password_or_line()?;
-
-    if api_key.is_empty() {
-        println!("No API key provided. Cancelled.");
-        return Ok(());
-    }
-
-    // Validate API key format
-    let valid = match provider {
-        "anthropic" => api_key.starts_with("sk-ant-"),
-        "openai" => api_key.starts_with("sk-"),
-        "openrouter" => api_key.starts_with("sk-or-"),
-        _ => true,
-    };
-
-    if !valid {
-        println!();
-        println!("Warning: The API key doesn't match the expected format for {provider}.");
-        print!("Continue anyway? [y/N] ");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
-            println!("Cancelled.");
-            return Ok(());
-        }
-    }
-
-    // Save to config file
-    save_api_key(provider, &api_key).await?;
-
-    println!();
-    println!("✓ API key saved for {provider}.");
-    println!();
-    println!("You can now use wonopcode with --provider {provider}");
-
-    Ok(())
-}
-
-/// Log out from a provider by removing the API key from config.
-async fn auth_logout(provider: &str) -> anyhow::Result<()> {
-    // Validate provider
-    match provider {
-        "anthropic" | "openai" | "openrouter" => {}
-        _ => {
-            eprintln!("Unknown provider: {provider}");
-            return Ok(());
-        }
-    }
-
-    // Remove from config
-    remove_api_key(provider).await?;
-
-    println!("✓ Logged out from {provider}.");
-
-    Ok(())
-}
-
-/// Show authentication status.
-async fn auth_status() -> anyhow::Result<()> {
-    use wonopcode_provider::claude_cli::ClaudeCliProvider;
-
-    println!("Authentication status:");
-    println!();
-
-    let providers = ["anthropic", "openai", "openrouter"];
-
-    for provider in providers {
-        let status = if let Ok(key) = std::env::var(get_env_var(provider)) {
-            format!("✓ {} (env)", mask_api_key(&key))
-        } else if let Some(key) = runner::load_api_key(provider) {
-            format!("✓ {} (config)", mask_api_key(&key))
-        } else if provider == "anthropic"
-            && ClaudeCliProvider::is_available()
-            && ClaudeCliProvider::is_authenticated()
-        {
-            "✓ subscription (claude cli)".to_string()
-        } else if provider == "anthropic" && ClaudeCliProvider::is_available() {
-            "✗ claude cli not logged in".to_string()
-        } else {
-            "✗ not authenticated".to_string()
-        };
-        println!("  {:<12} {}", format!("{}:", provider), status);
-    }
-
-    println!();
-    println!("Config file: {}", get_credentials_path().display());
-
-    // Show Claude CLI status
-    if ClaudeCliProvider::is_available() {
-        println!();
-        println!("Claude CLI:  installed");
-        if ClaudeCliProvider::is_authenticated() {
-            println!("             authenticated (subscription)");
-        } else {
-            println!("             not logged in (run: claude login)");
-        }
-    }
-
-    Ok(())
-}
-
-/// Read a line from stdin.
-/// Note: Input is not hidden. For production, consider adding rpassword dependency.
-fn read_password_or_line() -> std::io::Result<String> {
-    use std::io::{self, BufRead};
-
-    let mut line = String::new();
-    io::stdin().lock().read_line(&mut line)?;
-    Ok(line.trim().to_string())
-}
-
-/// Get environment variable name for a provider.
-fn get_env_var(provider: &str) -> &'static str {
-    match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        _ => "",
-    }
-}
-
-/// Mask an API key for display.
-fn mask_api_key(key: &str) -> String {
-    if key.len() <= 8 {
-        return "*".repeat(key.len());
-    }
-    let prefix = &key[..4];
-    let suffix = &key[key.len() - 4..];
-    format!("{prefix}...{suffix}")
-}
-
-/// Get the credentials file path.
-fn get_credentials_path() -> std::path::PathBuf {
-    wonopcode_core::config::Config::global_config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("credentials.json")
-}
-
-/// Save an API key to the credentials file.
-async fn save_api_key(provider: &str, api_key: &str) -> anyhow::Result<()> {
-    use std::collections::HashMap;
-
-    let path = get_credentials_path();
-
-    // Create directory if needed
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    // Load existing credentials
-    let mut credentials: HashMap<String, String> = if path.exists() {
-        let content = tokio::fs::read_to_string(&path).await?;
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        HashMap::new()
-    };
-
-    // Update credential
-    credentials.insert(provider.to_string(), api_key.to_string());
-
-    // Save back
-    let content = serde_json::to_string_pretty(&credentials)?;
-    tokio::fs::write(&path, content).await?;
-
-    // Set restrictive permissions on Unix
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&path, perms)?;
-    }
-
-    Ok(())
-}
-
-/// Remove a credential from the credentials file.
-async fn remove_api_key(provider: &str) -> anyhow::Result<()> {
-    use std::collections::HashMap;
-
-    let path = get_credentials_path();
-
-    if !path.exists() {
-        return Ok(());
-    }
-
-    // Load existing credentials
-    let content = tokio::fs::read_to_string(&path).await?;
-    let mut credentials: HashMap<String, String> =
-        serde_json::from_str(&content).unwrap_or_default();
-
-    // Remove credential
-    credentials.remove(provider);
-
-    // Save back
-    let content = serde_json::to_string_pretty(&credentials)?;
-    tokio::fs::write(&path, content).await?;
-
-    Ok(())
-}
-
-/// Handle session commands.
-async fn handle_session(command: SessionCommands, cwd: &std::path::Path) -> anyhow::Result<()> {
-    let instance = wonopcode_core::Instance::new(cwd).await?;
-
-    match command {
-        SessionCommands::List => {
-            let sessions = instance.list_sessions().await;
-
-            if sessions.is_empty() {
-                println!("No sessions found.");
-            } else {
-                println!("Sessions:");
-                println!();
-                println!("{:<28} {:<30} {:<20}", "ID", "TITLE", "UPDATED");
-                println!("{}", "-".repeat(78));
-
-                for session in sessions {
-                    let updated = session.updated_at().format("%Y-%m-%d %H:%M:%S");
-                    let title = if session.title.len() > 28 {
-                        format!("{}...", &session.title[..25])
-                    } else {
-                        session.title.clone()
-                    };
-                    println!("{:<28} {:<30} {:<20}", session.id, title, updated);
-                }
-            }
-        }
-        SessionCommands::Show { id } => match instance.get_session(&id).await {
-            Some(session) => {
-                println!("Session: {}", session.id);
-                println!("Title: {}", session.title);
-                println!("Project: {}", session.project_id);
-                println!("Directory: {}", session.directory);
-                println!(
-                    "Created: {}",
-                    session.created_at().format("%Y-%m-%d %H:%M:%S")
-                );
-                println!(
-                    "Updated: {}",
-                    session.updated_at().format("%Y-%m-%d %H:%M:%S")
-                );
-                if let Some(parent) = &session.parent_id {
-                    println!("Parent: {parent}");
-                }
-            }
-            None => {
-                println!("Session not found: {id}");
-            }
-        },
-        SessionCommands::Delete { id } => {
-            let project_id = instance.project_id().await;
-            match instance.session_repo().delete(&project_id, &id).await {
-                Ok(_) => println!("Session deleted: {id}"),
-                Err(e) => println!("Error deleting session: {e}"),
-            }
-        }
-    }
-
-    instance.dispose().await;
-    Ok(())
-}
-
-/// Handle export command.
-async fn handle_export(
-    cwd: &std::path::Path,
-    session_id: Option<String>,
-    output: std::path::PathBuf,
-    format: &str,
-) -> anyhow::Result<()> {
-    use wonopcode_core::message::MessagePart;
-    use wonopcode_core::session::MessageWithParts;
-
-    let instance = wonopcode_core::Instance::new(cwd).await?;
-    let project_id = instance.project_id().await;
-
-    // Collect sessions to export
-    let sessions: Vec<_> = if let Some(id) = session_id {
-        match instance.get_session(&id).await {
-            Some(session) => vec![session],
-            None => {
-                eprintln!("Session not found: {id}");
-                instance.dispose().await;
-                return Ok(());
-            }
-        }
-    } else {
-        instance.list_sessions().await
-    };
-
-    if sessions.is_empty() {
-        println!("No sessions to export.");
-        instance.dispose().await;
-        return Ok(());
-    }
-
-    match format {
-        "json" => {
-            // Export as JSON
-            #[derive(serde::Serialize)]
-            struct ExportData {
-                version: String,
-                exported_at: String,
-                sessions: Vec<SessionExport>,
-            }
-
-            #[derive(serde::Serialize)]
-            struct SessionExport {
-                session: wonopcode_core::session::Session,
-                messages: Vec<MessageWithParts>,
-            }
-
-            let mut session_exports = Vec::new();
-
-            for session in &sessions {
-                let messages = instance
-                    .session_repo()
-                    .messages(&project_id, &session.id, None)
-                    .await
-                    .unwrap_or_default();
-
-                session_exports.push(SessionExport {
-                    session: session.clone(),
-                    messages,
-                });
-            }
-
-            let export_data = ExportData {
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                exported_at: chrono::Utc::now().to_rfc3339(),
-                sessions: session_exports,
-            };
-
-            let json = serde_json::to_string_pretty(&export_data)?;
-            tokio::fs::write(&output, json).await?;
-
-            println!(
-                "Exported {} session(s) to {}",
-                sessions.len(),
-                output.display()
-            );
-        }
-        "markdown" | "md" => {
-            // Export as Markdown
-            let mut content = String::new();
-
-            content.push_str("# Wonopcode Session Export\n\n");
-            content.push_str(&format!(
-                "Exported: {}\n\n",
-                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-            content.push_str(&format!("Sessions: {}\n\n", sessions.len()));
-            content.push_str("---\n\n");
-
-            for session in &sessions {
-                content.push_str(&format!("## Session: {}\n\n", session.title));
-                content.push_str(&format!("- **ID**: {}\n", session.id));
-                content.push_str(&format!(
-                    "- **Created**: {}\n",
-                    session.created_at().format("%Y-%m-%d %H:%M:%S")
-                ));
-                content.push_str(&format!(
-                    "- **Updated**: {}\n\n",
-                    session.updated_at().format("%Y-%m-%d %H:%M:%S")
-                ));
-
-                let messages = instance
-                    .session_repo()
-                    .messages(&project_id, &session.id, None)
-                    .await
-                    .unwrap_or_default();
-
-                for msg_with_parts in &messages {
-                    let role = if msg_with_parts.message.is_user() {
-                        "User"
-                    } else {
-                        "Assistant"
-                    };
-                    content.push_str(&format!("### {role}\n\n"));
-
-                    for part in &msg_with_parts.parts {
-                        match part {
-                            MessagePart::Text(text_part) => {
-                                content.push_str(&text_part.text);
-                                content.push_str("\n\n");
-                            }
-                            MessagePart::Tool(tool_part) => {
-                                content.push_str(&format!("**Tool: {}**\n", tool_part.tool));
-                                // Get input from state
-                                let input = match &tool_part.state {
-                                    wonopcode_core::message::ToolState::Pending {
-                                        input, ..
-                                    } => Some(input),
-                                    wonopcode_core::message::ToolState::Running {
-                                        input, ..
-                                    } => Some(input),
-                                    wonopcode_core::message::ToolState::Completed {
-                                        input, ..
-                                    } => Some(input),
-                                    wonopcode_core::message::ToolState::Error { input, .. } => {
-                                        Some(input)
-                                    }
-                                };
-                                if let Some(input) = input {
-                                    content.push_str("```json\n");
-                                    content.push_str(
-                                        &serde_json::to_string_pretty(input).unwrap_or_default(),
-                                    );
-                                    content.push_str("\n```\n");
-                                }
-                                // Get output from completed state
-                                if let wonopcode_core::message::ToolState::Completed {
-                                    output,
-                                    ..
-                                } = &tool_part.state
-                                {
-                                    content.push_str("\n**Result:**\n```\n");
-                                    content.push_str(output);
-                                    content.push_str("\n```\n");
-                                }
-                                content.push('\n');
-                            }
-                            MessagePart::Reasoning(reasoning) => {
-                                content.push_str("*Thinking...*\n\n");
-                                content.push_str(&reasoning.text);
-                                content.push_str("\n\n");
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                content.push_str("---\n\n");
-            }
-
-            tokio::fs::write(&output, content).await?;
-
-            println!(
-                "Exported {} session(s) to {}",
-                sessions.len(),
-                output.display()
-            );
-        }
-        _ => {
-            eprintln!("Unknown export format: {format}. Use 'json' or 'markdown'.");
-        }
-    }
-
-    instance.dispose().await;
-    Ok(())
-}
-
-/// Handle import command.
-async fn handle_import(cwd: &std::path::Path, input: std::path::PathBuf) -> anyhow::Result<()> {
-    use wonopcode_core::session::MessageWithParts;
-
-    let instance = wonopcode_core::Instance::new(cwd).await?;
-    let project_id = instance.project_id().await;
-
-    // Read the file
-    let content = tokio::fs::read_to_string(&input).await?;
-
-    // Parse as JSON
-    #[derive(serde::Deserialize)]
-    struct ImportData {
-        /// Export format version (for future compatibility checks).
-        #[serde(default)]
-        _version: Option<String>,
-        /// Export timestamp (for informational purposes).
-        #[serde(default)]
-        _exported_at: Option<String>,
-        sessions: Vec<SessionImport>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct SessionImport {
-        session: wonopcode_core::session::Session,
-        messages: Vec<MessageWithParts>,
-    }
-
-    let import_data: ImportData = serde_json::from_str(&content)?;
-
-    let mut imported = 0;
-    let mut skipped = 0;
-
-    for session_import in import_data.sessions {
-        // Check if session already exists
-        if instance
-            .get_session(&session_import.session.id)
-            .await
-            .is_some()
-        {
-            println!(
-                "Skipping existing session: {} ({})",
-                session_import.session.id, session_import.session.title
-            );
-            skipped += 1;
-            continue;
-        }
-
-        // Create a new session with the imported data
-        let mut session = session_import.session.clone();
-        session.project_id = project_id.clone();
-
-        // Save session via the repository
-        let repo = instance.session_repo();
-        match repo.create(session.clone()).await {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Error importing session {}: {}", session.id, e);
-                continue;
-            }
-        }
-
-        // Save messages and parts
-        for msg_with_parts in &session_import.messages {
-            if let Err(e) = repo.save_message(&msg_with_parts.message).await {
-                eprintln!("Error importing message in session {}: {}", session.id, e);
-            }
-            for part in &msg_with_parts.parts {
-                if let Err(e) = repo.save_part(part).await {
-                    eprintln!(
-                        "Error importing message part in session {}: {}",
-                        session.id, e
-                    );
-                }
-            }
-        }
-
-        println!("Imported session: {} ({})", session.id, session.title);
-        imported += 1;
-    }
-
-    println!();
-    println!("Import complete: {imported} imported, {skipped} skipped");
-
-    instance.dispose().await;
-    Ok(())
-}
-
 /// Run interactive mode.
 async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> {
+    // Initialize shared todo storage early so MCP server and Runner use the same store
+    let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
+    info!(path = %todo_path.display(), "Initialized shared todo storage");
+
     // Check for updates on startup (non-blocking)
     let update_notification = {
         let cwd = cwd.to_path_buf();
@@ -2345,6 +1595,8 @@ async fn run_headless(
                         messages: protocol_messages,
                         is_shared: false,
                         share_url: None,
+                        is_streaming: false,
+                        streaming_message: None,
                     });
 
                     info!(
@@ -2362,6 +1614,8 @@ async fn run_headless(
                     messages: Vec::new(),
                     is_shared: false,
                     share_url: None,
+                    is_streaming: false,
+                    streaming_message: None,
                 });
                 info!(session_id = %new_session_id, "Created new empty session for headless mode");
             }
@@ -2500,42 +1754,62 @@ async fn run_headless(
     // Spawn task to convert app updates to protocol updates, update state, and broadcast
     let state_for_updates = state_handle.clone();
     tokio::spawn(async move {
-        // Track the current assistant message being built with ordered segments
-        let mut current_message_segments: Vec<wonopcode_protocol::MessageSegment> = Vec::new();
-        let mut current_message_id: Option<String> = None;
-
         while let Some(update) = app_update_rx.recv().await {
             // Update the current state based on the update type
             match &update {
                 wonopcode_tui::AppUpdate::Started => {
-                    // Start a new assistant message
-                    current_message_segments.clear();
-                    current_message_id = Some(uuid::Uuid::new_v4().to_string());
-                }
-                wonopcode_tui::AppUpdate::TextDelta(delta) => {
-                    // Append to last text segment or create new one
-                    if let Some(wonopcode_protocol::MessageSegment::Text { text }) =
-                        current_message_segments.last_mut()
-                    {
-                        text.push_str(delta);
-                    } else {
-                        current_message_segments.push(wonopcode_protocol::MessageSegment::Text {
-                            text: delta.clone(),
+                    // Start a new assistant message - track in shared state
+                    let mut state = state_for_updates.write().await;
+                    let model = Some(state.model.clone());
+                    let agent = Some(state.agent.clone());
+                    if let Some(ref mut session) = state.session {
+                        session.is_streaming = true;
+                        session.streaming_message = Some(wonopcode_protocol::Message {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            role: "assistant".to_string(),
+                            content: vec![],
+                            timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                            tool_calls: vec![],
+                            model,
+                            agent,
                         });
                     }
                 }
+                wonopcode_tui::AppUpdate::TextDelta(delta) => {
+                    // Append to streaming message in shared state
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            // Append to last text segment or create new one
+                            if let Some(wonopcode_protocol::MessageSegment::Text { text }) =
+                                msg.content.last_mut()
+                            {
+                                text.push_str(delta);
+                            } else {
+                                msg.content.push(wonopcode_protocol::MessageSegment::Text {
+                                    text: delta.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 wonopcode_tui::AppUpdate::ToolStarted { id, name, input } => {
-                    // Add tool segment in order
-                    current_message_segments.push(wonopcode_protocol::MessageSegment::Tool {
-                        tool: wonopcode_protocol::ToolCall {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input.clone(),
-                            output: None,
-                            success: false,
-                            status: "running".to_string(),
-                        },
-                    });
+                    // Add tool segment to streaming message
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            msg.content.push(wonopcode_protocol::MessageSegment::Tool {
+                                tool: wonopcode_protocol::ToolCall {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    output: None,
+                                    success: false,
+                                    status: "running".to_string(),
+                                },
+                            });
+                        }
+                    }
                 }
                 wonopcode_tui::AppUpdate::ToolCompleted {
                     id,
@@ -2543,43 +1817,43 @@ async fn run_headless(
                     output,
                     ..
                 } => {
-                    // Update tool status in segments
-                    for segment in &mut current_message_segments {
-                        if let wonopcode_protocol::MessageSegment::Tool { tool } = segment {
-                            if &tool.id == id {
-                                tool.output = Some(output.clone());
-                                tool.success = *success;
-                                tool.status = if *success {
-                                    "completed".to_string()
-                                } else {
-                                    "failed".to_string()
-                                };
-                                break;
+                    // Update tool status in streaming message
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            for segment in &mut msg.content {
+                                if let wonopcode_protocol::MessageSegment::Tool { tool } = segment {
+                                    if &tool.id == id {
+                                        tool.output = Some(output.clone());
+                                        tool.success = *success;
+                                        tool.status = if *success {
+                                            "completed".to_string()
+                                        } else {
+                                            "failed".to_string()
+                                        };
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
                 }
                 wonopcode_tui::AppUpdate::Completed { .. } => {
-                    // Finalize current message and add to session
-                    if let Some(msg_id) = current_message_id.take() {
-                        let mut state = state_for_updates.write().await;
-                        // Get model and agent from current state
-                        let model = Some(state.model.clone());
-                        let agent = Some(state.agent.clone());
-                        if let Some(ref mut session) = state.session {
-                            session.messages.push(wonopcode_protocol::Message {
-                                id: msg_id,
-                                role: "assistant".to_string(),
-                                content: current_message_segments.clone(),
-                                timestamp: chrono::Utc::now()
-                                    .format("%Y-%m-%d %H:%M:%S")
-                                    .to_string(),
-                                tool_calls: vec![], // Tools are now inline in content
-                                model,
-                                agent,
-                            });
+                    // Finalize streaming message and move to messages list
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(msg) = session.streaming_message.take() {
+                            session.messages.push(msg);
                         }
-                        current_message_segments.clear();
+                        session.is_streaming = false;
+                    }
+                }
+                wonopcode_tui::AppUpdate::Error(_) => {
+                    // Clear streaming state on error
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        session.streaming_message = None;
+                        session.is_streaming = false;
                     }
                 }
                 wonopcode_tui::AppUpdate::SandboxUpdated(status) => {
@@ -3009,7 +2283,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     };
     // Send as update so it's processed correctly
     let update_tx = app.update_sender();
-    let _ = update_tx.send(wonopcode_tui::AppUpdate::SandboxUpdated(sandbox_update));
+    if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::SandboxUpdated(sandbox_update)) {
+        warn!("Failed to send sandbox update: {}", e);
+    }
 
     // Apply todos
     if !state.todos.is_empty() {
@@ -3023,7 +2299,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 priority: t.priority,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated(todos));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated(todos)) {
+            warn!("Failed to send todos update: {}", e);
+        }
     }
 
     // Apply MCP servers
@@ -3037,7 +2315,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 error: s.error,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::McpUpdated(servers));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::McpUpdated(servers)) {
+            warn!("Failed to send MCP update: {}", e);
+        }
     }
 
     // Apply LSP servers
@@ -3052,7 +2332,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 connected: s.connected,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::LspUpdated(servers));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::LspUpdated(servers)) {
+            warn!("Failed to send LSP update: {}", e);
+        }
     }
 
     // Apply sessions list
@@ -3062,16 +2344,20 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
             .into_iter()
             .map(|s| (s.id, s.title, s.timestamp))
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::Sessions(sessions));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::Sessions(sessions)) {
+            warn!("Failed to send sessions update: {}", e);
+        }
     }
 
     // Apply token usage
-    let _ = update_tx.send(wonopcode_tui::AppUpdate::TokenUsage {
+    if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TokenUsage {
         input: state.token_usage.input,
         output: state.token_usage.output,
         cost: state.token_usage.cost,
         context_limit: state.context_limit,
-    });
+    }) {
+        warn!("Failed to send token usage update: {}", e);
+    }
 
     // Apply modified files
     if !state.modified_files.is_empty() {
@@ -3084,118 +2370,180 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 removed: f.removed,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::ModifiedFilesUpdated(files));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::ModifiedFilesUpdated(files)) {
+            warn!("Failed to send modified files update: {}", e);
+        }
     }
 
     // Apply current session with messages
     if let Some(session) = state.session {
-        let messages: Vec<wonopcode_tui::DisplayMessage> = session
-            .messages
-            .into_iter()
-            .map(|msg| {
-                // Convert protocol message to display message
-                match msg.role.as_str() {
-                    "user" => {
-                        // Extract text from content segments
-                        let text: String = msg
-                            .content
-                            .iter()
-                            .filter_map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    Some(text.clone())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("");
-                        wonopcode_tui::DisplayMessage::user(text)
-                    }
-                    "assistant" => {
-                        // Helper to convert protocol ToolCall to TUI DisplayToolCall
-                        let convert_tool =
-                            |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
-                                let status = match tool.status.as_str() {
-                                    "completed" => wonopcode_tui::ToolStatus::Success,
-                                    "failed" => wonopcode_tui::ToolStatus::Error,
-                                    "running" => wonopcode_tui::ToolStatus::Running,
-                                    _ => wonopcode_tui::ToolStatus::Pending,
-                                };
-                                wonopcode_tui::DisplayToolCall {
-                                    id: tool.id.clone(),
-                                    name: tool.name.clone(),
-                                    input: Some(tool.input.clone()),
-                                    output: tool.output.clone(),
-                                    status,
-                                    metadata: None,
-                                    expanded: false,
-                                }
-                            };
+        // Helper to convert protocol ToolCall to TUI DisplayToolCall
+        let convert_tool = |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
+            let status = match tool.status.as_str() {
+                "completed" => wonopcode_tui::ToolStatus::Success,
+                "failed" => wonopcode_tui::ToolStatus::Error,
+                "running" => wonopcode_tui::ToolStatus::Running,
+                _ => wonopcode_tui::ToolStatus::Pending,
+            };
+            wonopcode_tui::DisplayToolCall {
+                id: tool.id.clone(),
+                name: tool.name.clone(),
+                input: Some(tool.input.clone()),
+                output: tool.output.clone(),
+                status,
+                metadata: None,
+                expanded: false,
+            }
+        };
 
-                        // Convert segments to TUI segments (now includes inline tools)
-                        let mut all_segments: Vec<wonopcode_tui::widgets::MessageSegment> = msg
-                            .content
-                            .iter()
-                            .map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(text.clone())
-                                }
-                                wonopcode_protocol::MessageSegment::Code { code, .. } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(code.clone())
-                                }
-                                wonopcode_protocol::MessageSegment::Thinking { text } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(format!(
-                                        "*Thinking:* {text}"
-                                    ))
-                                }
-                                wonopcode_protocol::MessageSegment::Tool { tool } => {
-                                    wonopcode_tui::widgets::MessageSegment::Tool(convert_tool(tool))
-                                }
-                            })
-                            .collect();
-
-                        // Also add any legacy tool_calls (for backward compatibility)
-                        for tool in &msg.tool_calls {
-                            all_segments.push(wonopcode_tui::widgets::MessageSegment::Tool(
-                                convert_tool(tool),
-                            ));
-                        }
-
-                        // Convert agent string to AgentMode
-                        let agent_mode = msg
-                            .agent
-                            .as_ref()
-                            .map(|a| wonopcode_tui::AgentMode::parse(a));
-
-                        wonopcode_tui::DisplayMessage::assistant_with_segments(all_segments)
-                            .with_model_agent(msg.model.clone(), agent_mode)
-                    }
-                    "system" => {
-                        let text: String = msg
-                            .content
-                            .iter()
-                            .filter_map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    Some(text.clone())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("");
-                        wonopcode_tui::DisplayMessage::system(text)
-                    }
-                    _ => wonopcode_tui::DisplayMessage::system(format!(
-                        "Unknown role: {}",
-                        msg.role
-                    )),
+        // Helper to convert a protocol message to display message
+        let convert_message = |msg: &wonopcode_protocol::Message| -> wonopcode_tui::DisplayMessage {
+            match msg.role.as_str() {
+                "user" => {
+                    // Extract text from content segments
+                    let text: String = msg
+                        .content
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    wonopcode_tui::DisplayMessage::user(text)
                 }
-            })
-            .collect();
+                "assistant" => {
+                    // Convert segments to TUI segments (now includes inline tools)
+                    let mut all_segments: Vec<wonopcode_tui::widgets::MessageSegment> = msg
+                        .content
+                        .iter()
+                        .map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(text.clone())
+                            }
+                            wonopcode_protocol::MessageSegment::Code { code, .. } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(code.clone())
+                            }
+                            wonopcode_protocol::MessageSegment::Thinking { text } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(format!(
+                                    "*Thinking:* {text}"
+                                ))
+                            }
+                            wonopcode_protocol::MessageSegment::Tool { tool } => {
+                                wonopcode_tui::widgets::MessageSegment::Tool(convert_tool(tool))
+                            }
+                        })
+                        .collect();
 
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::SessionLoaded {
-            id: session.id,
-            title: session.title,
+                    // Also add any legacy tool_calls (for backward compatibility)
+                    for tool in &msg.tool_calls {
+                        all_segments.push(wonopcode_tui::widgets::MessageSegment::Tool(
+                            convert_tool(tool),
+                        ));
+                    }
+
+                    // Convert agent string to AgentMode
+                    let agent_mode = msg
+                        .agent
+                        .as_ref()
+                        .map(|a| wonopcode_tui::AgentMode::parse(a));
+
+                    wonopcode_tui::DisplayMessage::assistant_with_segments(all_segments)
+                        .with_model_agent(msg.model.clone(), agent_mode)
+                }
+                "system" => {
+                    let text: String = msg
+                        .content
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    wonopcode_tui::DisplayMessage::system(text)
+                }
+                _ => wonopcode_tui::DisplayMessage::system(format!("Unknown role: {}", msg.role)),
+            }
+        };
+
+        let messages: Vec<wonopcode_tui::DisplayMessage> =
+            session.messages.iter().map(convert_message).collect();
+
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::SessionLoaded {
+            id: session.id.clone(),
+            title: session.title.clone(),
             messages,
-        });
+        }) {
+            warn!("Failed to send session loaded update: {}", e);
+        }
+
+        // If there's an in-progress streaming message, restore the streaming state
+        if session.is_streaming {
+            if let Some(ref streaming_msg) = session.streaming_message {
+                info!(
+                    "Restoring streaming state with {} content segments",
+                    streaming_msg.content.len()
+                );
+
+                // Send Started to put TUI in streaming mode
+                if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::Started) {
+                    warn!("Failed to send Started update: {}", e);
+                }
+
+                // Send the accumulated content as events to build up the streaming display
+                for segment in &streaming_msg.content {
+                    match segment {
+                        wonopcode_protocol::MessageSegment::Text { text } => {
+                            if let Err(e) =
+                                update_tx.send(wonopcode_tui::AppUpdate::TextDelta(text.clone()))
+                            {
+                                warn!("Failed to send TextDelta update: {}", e);
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Tool { tool } => {
+                            // Send ToolStarted
+                            if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::ToolStarted {
+                                id: tool.id.clone(),
+                                name: tool.name.clone(),
+                                input: tool.input.clone(),
+                            }) {
+                                warn!("Failed to send ToolStarted update: {}", e);
+                            }
+
+                            // If tool is completed, send ToolCompleted
+                            if tool.status == "completed" || tool.status == "failed" {
+                                if let Err(e) =
+                                    update_tx.send(wonopcode_tui::AppUpdate::ToolCompleted {
+                                        id: tool.id.clone(),
+                                        success: tool.success,
+                                        output: tool.output.clone().unwrap_or_default(),
+                                        metadata: None,
+                                    })
+                                {
+                                    warn!("Failed to send ToolCompleted update: {}", e);
+                                }
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Thinking { text } => {
+                            // Send thinking as text delta with prefix
+                            if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TextDelta(
+                                format!("*Thinking:* {text}"),
+                            )) {
+                                warn!("Failed to send Thinking update: {}", e);
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Code { code, .. } => {
+                            if let Err(e) =
+                                update_tx.send(wonopcode_tui::AppUpdate::TextDelta(code.clone()))
+                            {
+                                warn!("Failed to send Code update: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Take action receiver
@@ -3319,6 +2667,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             snapshot: self.snapshot.clone(),
             file_time: Some(self.file_time.clone()),
             sandbox,
+            event_tx: None, // MCP HTTP doesn't need event_tx
         };
 
         tracing::info!(
@@ -3485,12 +2834,18 @@ async fn create_mcp_http_state(
     let file_time = Arc::new(FileTimeState::new());
 
     // Use shared file todo store
-    let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> =
-        if let Some(store) = wonopcode_tools::todo::SharedFileTodoStore::from_env() {
-            Arc::new(store)
-        } else {
-            Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
-        };
+    let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> = if let Some(store) =
+        wonopcode_tools::todo::SharedFileTodoStore::from_env()
+    {
+        tracing::info!(
+            path = %store.path().display(),
+            "MCP HTTP using SharedFileTodoStore"
+        );
+        Arc::new(store)
+    } else {
+        tracing::warn!("WONOPCODE_TODO_FILE not set, MCP HTTP using InMemoryTodoStore - todos will NOT sync with TUI!");
+        Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
+    };
 
     // Create tool registry with all tools
     let mut tools = ToolRegistry::with_builtins();
@@ -3717,221 +3072,6 @@ fn get_network_ips() -> std::io::Result<Vec<String>> {
     }
 
     Ok(ips)
-}
-
-/// Handle MCP commands.
-async fn handle_mcp(command: McpCommands, cwd: &std::path::Path) -> anyhow::Result<()> {
-    match command {
-        McpCommands::Add {
-            name,
-            server_type,
-            command,
-            url,
-        } => handle_mcp_add(&name, &server_type, command, url, cwd).await,
-        McpCommands::List => handle_mcp_list(cwd).await,
-        McpCommands::Auth { name } => handle_mcp_auth(&name, cwd).await,
-        McpCommands::Logout { name } => handle_mcp_logout(&name).await,
-    }
-}
-
-/// Add an MCP server.
-async fn handle_mcp_add(
-    name: &str,
-    server_type: &str,
-    command: Option<String>,
-    url: Option<String>,
-    _cwd: &std::path::Path,
-) -> anyhow::Result<()> {
-    use std::io::{self, Write};
-
-    println!();
-    println!("Add MCP Server");
-    println!("==============");
-    println!();
-
-    match server_type {
-        "local" => {
-            let cmd = if let Some(c) = command {
-                c
-            } else {
-                print!("Enter command to run: ");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                input.trim().to_string()
-            };
-
-            if cmd.is_empty() {
-                println!("Error: Command is required for local servers");
-                return Ok(());
-            }
-
-            println!();
-            println!("Add the following to your wonopcode.json:");
-            println!();
-            println!(r#"  "mcp": {{"#);
-            println!(r#"    "{name}": {{"#);
-            println!(r#"      "type": "local","#);
-            println!(r#"      "command": ["{}"]"#, cmd.replace('"', r#"\""#));
-            println!(r#"    }}"#);
-            println!(r#"  }}"#);
-        }
-        "remote" => {
-            let server_url = if let Some(u) = url {
-                u
-            } else {
-                print!("Enter server URL: ");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                input.trim().to_string()
-            };
-
-            if server_url.is_empty() {
-                println!("Error: URL is required for remote servers");
-                return Ok(());
-            }
-
-            println!();
-            println!("Add the following to your wonopcode.json:");
-            println!();
-            println!(r#"  "mcp": {{"#);
-            println!(r#"    "{name}": {{"#);
-            println!(r#"      "type": "remote","#);
-            println!(r#"      "url": "{server_url}""#);
-            println!(r#"    }}"#);
-            println!(r#"  }}"#);
-        }
-        _ => {
-            println!("Error: Invalid server type '{server_type}'. Use 'local' or 'remote'.");
-        }
-    }
-
-    println!();
-    Ok(())
-}
-
-/// List MCP servers.
-async fn handle_mcp_list(cwd: &std::path::Path) -> anyhow::Result<()> {
-    println!();
-    println!("MCP Servers");
-    println!("===========");
-    println!();
-
-    // Load config to get MCP servers
-    let (config, _) = wonopcode_core::config::Config::load(Some(cwd)).await?;
-
-    match config.mcp {
-        Some(servers) if !servers.is_empty() => {
-            for (name, server_config) in &servers {
-                let status_icon = "○"; // We'd need actual connection status
-                let type_info = match server_config {
-                    wonopcode_core::config::McpConfig::Local(local) => {
-                        format!("local: {}", local.command.join(" "))
-                    }
-                    wonopcode_core::config::McpConfig::Remote(remote) => {
-                        format!("remote: {}", remote.url)
-                    }
-                };
-                println!("  {status_icon} {name} ({type_info})");
-            }
-            println!();
-            println!("{} server(s) configured", servers.len());
-        }
-        _ => {
-            println!("No MCP servers configured.");
-            println!();
-            println!("Add servers with: wonopcode mcp add <name>");
-            println!("Or add to wonopcode.json manually.");
-        }
-    }
-
-    println!();
-    Ok(())
-}
-
-/// Authenticate with an MCP server.
-async fn handle_mcp_auth(name: &str, cwd: &std::path::Path) -> anyhow::Result<()> {
-    println!();
-    println!("MCP OAuth Authentication");
-    println!("========================");
-    println!();
-
-    // Load config
-    let (config, _) = wonopcode_core::config::Config::load(Some(cwd)).await?;
-
-    let servers = match config.mcp {
-        Some(s) => s,
-        None => {
-            println!("No MCP servers configured.");
-            return Ok(());
-        }
-    };
-
-    let server_config = match servers.get(name) {
-        Some(c) => c,
-        None => {
-            println!("MCP server '{name}' not found.");
-            println!();
-            println!("Available servers:");
-            for name in servers.keys() {
-                println!("  - {name}");
-            }
-            return Ok(());
-        }
-    };
-
-    match server_config {
-        wonopcode_core::config::McpConfig::Remote(remote) => {
-            println!("Server: {name}");
-            println!("URL: {}", remote.url);
-            println!();
-            println!("OAuth authentication is initiated when connecting to the server.");
-            println!("The server will redirect you to complete authentication in your browser.");
-            println!();
-            println!("To test the connection, restart wonopcode and the OAuth flow will begin.");
-        }
-        wonopcode_core::config::McpConfig::Local(_) => {
-            println!("Server '{name}' is a local server and doesn't support OAuth.");
-        }
-    }
-
-    println!();
-    Ok(())
-}
-
-/// Remove MCP OAuth credentials.
-async fn handle_mcp_logout(name: &str) -> anyhow::Result<()> {
-    println!();
-    println!("MCP OAuth Logout");
-    println!("================");
-    println!();
-
-    // Try to remove credentials
-    let credentials_path = wonopcode_core::config::Config::global_config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("mcp-auth.json");
-
-    if !credentials_path.exists() {
-        println!("No MCP OAuth credentials stored.");
-        return Ok(());
-    }
-
-    // Read and modify credentials
-    let content = tokio::fs::read_to_string(&credentials_path).await?;
-    let mut credentials: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_str(&content).unwrap_or_default();
-
-    if credentials.remove(name).is_some() {
-        let new_content = serde_json::to_string_pretty(&credentials)?;
-        tokio::fs::write(&credentials_path, new_content).await?;
-        println!("Removed OAuth credentials for '{name}'.");
-    } else {
-        println!("No credentials found for '{name}'.");
-    }
-
-    println!();
-    Ok(())
 }
 
 /// Handle agent commands.

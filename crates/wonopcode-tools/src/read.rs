@@ -194,7 +194,7 @@ Usage:
                 let truncated = if line.len() > 2000 {
                     format!("{}... [truncated]", &line[..2000])
                 } else {
-                    line.to_string()
+                    (*line).to_string()
                 };
                 format!("{:5}|\t{}", offset + i + 1, truncated)
             })
@@ -297,6 +297,7 @@ mod tests {
             snapshot: None,
             file_time: None,
             sandbox: None,
+            event_tx: None,
         }
     }
 

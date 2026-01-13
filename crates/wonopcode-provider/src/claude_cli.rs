@@ -417,7 +417,9 @@ impl ClaudeCliProvider {
                 .as_millis()
         ));
 
-        std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap())
+        let config_json = serde_json::to_string_pretty(&config)
+            .map_err(|e| ProviderError::internal(format!("Failed to serialize MCP config: {e}")))?;
+        std::fs::write(&config_path, config_json)
             .map_err(|e| ProviderError::internal(format!("Failed to write MCP config: {e}")))?;
 
         debug!(path = %config_path.display(), "Generated MCP config");

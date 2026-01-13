@@ -7,7 +7,7 @@
 //! Todos are stored in memory by default (InMemoryTodoStore) but can optionally
 //! be persisted to `.wonopcode/todos.json` using FileTodoStore.
 
-use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolContext, ToolError, ToolEvent, ToolOutput, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
+use tracing::debug;
 
 /// A todo item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,6 +453,19 @@ Task States:
             )));
         }
 
+        // Publish event immediately via event channel if available
+        if let Some(ref event_tx) = ctx.event_tx {
+            debug!(
+                session_id = %ctx.session_id,
+                items = items.len(),
+                "Publishing TodosUpdated event"
+            );
+
+            if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(items.clone())) {
+                debug!("Failed to send TodosUpdated event: {}", e);
+            }
+        }
+
         // Format output
         let output = format_todo_list(&items);
 
@@ -630,6 +644,7 @@ mod tests {
             snapshot: None,
             file_time: None,
             sandbox: None,
+            event_tx: None,
         }
     }
 

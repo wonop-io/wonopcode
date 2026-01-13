@@ -48,10 +48,20 @@ pub fn create_router(state: AppState) -> Router {
         .route("/instance", get(get_instance))
         .route("/instance/dispose", post(instance_dispose))
         // ===================
+        // State endpoint (comprehensive runtime state)
+        // ===================
+        .route("/state", get(get_full_state))
+        // ===================
         // SSE events
         // ===================
         .route("/events", get(events))
         .route("/event", get(events))
+        .route("/events/replay", get(events_replay))
+        .route("/events/sequence", get(events_sequence))
+        // ===================
+        // WebSocket
+        // ===================
+        .route("/ws", get(crate::ws::ws_handler))
         // ===================
         // Session endpoints
         // ===================
@@ -254,11 +264,98 @@ async fn instance_dispose(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 // =============================================================================
+// Full state endpoint
+// =============================================================================
+
+/// Get comprehensive runtime state for late-joining clients.
+async fn get_full_state(State(state): State<AppState>) -> impl IntoResponse {
+    let instance = state.instance.read().await;
+    let project_id = instance.project_id().await;
+    let worktree = instance.worktree().await;
+
+    // Get todos
+    let todos = state.get_todos().await;
+    let todos_json: Vec<serde_json::Value> = todos
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "id": t.id,
+                "content": t.content,
+                "status": format!("{:?}", t.status).to_lowercase(),
+                "priority": format!("{:?}", t.priority).to_lowercase(),
+            })
+        })
+        .collect();
+
+    // Get active sessions (runners)
+    let runners = state.session_runners.read().await;
+    let active_sessions: Vec<String> = runners.keys().cloned().collect();
+
+    // Get event sequence info
+    let current_seq = state.bus.current_sequence();
+    let oldest_seq = state.bus.oldest_sequence().await;
+
+    Json(serde_json::json!({
+        "instance": {
+            "directory": instance.directory().display().to_string(),
+            "project_id": project_id,
+            "worktree": worktree.display().to_string(),
+        },
+        "todos": todos_json,
+        "active_sessions": active_sessions,
+        "events": {
+            "current_seq": current_seq,
+            "oldest_seq": oldest_seq,
+        },
+    }))
+}
+
+// =============================================================================
 // SSE events endpoint
 // =============================================================================
 
 async fn events(State(state): State<AppState>) -> impl IntoResponse {
     create_event_stream(state.bus)
+}
+
+/// Query parameters for event replay.
+#[derive(Debug, Deserialize)]
+struct EventReplayQuery {
+    /// Starting sequence number (exclusive).
+    from_seq: u64,
+    /// Maximum number of events to return (default 100, max 1000).
+    #[serde(default = "default_replay_limit")]
+    limit: usize,
+}
+
+fn default_replay_limit() -> usize {
+    100
+}
+
+/// Get events from the replay buffer.
+async fn events_replay(
+    State(state): State<AppState>,
+    Query(query): Query<EventReplayQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.min(1000); // Cap at 1000
+    let events = state.bus.replay_from(query.from_seq, limit).await;
+
+    Json(serde_json::json!({
+        "events": events,
+        "count": events.len(),
+        "from_seq": query.from_seq,
+    }))
+}
+
+/// Get current event sequence information.
+async fn events_sequence(State(state): State<AppState>) -> impl IntoResponse {
+    let current_seq = state.bus.current_sequence();
+    let oldest_seq = state.bus.oldest_sequence().await;
+
+    Json(serde_json::json!({
+        "current_seq": current_seq,
+        "oldest_seq": oldest_seq,
+    }))
 }
 
 // =============================================================================
@@ -1181,8 +1278,8 @@ async fn session_command(
         ));
     };
     let parts: Vec<&str> = stripped.splitn(2, ' ').collect();
-    let cmd_name = parts.first().unwrap_or(&"").to_string();
-    let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+    let cmd_name = (*parts.first().unwrap_or(&"")).to_string();
+    let args = parts.get(1).map(|s| (*s).to_string()).unwrap_or_default();
 
     // Get the command registry
     let registry = wonopcode_core::CommandRegistry::with_builtins();

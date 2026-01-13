@@ -146,7 +146,7 @@ impl Storage for JsonStorage {
                     if path.extension().is_some_and(|ext| ext == "json") {
                         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                             let mut key: Vec<String> =
-                                prefix.iter().map(|s| s.to_string()).collect();
+                                prefix.iter().map(|s| (*s).to_string()).collect();
                             key.push(stem.to_string());
                             results.push(key);
                         }

@@ -289,10 +289,13 @@ impl InputWidget {
     }
 
     pub fn take(&mut self) -> String {
-        let text = self.text();
-        self.history.push(text.clone());
+        let raw = self.raw_text();
+        // Store raw text with paste tags in history so it displays the same when recalled
+        self.history.push(raw);
+        // Return stripped text for submission (paste tags are for display only)
+        let stripped = self.text();
         self.clear();
-        text
+        stripped
     }
 
     pub fn set_text(&mut self, text: &str) {
@@ -421,9 +424,13 @@ impl InputWidget {
                     match c {
                         'a' => {
                             self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+                            // Snap outside paste regions after moving to head
+                            self.snap_cursor_outside_paste_region();
                         }
                         'e' => {
                             self.textarea.move_cursor(tui_textarea::CursorMove::End);
+                            // Snap outside paste regions after moving to end
+                            self.snap_cursor_outside_paste_region();
                         }
                         'u' => {
                             self.textarea.delete_line_by_head();
@@ -502,10 +509,16 @@ impl InputWidget {
                 }
             }
             KeyCode::Up => {
+                // Snap to start of paste region first (treat paste as single unit)
+                self.snap_to_paste_start();
                 // Try to move cursor up visually (handles wrapped lines)
-                if !self.move_cursor_up_visual() {
+                if self.move_cursor_up_visual() {
+                    // Cursor was moved - snap outside paste regions
+                    self.snap_cursor_outside_paste_region();
+                } else {
                     // Already at top - navigate history
-                    let current_text = self.text();
+                    // Use raw_text() to preserve paste tags when stashing current content
+                    let current_text = self.raw_text();
                     if let Some(prev) = self.history.previous(&current_text) {
                         let prev_owned = prev.to_string();
                         self.set_text(&prev_owned);
@@ -515,8 +528,13 @@ impl InputWidget {
                 }
             }
             KeyCode::Down => {
+                // Snap to end of paste region first (treat paste as single unit)
+                self.snap_to_paste_end();
                 // Try to move cursor down visually (handles wrapped lines)
-                if !self.move_cursor_down_visual() {
+                if self.move_cursor_down_visual() {
+                    // Cursor was moved - snap outside paste regions
+                    self.snap_cursor_outside_paste_region();
+                } else {
                     // Already at bottom - navigate history
                     if let Some(next) = self.history.next_entry() {
                         let next_owned = next.to_string();
@@ -529,12 +547,16 @@ impl InputWidget {
                     self.textarea.move_cursor(tui_textarea::CursorMove::Top);
                 }
                 self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+                // Snap outside paste regions after moving to head
+                self.snap_cursor_outside_paste_region();
             }
             KeyCode::End => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.textarea.move_cursor(tui_textarea::CursorMove::Bottom);
                 }
                 self.textarea.move_cursor(tui_textarea::CursorMove::End);
+                // Snap outside paste regions after moving to end
+                self.snap_cursor_outside_paste_region();
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 // Cycle agent modes (Tab = forward, Shift+Tab/BackTab = backward)
@@ -619,6 +641,59 @@ impl InputWidget {
             self.move_to_offset(start_offset);
         } else {
             self.textarea.move_cursor(tui_textarea::CursorMove::Back);
+        }
+    }
+
+    /// Ensure cursor is not inside a paste region.
+    /// If it is, snap to the nearest edge (start or end of region).
+    fn snap_cursor_outside_paste_region(&mut self) {
+        let raw_text = self.raw_text();
+        let current_offset = self.cursor_offset();
+
+        if let Some((start, end)) = find_containing_paste_region(&raw_text, current_offset) {
+            // Cursor is inside a paste region, snap to nearest edge
+            let dist_to_start = current_offset - start;
+            let dist_to_end = end - current_offset;
+
+            if dist_to_start <= dist_to_end {
+                self.move_to_offset(start);
+            } else {
+                self.move_to_offset(end);
+            }
+        }
+    }
+
+    /// Snap cursor to start of paste region if inside or at end of one.
+    /// Used before moving up to treat paste as single unit.
+    fn snap_to_paste_start(&mut self) {
+        let raw_text = self.raw_text();
+        let current_offset = self.cursor_offset();
+
+        // Check all paste regions
+        for (start, end) in find_paste_regions(&raw_text) {
+            // If cursor is inside or at the end of a paste region, snap to start
+            // This treats the entire paste as a single unit when moving up
+            if current_offset > start && current_offset <= end {
+                self.move_to_offset(start);
+                return;
+            }
+        }
+    }
+
+    /// Snap cursor to end of paste region if inside or at start of one.
+    /// Used before moving down to treat paste as single unit.
+    fn snap_to_paste_end(&mut self) {
+        let raw_text = self.raw_text();
+        let current_offset = self.cursor_offset();
+
+        // Check all paste regions
+        for (start, end) in find_paste_regions(&raw_text) {
+            // If cursor is inside or at the start of a paste region, snap to end
+            // This treats the entire paste as a single unit when moving down
+            if current_offset >= start && current_offset < end {
+                self.move_to_offset(end);
+                return;
+            }
         }
     }
 
@@ -1268,6 +1343,18 @@ fn skip_paste_region_left(text: &str, current_offset: usize) -> Option<usize> {
     None
 }
 
+/// Check if a cursor offset is inside a paste region (not at the edges).
+/// Returns Some((start, end)) of the containing region if so.
+fn find_containing_paste_region(text: &str, offset: usize) -> Option<(usize, usize)> {
+    for (start, end) in find_paste_regions(text) {
+        // Inside means strictly between start and end (not at edges)
+        if offset > start && offset < end {
+            return Some((start, end));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1532,5 +1619,117 @@ mod tests {
         let (display, regions) = transform_for_display(&raw);
         assert_eq!(display, "[Paste #1 - 3 lines]");
         assert_eq!(regions.len(), 1);
+    }
+
+    #[test]
+    fn test_history_stores_raw_text_with_tags() {
+        let mut input = InputWidget::new();
+
+        // Insert a multi-line paste (should be wrapped in tags)
+        input.insert_paste("line1\nline2\nline3");
+
+        // Verify raw text has tags
+        let raw = input.raw_text();
+        assert!(raw.contains("<wonopcode__paste>"));
+
+        // Take the text (this should push raw text to history)
+        let submitted = input.take();
+
+        // Submitted text should have tags stripped
+        assert_eq!(submitted, "line1\nline2\nline3");
+        assert!(!submitted.contains("<wonopcode__paste>"));
+
+        // History should contain the raw text with tags
+        assert!(!input.history.is_empty());
+        let history_entry = input.history.previous("").unwrap();
+        assert!(
+            history_entry.contains("<wonopcode__paste>"),
+            "History should contain paste tags, got: {history_entry}"
+        );
+    }
+
+    #[test]
+    fn test_find_containing_paste_region() {
+        // Text with a paste region
+        let text = "before <wonopcode__paste>paste content</wonopcode__paste> after";
+
+        // Find the region boundaries
+        let regions = find_paste_regions(text);
+        assert_eq!(regions.len(), 1);
+        let (start, end) = regions[0];
+
+        // Cursor before the region - not inside
+        assert!(find_containing_paste_region(text, 0).is_none());
+        assert!(find_containing_paste_region(text, 5).is_none());
+
+        // Cursor at the start of region - not inside (at edge)
+        assert!(find_containing_paste_region(text, start).is_none());
+
+        // Cursor inside the region
+        assert!(find_containing_paste_region(text, start + 5).is_some());
+        assert!(find_containing_paste_region(text, start + 10).is_some());
+
+        // Cursor at the end of region - not inside (at edge)
+        assert!(find_containing_paste_region(text, end).is_none());
+
+        // Cursor after the region - not inside
+        assert!(find_containing_paste_region(text, end + 1).is_none());
+    }
+
+    #[test]
+    fn test_snap_cursor_preserves_position_outside_paste() {
+        let mut input = InputWidget::new();
+
+        // Type some text with a paste in the middle
+        input.set_text("before ");
+        input.insert_paste("line1\nline2");
+        input.insert_text(" after");
+
+        let raw = input.raw_text();
+        assert!(raw.contains("<wonopcode__paste>"));
+
+        // Cursor should be at the end, outside paste region
+        let offset_before = input.cursor_offset();
+        input.snap_cursor_outside_paste_region();
+        let offset_after = input.cursor_offset();
+
+        // Should not have moved
+        assert_eq!(offset_before, offset_after);
+    }
+
+    #[test]
+    fn test_history_navigation_preserves_paste_tags() {
+        let mut input = InputWidget::new();
+
+        // First, add a history entry
+        input.set_text("previous entry");
+        input.take();
+
+        // Now type new content with paste
+        input.insert_paste("line1\nline2\nline3");
+        let raw_before = input.raw_text();
+        assert!(
+            raw_before.contains("<wonopcode__paste>"),
+            "Should have paste tags before history navigation"
+        );
+
+        // Navigate up (should stash current content with tags)
+        let up_key = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        input.handle_key(up_key);
+
+        // Should now show "previous entry"
+        assert_eq!(input.raw_text(), "previous entry");
+
+        // Navigate back down (should restore stashed content with tags)
+        let down_key = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+        input.handle_key(down_key);
+
+        // Should have paste tags preserved
+        let raw_after = input.raw_text();
+        assert!(
+            raw_after.contains("<wonopcode__paste>"),
+            "Paste tags should be preserved after history navigation, got: {raw_after}"
+        );
+        assert_eq!(raw_before, raw_after);
     }
 }

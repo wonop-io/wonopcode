@@ -349,7 +349,10 @@ fn parse_patch(text: &str) -> ToolResult<Vec<Hunk>> {
                 if next_line.starts_with("*** ") {
                     break;
                 }
-                let next_line = lines.next().unwrap();
+                // Safe: we just peeked successfully, so next() will return Some
+                let Some(next_line) = lines.next() else {
+                    break;
+                };
                 if let Some(content) = next_line.strip_prefix('+') {
                     contents.push_str(content);
                     contents.push('\n');
@@ -594,7 +597,7 @@ fn apply_chunk(content: &str, chunk: &UpdateChunk) -> ToolResult<String> {
 
     // Add lines before the chunk
     for line in &lines[..start_idx] {
-        new_lines.push(line.to_string());
+        new_lines.push((*line).to_string());
     }
 
     // Add new lines from the chunk
@@ -615,7 +618,7 @@ fn apply_chunk(content: &str, chunk: &UpdateChunk) -> ToolResult<String> {
     // Add remaining lines after the chunk
     let after_idx = start_idx + skip_count.min(lines.len() - start_idx);
     for line in &lines[after_idx..] {
-        new_lines.push(line.to_string());
+        new_lines.push((*line).to_string());
     }
 
     Ok(new_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })

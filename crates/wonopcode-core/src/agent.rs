@@ -450,7 +450,7 @@ impl AgentRegistry {
             "whereis*",
             "which*",
         ] {
-            bash.insert(pattern.to_string(), Permission::Allow);
+            bash.insert((*pattern).to_string(), Permission::Allow);
         }
 
         // Dangerous commands need confirmation
@@ -465,7 +465,7 @@ impl AgentRegistry {
             "sort -o *",
             "tree -o *",
         ] {
-            bash.insert(pattern.to_string(), Permission::Ask);
+            bash.insert((*pattern).to_string(), Permission::Ask);
         }
 
         // Default to ask for unknown commands

@@ -870,13 +870,13 @@ impl MessagesWidget {
     }
 
     /// Replace all messages with a new set (used when loading a session).
+    /// Scrolls to the bottom to show the most recent messages.
     pub fn set_messages(&mut self, messages: Vec<DisplayMessage>) {
         // Clear existing caches
         for msg in &self.messages {
             msg.clear_cache();
         }
         self.messages = messages;
-        self.scroll = 0;
         self.revert_index = None;
         self.invalidate_render_cache();
 
@@ -884,6 +884,9 @@ impl MessagesWidget {
         if self.messages.len() > MAX_MESSAGES_IN_MEMORY {
             self.prune_old_messages();
         }
+
+        // Scroll to bottom to show most recent messages
+        self.scroll_to_bottom();
     }
 
     /// Invalidate all render caches, forcing a full rebuild on next render.
@@ -2343,7 +2346,7 @@ impl MessagesWidget {
                         .unwrap_or(after_pipe)
                         .to_string()
                 } else {
-                    line.to_string()
+                    (*line).to_string()
                 }
             })
             .collect();
@@ -2404,7 +2407,7 @@ impl MessagesWidget {
                 let t: String = line.chars().take(67).collect();
                 format!("{t}...")
             } else {
-                line.to_string()
+                (*line).to_string()
             };
 
             lines.push(Line::from(vec![
@@ -2474,7 +2477,7 @@ impl MessagesWidget {
                             let t: String = line.chars().take(67).collect();
                             format!("{t}...")
                         } else {
-                            line.to_string()
+                            (*line).to_string()
                         };
 
                         lines.push(Line::from(vec![

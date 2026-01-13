@@ -75,6 +75,14 @@ pub struct SessionState {
     /// Share URL if shared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_url: Option<String>,
+
+    /// Whether the assistant is currently streaming a response.
+    #[serde(default)]
+    pub is_streaming: bool,
+
+    /// The in-progress message being streamed (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming_message: Option<Message>,
 }
 
 /// A message in the conversation.

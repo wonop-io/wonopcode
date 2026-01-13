@@ -23,13 +23,17 @@
 
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
 /// Default channel capacity.
 const DEFAULT_CAPACITY: usize = 256;
+
+/// Maximum number of events to keep in the replay buffer.
+const REPLAY_BUFFER_SIZE: usize = 1000;
 
 /// Trait for events that can be published on the bus.
 pub trait Event: Clone + Send + Sync + 'static {
@@ -47,10 +51,28 @@ struct BusInner {
     /// Typed channels by TypeId.
     channels: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
     /// Wildcard subscribers (receive all events as JSON).
-    wildcard: broadcast::Sender<BusEvent>,
+    wildcard: broadcast::Sender<SequencedEvent>,
+    /// Monotonically increasing sequence number.
+    sequence: AtomicU64,
+    /// Ring buffer of recent events for replay.
+    replay_buffer: RwLock<VecDeque<SequencedEvent>>,
 }
 
-/// A serialized event for wildcard subscribers.
+/// A serialized event with sequence number for reliable delivery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequencedEvent {
+    /// Unique sequence number (monotonically increasing).
+    pub seq: u64,
+    /// Timestamp in milliseconds since Unix epoch.
+    pub timestamp: i64,
+    /// Event type name.
+    #[serde(rename = "type")]
+    pub event_type: String,
+    /// Event payload as JSON.
+    pub payload: serde_json::Value,
+}
+
+/// A serialized event for wildcard subscribers (legacy, kept for backwards compatibility).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BusEvent {
     /// Event type name.
@@ -58,6 +80,15 @@ pub struct BusEvent {
     pub event_type: String,
     /// Event payload as JSON.
     pub payload: serde_json::Value,
+}
+
+impl From<SequencedEvent> for BusEvent {
+    fn from(event: SequencedEvent) -> Self {
+        Self {
+            event_type: event.event_type,
+            payload: event.payload,
+        }
+    }
 }
 
 impl Bus {
@@ -68,8 +99,15 @@ impl Bus {
             inner: Arc::new(BusInner {
                 channels: RwLock::new(HashMap::new()),
                 wildcard,
+                sequence: AtomicU64::new(0),
+                replay_buffer: RwLock::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)),
             }),
         }
+    }
+
+    /// Get the current sequence number (the next event will have seq + 1).
+    pub fn current_sequence(&self) -> u64 {
+        self.inner.sequence.load(Ordering::SeqCst)
     }
 
     /// Publish an event to all subscribers.
@@ -86,13 +124,28 @@ impl Bus {
         }
         drop(channels);
 
-        // Send to wildcard subscribers
+        // Send to wildcard subscribers with sequence number
         if let Ok(payload) = serde_json::to_value(&event) {
-            let bus_event = BusEvent {
+            let seq = self.inner.sequence.fetch_add(1, Ordering::SeqCst) + 1;
+            let timestamp = chrono::Utc::now().timestamp_millis();
+
+            let sequenced_event = SequencedEvent {
+                seq,
+                timestamp,
                 event_type: E::event_type().to_string(),
                 payload,
             };
-            let _ = self.inner.wildcard.send(bus_event);
+
+            // Add to replay buffer
+            {
+                let mut buffer = self.inner.replay_buffer.write().await;
+                if buffer.len() >= REPLAY_BUFFER_SIZE {
+                    buffer.pop_front();
+                }
+                buffer.push_back(sequenced_event.clone());
+            }
+
+            let _ = self.inner.wildcard.send(sequenced_event);
         }
     }
 
@@ -117,9 +170,27 @@ impl Bus {
         rx
     }
 
-    /// Subscribe to all events (wildcard).
-    pub fn subscribe_all(&self) -> broadcast::Receiver<BusEvent> {
+    /// Subscribe to all events (wildcard) with sequencing support.
+    pub fn subscribe_all(&self) -> broadcast::Receiver<SequencedEvent> {
         self.inner.wildcard.subscribe()
+    }
+
+    /// Get events from the replay buffer starting from a given sequence number.
+    /// Returns events with seq > from_seq, up to limit events.
+    pub async fn replay_from(&self, from_seq: u64, limit: usize) -> Vec<SequencedEvent> {
+        let buffer = self.inner.replay_buffer.read().await;
+        buffer
+            .iter()
+            .filter(|e| e.seq > from_seq)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    /// Get the oldest sequence number in the replay buffer.
+    pub async fn oldest_sequence(&self) -> Option<u64> {
+        let buffer = self.inner.replay_buffer.read().await;
+        buffer.front().map(|e| e.seq)
     }
 }
 

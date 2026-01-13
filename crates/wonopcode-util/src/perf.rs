@@ -11,7 +11,7 @@ use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -135,13 +135,13 @@ impl PerfLogger {
     }
 
     /// Initialize the logger with a file path.
-    fn init(&self, path: PathBuf) -> std::io::Result<()> {
+    fn init(&self, path: &Path) -> std::io::Result<()> {
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         *writer = Some(BufWriter::new(file));
@@ -167,7 +167,7 @@ impl PerfLogger {
     }
 
     /// Log a performance event.
-    fn log(&self, event: PerfEvent) {
+    fn log(&self, event: &PerfEvent) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
@@ -272,7 +272,7 @@ pub fn init() -> std::io::Result<PathBuf> {
     let path = get_perf_log_path();
 
     let logger = PERF_LOGGER.get_or_init(PerfLogger::new);
-    logger.init(path.clone())?;
+    logger.init(&path)?;
 
     // Initialize metrics
     METRICS.get_or_init(Metrics::new);
@@ -281,7 +281,7 @@ pub fn init() -> std::io::Result<PathBuf> {
 }
 
 /// Initialize performance logging to a specific path.
-pub fn init_with_path(path: PathBuf) -> std::io::Result<()> {
+pub fn init_with_path(path: &Path) -> std::io::Result<()> {
     let logger = PERF_LOGGER.get_or_init(PerfLogger::new);
     logger.init(path)?;
     METRICS.get_or_init(Metrics::new);
@@ -324,7 +324,7 @@ pub fn is_enabled() -> bool {
 }
 
 /// Log a performance event.
-pub fn log(event: PerfEvent) {
+pub fn log(event: &PerfEvent) {
     if let Some(logger) = PERF_LOGGER.get() {
         logger.log(event);
     }
@@ -337,7 +337,7 @@ pub fn metrics() -> Option<&'static Metrics> {
 
 /// Log a memory snapshot event.
 pub fn log_memory(component: &str, operation: &str, count: usize, size_bytes: usize) {
-    log(PerfEvent::new(PerfEventType::Memory, component, operation)
+    log(&PerfEvent::new(PerfEventType::Memory, component, operation)
         .with_count(count)
         .with_size(size_bytes));
 }
@@ -355,7 +355,7 @@ pub fn log_render(component: &str, duration: Duration, context: Option<serde_jso
     if let Some(ctx) = context {
         event = event.with_context(ctx);
     }
-    log(event);
+    log(&event);
 }
 
 /// Log a cache operation.
@@ -364,7 +364,7 @@ pub fn log_cache(component: &str, operation: &str, entries: usize, size_bytes: O
     if let Some(size) = size_bytes {
         event = event.with_size(size);
     }
-    log(event);
+    log(&event);
 }
 
 /// Log a tool execution.
@@ -373,9 +373,11 @@ pub fn log_tool(name: &str, duration: Duration, success: bool) {
         m.tool_calls_total.fetch_add(1, Ordering::Relaxed);
     }
 
-    log(PerfEvent::new(PerfEventType::ToolExecution, "runner", name)
-        .with_duration(duration)
-        .with_context(serde_json::json!({ "success": success })));
+    log(
+        &PerfEvent::new(PerfEventType::ToolExecution, "runner", name)
+            .with_duration(duration)
+            .with_context(serde_json::json!({ "success": success })),
+    );
 }
 
 /// Log a compaction event.
@@ -387,7 +389,7 @@ pub fn log_compaction(messages_before: usize, messages_after: usize, duration: D
     }
 
     log(
-        PerfEvent::new(PerfEventType::Compaction, "runner", "compact")
+        &PerfEvent::new(PerfEventType::Compaction, "runner", "compact")
             .with_duration(duration)
             .with_count(messages_before)
             .with_context(serde_json::json!({
@@ -406,7 +408,7 @@ pub fn log_message_history(operation: &str, count: usize, size_bytes: usize) {
     }
 
     log(
-        PerfEvent::new(PerfEventType::MessageHistory, "runner", operation)
+        &PerfEvent::new(PerfEventType::MessageHistory, "runner", operation)
             .with_count(count)
             .with_size(size_bytes),
     );
@@ -416,7 +418,7 @@ pub fn log_message_history(operation: &str, count: usize, size_bytes: usize) {
 pub fn log_metrics_snapshot() {
     if let Some(m) = metrics() {
         log(
-            PerfEvent::new(PerfEventType::Memory, "system", "metrics_snapshot")
+            &PerfEvent::new(PerfEventType::Memory, "system", "metrics_snapshot")
                 .with_context(m.snapshot()),
         );
     }
@@ -450,7 +452,7 @@ impl Drop for TimingGuard {
     fn drop(&mut self) {
         let duration = self.start.elapsed();
         log(
-            PerfEvent::new(self.event_type.clone(), &self.component, &self.operation)
+            &PerfEvent::new(self.event_type.clone(), &self.component, &self.operation)
                 .with_duration(duration),
         );
     }
@@ -468,7 +470,7 @@ macro_rules! perf_time {
 #[macro_export]
 macro_rules! perf_log {
     ($event_type:expr, $component:expr, $operation:expr) => {
-        $crate::perf::log($crate::perf::PerfEvent::new(
+        $crate::perf::log(&$crate::perf::PerfEvent::new(
             $event_type,
             $component,
             $operation,
@@ -476,17 +478,17 @@ macro_rules! perf_log {
     };
     ($event_type:expr, $component:expr, $operation:expr, count = $count:expr) => {
         $crate::perf::log(
-            $crate::perf::PerfEvent::new($event_type, $component, $operation).with_count($count),
+            &$crate::perf::PerfEvent::new($event_type, $component, $operation).with_count($count),
         )
     };
     ($event_type:expr, $component:expr, $operation:expr, size = $size:expr) => {
         $crate::perf::log(
-            $crate::perf::PerfEvent::new($event_type, $component, $operation).with_size($size),
+            &$crate::perf::PerfEvent::new($event_type, $component, $operation).with_size($size),
         )
     };
     ($event_type:expr, $component:expr, $operation:expr, duration = $duration:expr) => {
         $crate::perf::log(
-            $crate::perf::PerfEvent::new($event_type, $component, $operation)
+            &$crate::perf::PerfEvent::new($event_type, $component, $operation)
                 .with_duration($duration),
         )
     };
@@ -531,7 +533,7 @@ mod tests {
 
         // Note: Can only init once per process, so this test may fail
         // if run after other tests that call init()
-        let _ = init_with_path(path);
+        let _ = init_with_path(&path);
 
         // File should be created
         // Note: May not work if already initialized

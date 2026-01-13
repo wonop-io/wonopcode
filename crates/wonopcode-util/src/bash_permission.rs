@@ -222,7 +222,7 @@ pub fn extract_path_args(command: &str) -> Vec<String> {
             if cmd == "chmod" && (arg.starts_with('+') || arg.chars().all(|c| c.is_ascii_digit())) {
                 continue;
             }
-            paths.push(arg.to_string());
+            paths.push((*arg).to_string());
         }
     }
 
