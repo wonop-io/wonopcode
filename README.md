@@ -178,6 +178,101 @@ wonopcode run --format json "List all functions"
 | `agent` | List available agents (`list`, `show`) |
 | `mcp-serve` | Run as MCP server (for Claude CLI integration) |
 
+### Client-Server Mode (Network Discovery)
+
+Wonopcode supports running in a client-server architecture where a headless server can be discovered and connected to from other machines on the local network using mDNS (Multicast DNS).
+
+#### Server Setup
+
+Start a headless server that advertises itself on the network:
+
+```bash
+# Basic headless server with mDNS advertisement
+wonopcode --headless --advertise
+
+# Custom name for the advertisement (default: hostname)
+wonopcode --headless --advertise --name "my-workstation"
+
+# With authentication (recommended for security)
+wonopcode --headless --advertise --secret "your-secret-key"
+
+# Custom address binding
+wonopcode --headless --advertise --address 0.0.0.0:3000
+```
+
+The server advertises itself using the service type `_wonopcode._tcp.local.` and includes metadata such as:
+- Server name (hostname or custom name)
+- Project name (from working directory)
+- Model being used
+- Whether authentication is required
+
+#### Client Discovery
+
+Discover and connect to servers on the local network:
+
+```bash
+# Discover available servers
+wonopcode --discover
+```
+
+This will:
+1. Scan the local network for 3 seconds
+2. Display all found servers with their details (name, address, project, model, auth status)
+3. Prompt you to select a server (if multiple are found)
+4. Connect to the selected server
+
+Example output:
+```
+Discovering wonopcode servers on the local network...
+
+Found 2 server(s):
+
+  1. my-workstation
+     Address: 192.168.1.100:3000
+     Project: my-project
+     Model: claude-sonnet-4-5-20250929
+
+  2. dev-server
+     Address: 192.168.1.101:3000
+     Project: backend-api
+     Model: gpt-4o
+     Auth: required
+
+Select server (1-2):
+```
+
+#### Direct Connection
+
+If you know the server address, you can connect directly without discovery:
+
+```bash
+# Connect to a specific server
+wonopcode --connect 192.168.1.100:3000
+
+# With authentication
+wonopcode --connect 192.168.1.100:3000 --secret "your-secret-key"
+
+# Shorthand for localhost
+wonopcode --connect :3000
+```
+
+#### Authentication
+
+For secure deployments, use the `--secret` flag on both server and client:
+
+```bash
+# Server
+wonopcode --headless --advertise --secret "shared-secret"
+
+# Client (via discovery)
+wonopcode --discover --secret "shared-secret"
+
+# Client (direct connection)
+wonopcode --connect 192.168.1.100:3000 --secret "shared-secret"
+```
+
+The secret can also be set via the `WONOPCODE_SECRET` environment variable.
+
 ### TUI Keybindings
 
 The TUI uses a **leader key** system (default: `Ctrl+X`). Press the leader key followed by another key to trigger actions.

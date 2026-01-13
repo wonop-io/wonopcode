@@ -1595,6 +1595,8 @@ async fn run_headless(
                         messages: protocol_messages,
                         is_shared: false,
                         share_url: None,
+                        is_streaming: false,
+                        streaming_message: None,
                     });
 
                     info!(
@@ -1612,6 +1614,8 @@ async fn run_headless(
                     messages: Vec::new(),
                     is_shared: false,
                     share_url: None,
+                    is_streaming: false,
+                    streaming_message: None,
                 });
                 info!(session_id = %new_session_id, "Created new empty session for headless mode");
             }
@@ -1750,42 +1754,64 @@ async fn run_headless(
     // Spawn task to convert app updates to protocol updates, update state, and broadcast
     let state_for_updates = state_handle.clone();
     tokio::spawn(async move {
-        // Track the current assistant message being built with ordered segments
-        let mut current_message_segments: Vec<wonopcode_protocol::MessageSegment> = Vec::new();
-        let mut current_message_id: Option<String> = None;
-
         while let Some(update) = app_update_rx.recv().await {
             // Update the current state based on the update type
             match &update {
                 wonopcode_tui::AppUpdate::Started => {
-                    // Start a new assistant message
-                    current_message_segments.clear();
-                    current_message_id = Some(uuid::Uuid::new_v4().to_string());
-                }
-                wonopcode_tui::AppUpdate::TextDelta(delta) => {
-                    // Append to last text segment or create new one
-                    if let Some(wonopcode_protocol::MessageSegment::Text { text }) =
-                        current_message_segments.last_mut()
-                    {
-                        text.push_str(delta);
-                    } else {
-                        current_message_segments.push(wonopcode_protocol::MessageSegment::Text {
-                            text: delta.clone(),
+                    // Start a new assistant message - track in shared state
+                    let mut state = state_for_updates.write().await;
+                    let model = Some(state.model.clone());
+                    let agent = Some(state.agent.clone());
+                    if let Some(ref mut session) = state.session {
+                        session.is_streaming = true;
+                        session.streaming_message = Some(wonopcode_protocol::Message {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            role: "assistant".to_string(),
+                            content: vec![],
+                            timestamp: chrono::Utc::now()
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string(),
+                            tool_calls: vec![],
+                            model,
+                            agent,
                         });
                     }
                 }
+                wonopcode_tui::AppUpdate::TextDelta(delta) => {
+                    // Append to streaming message in shared state
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            // Append to last text segment or create new one
+                            if let Some(wonopcode_protocol::MessageSegment::Text { text }) =
+                                msg.content.last_mut()
+                            {
+                                text.push_str(delta);
+                            } else {
+                                msg.content.push(wonopcode_protocol::MessageSegment::Text {
+                                    text: delta.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 wonopcode_tui::AppUpdate::ToolStarted { id, name, input } => {
-                    // Add tool segment in order
-                    current_message_segments.push(wonopcode_protocol::MessageSegment::Tool {
-                        tool: wonopcode_protocol::ToolCall {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input.clone(),
-                            output: None,
-                            success: false,
-                            status: "running".to_string(),
-                        },
-                    });
+                    // Add tool segment to streaming message
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            msg.content.push(wonopcode_protocol::MessageSegment::Tool {
+                                tool: wonopcode_protocol::ToolCall {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    output: None,
+                                    success: false,
+                                    status: "running".to_string(),
+                                },
+                            });
+                        }
+                    }
                 }
                 wonopcode_tui::AppUpdate::ToolCompleted {
                     id,
@@ -1793,43 +1819,43 @@ async fn run_headless(
                     output,
                     ..
                 } => {
-                    // Update tool status in segments
-                    for segment in &mut current_message_segments {
-                        if let wonopcode_protocol::MessageSegment::Tool { tool } = segment {
-                            if &tool.id == id {
-                                tool.output = Some(output.clone());
-                                tool.success = *success;
-                                tool.status = if *success {
-                                    "completed".to_string()
-                                } else {
-                                    "failed".to_string()
-                                };
-                                break;
+                    // Update tool status in streaming message
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(ref mut msg) = session.streaming_message {
+                            for segment in &mut msg.content {
+                                if let wonopcode_protocol::MessageSegment::Tool { tool } = segment {
+                                    if &tool.id == id {
+                                        tool.output = Some(output.clone());
+                                        tool.success = *success;
+                                        tool.status = if *success {
+                                            "completed".to_string()
+                                        } else {
+                                            "failed".to_string()
+                                        };
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
                 }
                 wonopcode_tui::AppUpdate::Completed { .. } => {
-                    // Finalize current message and add to session
-                    if let Some(msg_id) = current_message_id.take() {
-                        let mut state = state_for_updates.write().await;
-                        // Get model and agent from current state
-                        let model = Some(state.model.clone());
-                        let agent = Some(state.agent.clone());
-                        if let Some(ref mut session) = state.session {
-                            session.messages.push(wonopcode_protocol::Message {
-                                id: msg_id,
-                                role: "assistant".to_string(),
-                                content: current_message_segments.clone(),
-                                timestamp: chrono::Utc::now()
-                                    .format("%Y-%m-%d %H:%M:%S")
-                                    .to_string(),
-                                tool_calls: vec![], // Tools are now inline in content
-                                model,
-                                agent,
-                            });
+                    // Finalize streaming message and move to messages list
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        if let Some(msg) = session.streaming_message.take() {
+                            session.messages.push(msg);
                         }
-                        current_message_segments.clear();
+                        session.is_streaming = false;
+                    }
+                }
+                wonopcode_tui::AppUpdate::Error(_) => {
+                    // Clear streaming state on error
+                    let mut state = state_for_updates.write().await;
+                    if let Some(ref mut session) = state.session {
+                        session.streaming_message = None;
+                        session.is_streaming = false;
                     }
                 }
                 wonopcode_tui::AppUpdate::SandboxUpdated(status) => {
@@ -2353,114 +2379,170 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
 
     // Apply current session with messages
     if let Some(session) = state.session {
-        let messages: Vec<wonopcode_tui::DisplayMessage> = session
-            .messages
-            .into_iter()
-            .map(|msg| {
-                // Convert protocol message to display message
-                match msg.role.as_str() {
-                    "user" => {
-                        // Extract text from content segments
-                        let text: String = msg
-                            .content
-                            .iter()
-                            .filter_map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    Some(text.clone())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("");
-                        wonopcode_tui::DisplayMessage::user(text)
-                    }
-                    "assistant" => {
-                        // Helper to convert protocol ToolCall to TUI DisplayToolCall
-                        let convert_tool =
-                            |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
-                                let status = match tool.status.as_str() {
-                                    "completed" => wonopcode_tui::ToolStatus::Success,
-                                    "failed" => wonopcode_tui::ToolStatus::Error,
-                                    "running" => wonopcode_tui::ToolStatus::Running,
-                                    _ => wonopcode_tui::ToolStatus::Pending,
-                                };
-                                wonopcode_tui::DisplayToolCall {
-                                    id: tool.id.clone(),
-                                    name: tool.name.clone(),
-                                    input: Some(tool.input.clone()),
-                                    output: tool.output.clone(),
-                                    status,
-                                    metadata: None,
-                                    expanded: false,
-                                }
-                            };
-
-                        // Convert segments to TUI segments (now includes inline tools)
-                        let mut all_segments: Vec<wonopcode_tui::widgets::MessageSegment> = msg
-                            .content
-                            .iter()
-                            .map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(text.clone())
-                                }
-                                wonopcode_protocol::MessageSegment::Code { code, .. } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(code.clone())
-                                }
-                                wonopcode_protocol::MessageSegment::Thinking { text } => {
-                                    wonopcode_tui::widgets::MessageSegment::Text(format!(
-                                        "*Thinking:* {text}"
-                                    ))
-                                }
-                                wonopcode_protocol::MessageSegment::Tool { tool } => {
-                                    wonopcode_tui::widgets::MessageSegment::Tool(convert_tool(tool))
-                                }
-                            })
-                            .collect();
-
-                        // Also add any legacy tool_calls (for backward compatibility)
-                        for tool in &msg.tool_calls {
-                            all_segments.push(wonopcode_tui::widgets::MessageSegment::Tool(
-                                convert_tool(tool),
-                            ));
-                        }
-
-                        // Convert agent string to AgentMode
-                        let agent_mode = msg
-                            .agent
-                            .as_ref()
-                            .map(|a| wonopcode_tui::AgentMode::parse(a));
-
-                        wonopcode_tui::DisplayMessage::assistant_with_segments(all_segments)
-                            .with_model_agent(msg.model.clone(), agent_mode)
-                    }
-                    "system" => {
-                        let text: String = msg
-                            .content
-                            .iter()
-                            .filter_map(|seg| match seg {
-                                wonopcode_protocol::MessageSegment::Text { text } => {
-                                    Some(text.clone())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("");
-                        wonopcode_tui::DisplayMessage::system(text)
-                    }
-                    _ => wonopcode_tui::DisplayMessage::system(format!(
-                        "Unknown role: {}",
-                        msg.role
-                    )),
+        // Helper to convert protocol ToolCall to TUI DisplayToolCall
+        let convert_tool =
+            |tool: &wonopcode_protocol::ToolCall| -> wonopcode_tui::DisplayToolCall {
+                let status = match tool.status.as_str() {
+                    "completed" => wonopcode_tui::ToolStatus::Success,
+                    "failed" => wonopcode_tui::ToolStatus::Error,
+                    "running" => wonopcode_tui::ToolStatus::Running,
+                    _ => wonopcode_tui::ToolStatus::Pending,
+                };
+                wonopcode_tui::DisplayToolCall {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    input: Some(tool.input.clone()),
+                    output: tool.output.clone(),
+                    status,
+                    metadata: None,
+                    expanded: false,
                 }
-            })
-            .collect();
+            };
+
+        // Helper to convert a protocol message to display message
+        let convert_message = |msg: &wonopcode_protocol::Message| -> wonopcode_tui::DisplayMessage {
+            match msg.role.as_str() {
+                "user" => {
+                    // Extract text from content segments
+                    let text: String = msg
+                        .content
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    wonopcode_tui::DisplayMessage::user(text)
+                }
+                "assistant" => {
+                    // Convert segments to TUI segments (now includes inline tools)
+                    let mut all_segments: Vec<wonopcode_tui::widgets::MessageSegment> = msg
+                        .content
+                        .iter()
+                        .map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(text.clone())
+                            }
+                            wonopcode_protocol::MessageSegment::Code { code, .. } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(code.clone())
+                            }
+                            wonopcode_protocol::MessageSegment::Thinking { text } => {
+                                wonopcode_tui::widgets::MessageSegment::Text(format!(
+                                    "*Thinking:* {text}"
+                                ))
+                            }
+                            wonopcode_protocol::MessageSegment::Tool { tool } => {
+                                wonopcode_tui::widgets::MessageSegment::Tool(convert_tool(tool))
+                            }
+                        })
+                        .collect();
+
+                    // Also add any legacy tool_calls (for backward compatibility)
+                    for tool in &msg.tool_calls {
+                        all_segments.push(wonopcode_tui::widgets::MessageSegment::Tool(
+                            convert_tool(tool),
+                        ));
+                    }
+
+                    // Convert agent string to AgentMode
+                    let agent_mode = msg.agent.as_ref().map(|a| wonopcode_tui::AgentMode::parse(a));
+
+                    wonopcode_tui::DisplayMessage::assistant_with_segments(all_segments)
+                        .with_model_agent(msg.model.clone(), agent_mode)
+                }
+                "system" => {
+                    let text: String = msg
+                        .content
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            wonopcode_protocol::MessageSegment::Text { text } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    wonopcode_tui::DisplayMessage::system(text)
+                }
+                _ => wonopcode_tui::DisplayMessage::system(format!("Unknown role: {}", msg.role)),
+            }
+        };
+
+        let messages: Vec<wonopcode_tui::DisplayMessage> =
+            session.messages.iter().map(convert_message).collect();
 
         if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::SessionLoaded {
-            id: session.id,
-            title: session.title,
+            id: session.id.clone(),
+            title: session.title.clone(),
             messages,
         }) {
             warn!("Failed to send session loaded update: {}", e);
+        }
+
+        // If there's an in-progress streaming message, restore the streaming state
+        if session.is_streaming {
+            if let Some(ref streaming_msg) = session.streaming_message {
+                info!(
+                    "Restoring streaming state with {} content segments",
+                    streaming_msg.content.len()
+                );
+
+                // Send Started to put TUI in streaming mode
+                if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::Started) {
+                    warn!("Failed to send Started update: {}", e);
+                }
+
+                // Send the accumulated content as events to build up the streaming display
+                for segment in &streaming_msg.content {
+                    match segment {
+                        wonopcode_protocol::MessageSegment::Text { text } => {
+                            if let Err(e) =
+                                update_tx.send(wonopcode_tui::AppUpdate::TextDelta(text.clone()))
+                            {
+                                warn!("Failed to send TextDelta update: {}", e);
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Tool { tool } => {
+                            // Send ToolStarted
+                            if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::ToolStarted {
+                                id: tool.id.clone(),
+                                name: tool.name.clone(),
+                                input: tool.input.clone(),
+                            }) {
+                                warn!("Failed to send ToolStarted update: {}", e);
+                            }
+
+                            // If tool is completed, send ToolCompleted
+                            if tool.status == "completed" || tool.status == "failed" {
+                                if let Err(e) =
+                                    update_tx.send(wonopcode_tui::AppUpdate::ToolCompleted {
+                                        id: tool.id.clone(),
+                                        success: tool.success,
+                                        output: tool.output.clone().unwrap_or_default(),
+                                        metadata: None,
+                                    })
+                                {
+                                    warn!("Failed to send ToolCompleted update: {}", e);
+                                }
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Thinking { text } => {
+                            // Send thinking as text delta with prefix
+                            if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TextDelta(
+                                format!("*Thinking:* {text}"),
+                            )) {
+                                warn!("Failed to send Thinking update: {}", e);
+                            }
+                        }
+                        wonopcode_protocol::MessageSegment::Code { code, .. } => {
+                            if let Err(e) =
+                                update_tx.send(wonopcode_tui::AppUpdate::TextDelta(code.clone()))
+                            {
+                                warn!("Failed to send Code update: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
