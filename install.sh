@@ -15,6 +15,9 @@ BINARY_NAME="wonopcode"
 GITHUB_API="https://api.github.com"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
 
+# Global temp directory (for cleanup trap)
+TMP_DIR=""
+
 # Colors (disabled if not a terminal)
 if [ -t 1 ]; then
     RED='\033[0;31m'
@@ -314,14 +317,13 @@ main() {
     esac
 
     # Create temporary directory
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    trap 'rm -rf "$tmp_dir"' EXIT
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR"' EXIT
 
     # Download archive and checksums
     local archive_name="${artifact_name}.${extension}"
-    local archive_path="${tmp_dir}/${archive_name}"
-    local checksums_path="${tmp_dir}/checksums.txt"
+    local archive_path="${TMP_DIR}/${archive_name}"
+    local checksums_path="${TMP_DIR}/checksums.txt"
 
     local download_url="${GITHUB_RELEASES}/download/${VERSION}/${archive_name}"
     local checksums_url="${GITHUB_RELEASES}/download/${VERSION}/checksums.txt"
@@ -334,7 +336,7 @@ main() {
 
     # Extract archive
     info "Extracting archive..."
-    local extract_dir="${tmp_dir}/extract"
+    local extract_dir="${TMP_DIR}/extract"
     mkdir -p "$extract_dir"
     extract "$archive_path" "$extract_dir"
 
