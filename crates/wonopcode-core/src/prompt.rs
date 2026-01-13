@@ -423,6 +423,7 @@ impl PromptLoop {
             snapshot: self.snapshot.clone(),
             file_time: self.file_time.clone(),
             sandbox: None, // Sandbox not used in prompt executor (yet)
+            event_tx: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool_name);

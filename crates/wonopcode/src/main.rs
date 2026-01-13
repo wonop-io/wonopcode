@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use runner::{Runner, RunnerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Parser)]
 #[command(name = "wonopcode")]
@@ -1670,6 +1670,10 @@ async fn handle_import(cwd: &std::path::Path, input: std::path::PathBuf) -> anyh
 
 /// Run interactive mode.
 async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> {
+    // Initialize shared todo storage early so MCP server and Runner use the same store
+    let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
+    info!(path = %todo_path.display(), "Initialized shared todo storage");
+
     // Check for updates on startup (non-blocking)
     let update_notification = {
         let cwd = cwd.to_path_buf();
@@ -3009,7 +3013,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     };
     // Send as update so it's processed correctly
     let update_tx = app.update_sender();
-    let _ = update_tx.send(wonopcode_tui::AppUpdate::SandboxUpdated(sandbox_update));
+    if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::SandboxUpdated(sandbox_update)) {
+        warn!("Failed to send sandbox update: {}", e);
+    }
 
     // Apply todos
     if !state.todos.is_empty() {
@@ -3023,7 +3029,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 priority: t.priority,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated(todos));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated(todos)) {
+            warn!("Failed to send todos update: {}", e);
+        }
     }
 
     // Apply MCP servers
@@ -3037,7 +3045,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 error: s.error,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::McpUpdated(servers));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::McpUpdated(servers)) {
+            warn!("Failed to send MCP update: {}", e);
+        }
     }
 
     // Apply LSP servers
@@ -3052,7 +3062,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 connected: s.connected,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::LspUpdated(servers));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::LspUpdated(servers)) {
+            warn!("Failed to send LSP update: {}", e);
+        }
     }
 
     // Apply sessions list
@@ -3062,16 +3074,20 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
             .into_iter()
             .map(|s| (s.id, s.title, s.timestamp))
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::Sessions(sessions));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::Sessions(sessions)) {
+            warn!("Failed to send sessions update: {}", e);
+        }
     }
 
     // Apply token usage
-    let _ = update_tx.send(wonopcode_tui::AppUpdate::TokenUsage {
+    if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TokenUsage {
         input: state.token_usage.input,
         output: state.token_usage.output,
         cost: state.token_usage.cost,
         context_limit: state.context_limit,
-    });
+    }) {
+        warn!("Failed to send token usage update: {}", e);
+    }
 
     // Apply modified files
     if !state.modified_files.is_empty() {
@@ -3084,7 +3100,9 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 removed: f.removed,
             })
             .collect();
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::ModifiedFilesUpdated(files));
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::ModifiedFilesUpdated(files)) {
+            warn!("Failed to send modified files update: {}", e);
+        }
     }
 
     // Apply current session with messages
@@ -3191,11 +3209,13 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
             })
             .collect();
 
-        let _ = update_tx.send(wonopcode_tui::AppUpdate::SessionLoaded {
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::SessionLoaded {
             id: session.id,
             title: session.title,
             messages,
-        });
+        }) {
+            warn!("Failed to send session loaded update: {}", e);
+        }
     }
 
     // Take action receiver
@@ -3319,6 +3339,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             snapshot: self.snapshot.clone(),
             file_time: Some(self.file_time.clone()),
             sandbox,
+            event_tx: None, // MCP HTTP doesn't need event_tx
         };
 
         tracing::info!(
@@ -3487,8 +3508,13 @@ async fn create_mcp_http_state(
     // Use shared file todo store
     let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> =
         if let Some(store) = wonopcode_tools::todo::SharedFileTodoStore::from_env() {
+            tracing::info!(
+                path = %store.path().display(),
+                "MCP HTTP using SharedFileTodoStore"
+            );
             Arc::new(store)
         } else {
+            tracing::warn!("WONOPCODE_TODO_FILE not set, MCP HTTP using InMemoryTodoStore - todos will NOT sync with TUI!");
             Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
         };
 

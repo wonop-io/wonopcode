@@ -39,6 +39,14 @@ use wonopcode_util::FileTimeState;
 
 use crate::compaction::{self, CompactionConfig, CompactionResult};
 
+/// Helper to send updates to the TUI with proper error logging.
+/// This replaces `let _ = update_tx.send(...)` to avoid silent failures.
+fn send_update(update_tx: &mpsc::UnboundedSender<AppUpdate>, update: AppUpdate) {
+    if let Err(e) = update_tx.send(update) {
+        warn!("Failed to send update to TUI (channel closed): {}", e);
+    }
+}
+
 /// Wrapper to store `Arc<dyn SandboxRuntime>` as `Arc<dyn Any + Send + Sync>`.
 /// This allows sharing sandbox runtime through permission manager without circular deps.
 pub struct SandboxRuntimeWrapper(pub Arc<dyn SandboxRuntime>);
@@ -622,7 +630,7 @@ impl Runner {
                     connected: s.status == wonopcode_lsp::LspServerStatus::Connected,
                 })
                 .collect();
-            let _ = update_tx.send(AppUpdate::LspUpdated(lsp_updates));
+            send_update(&update_tx, AppUpdate::LspUpdated(lsp_updates));
         }
     }
 
@@ -763,7 +771,7 @@ impl Runner {
         {
             let provider = self.provider.read().await;
             let model_info = provider.model_info();
-            let _ = update_tx.send(AppUpdate::ModelInfo {
+            send_update(&update_tx, AppUpdate::ModelInfo {
                 context_limit: model_info.limit.context,
             });
         }
@@ -782,7 +790,7 @@ impl Runner {
                 .collect();
 
             if !mcp_updates.is_empty() {
-                let _ = update_tx.send(AppUpdate::McpUpdated(mcp_updates));
+                send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
             }
         }
 
@@ -838,9 +846,9 @@ impl Runner {
                     None, // Don't show message when sandbox is completely disabled
                 )
             };
-            let _ = update_tx.send(AppUpdate::SandboxUpdated(status));
+            send_update(&update_tx, AppUpdate::SandboxUpdated(status));
             if let Some(msg) = system_msg {
-                let _ = update_tx.send(AppUpdate::SystemMessage(msg));
+                send_update(&update_tx, AppUpdate::SystemMessage(msg));
             }
         }
 
@@ -852,7 +860,7 @@ impl Runner {
                     self.reset_cancel_token().await;
 
                     // Send started update
-                    let _ = update_tx.send(AppUpdate::Started);
+                    send_update(&update_tx, AppUpdate::Started);
 
                     // Run the prompt with concurrent cancellation handling
                     info!(prompt_len = text.len(), "Running prompt");
@@ -918,7 +926,7 @@ impl Runner {
                                 result_len = result_text.len(),
                                 "Prompt completed successfully"
                             );
-                            let _ = update_tx.send(AppUpdate::Completed { text: result_text });
+                            send_update(&update_tx, AppUpdate::Completed { text: result_text });
 
                             // Sync todos to TUI
                             self.sync_todos_to_tui(&cwd, &update_tx);
@@ -927,10 +935,10 @@ impl Runner {
                             let err_str = e.to_string();
                             if err_str.contains("Cancelled") {
                                 info!("Prompt was cancelled");
-                                let _ = update_tx.send(AppUpdate::Error("Cancelled".to_string()));
+                                send_update(&update_tx, AppUpdate::Error("Cancelled".to_string()));
                             } else {
                                 error!("Prompt error: {}", e);
-                                let _ = update_tx.send(AppUpdate::Error(err_str));
+                                send_update(&update_tx, AppUpdate::Error(err_str));
                             }
                         }
                     }
@@ -955,13 +963,11 @@ impl Runner {
                     info!(model = %model_spec, "Changing model");
                     match self.change_model(&model_spec).await {
                         Ok(()) => {
-                            let _ = update_tx
-                                .send(AppUpdate::Status(format!("Model changed to {model_spec}")));
+                            send_update(&update_tx, AppUpdate::Status(format!("Model changed to {model_spec}")));
                         }
                         Err(e) => {
                             error!("Failed to change model: {}", e);
-                            let _ = update_tx
-                                .send(AppUpdate::Error(format!("Failed to change model: {e}")));
+                            send_update(&update_tx, AppUpdate::Error(format!("Failed to change model: {e}")));
                         }
                     }
                 }
@@ -995,7 +1001,7 @@ impl Runner {
                 }
                 AppAction::Revert { message_id } => {
                     info!(message_id = %message_id, "Revert requested");
-                    let _ = update_tx.send(AppUpdate::Status(format!(
+                    send_update(&update_tx, AppUpdate::Status(format!(
                         "Reverting to message {message_id}..."
                     )));
 
@@ -1070,7 +1076,7 @@ impl Runner {
                     };
 
                     if messages.len() < 4 {
-                        let _ = update_tx.send(AppUpdate::Status(
+                        send_update(&update_tx, AppUpdate::Status(
                             "Not enough messages to compact".to_string(),
                         ));
                         continue;
@@ -1124,21 +1130,19 @@ impl Runner {
                             } else {
                                 "Pruned old tool outputs".to_string()
                             };
-                            let _ = update_tx.send(AppUpdate::Status(status));
+                            send_update(&update_tx, AppUpdate::Status(status));
                         }
                         CompactionResult::NotNeeded => {
-                            let _ = update_tx
-                                .send(AppUpdate::Status("Compaction not needed".to_string()));
+                            send_update(&update_tx, AppUpdate::Status("Compaction not needed".to_string()));
                         }
                         CompactionResult::InsufficientMessages => {
-                            let _ = update_tx.send(AppUpdate::Status(
+                            send_update(&update_tx, AppUpdate::Status(
                                 "Not enough messages to compact".to_string(),
                             ));
                         }
                         CompactionResult::Failed(err) => {
                             warn!(error = %err, "Compaction failed");
-                            let _ = update_tx
-                                .send(AppUpdate::Error(format!("Compaction failed: {err}")));
+                            send_update(&update_tx, AppUpdate::Error(format!("Compaction failed: {err}")));
                         }
                     }
                 }
@@ -1165,7 +1169,7 @@ impl Runner {
                         match mcp_client.toggle_server(&name).await {
                             Ok(enabled) => {
                                 let status = if enabled { "enabled" } else { "disabled" };
-                                let _ = update_tx.send(AppUpdate::Status(format!(
+                                send_update(&update_tx, AppUpdate::Status(format!(
                                     "MCP server '{name}' {status}"
                                 )));
 
@@ -1180,30 +1184,27 @@ impl Runner {
                                         error,
                                     })
                                     .collect();
-                                let _ = update_tx.send(AppUpdate::McpUpdated(mcp_updates));
+                                send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
                             }
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to toggle MCP server");
-                                let _ = update_tx.send(AppUpdate::Error(format!(
+                                send_update(&update_tx, AppUpdate::Error(format!(
                                     "Failed to toggle '{name}': {e}"
                                 )));
                             }
                         }
                     } else {
-                        let _ = update_tx
-                            .send(AppUpdate::Error("No MCP client configured".to_string()));
+                        send_update(&update_tx, AppUpdate::Error("No MCP client configured".to_string()));
                     }
                 }
                 AppAction::McpReconnect { name } => {
                     info!(server = %name, "MCP reconnect requested");
                     if let Some(ref mcp_client) = self.mcp_client {
-                        let _ = update_tx
-                            .send(AppUpdate::Status(format!("Reconnecting to '{name}'...")));
+                        send_update(&update_tx, AppUpdate::Status(format!("Reconnecting to '{name}'...")));
 
                         match mcp_client.reconnect_server(&name).await {
                             Ok(()) => {
-                                let _ = update_tx
-                                    .send(AppUpdate::Status(format!("Reconnected to '{name}'")));
+                                send_update(&update_tx, AppUpdate::Status(format!("Reconnected to '{name}'")));
 
                                 // Send updated MCP status
                                 let mcp_updates: Vec<McpStatusUpdate> = mcp_client
@@ -1216,18 +1217,17 @@ impl Runner {
                                         error,
                                     })
                                     .collect();
-                                let _ = update_tx.send(AppUpdate::McpUpdated(mcp_updates));
+                                send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
                             }
                             Err(e) => {
                                 warn!(server = %name, error = %e, "Failed to reconnect MCP server");
-                                let _ = update_tx.send(AppUpdate::Error(format!(
+                                send_update(&update_tx, AppUpdate::Error(format!(
                                     "Failed to reconnect '{name}': {e}"
                                 )));
                             }
                         }
                     } else {
-                        let _ = update_tx
-                            .send(AppUpdate::Error("No MCP client configured".to_string()));
+                        send_update(&update_tx, AppUpdate::Error("No MCP client configured".to_string()));
                     }
                 }
                 AppAction::ForkSession { message_id } => {
@@ -1247,14 +1247,14 @@ impl Runner {
                                 let mut history = self.history.write().await;
                                 history.clear();
                             }
-                            let _ = update_tx.send(AppUpdate::Status(format!(
+                            send_update(&update_tx, AppUpdate::Status(format!(
                                 "Forked to new session: {}",
                                 forked.title
                             )));
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to fork session");
-                            let _ = update_tx.send(AppUpdate::Error(format!("Fork failed: {e}")));
+                            send_update(&update_tx, AppUpdate::Error(format!("Fork failed: {e}")));
                         }
                     }
                 }
@@ -1274,12 +1274,11 @@ impl Runner {
                     {
                         Ok(share_info) => {
                             info!(url = %share_info.url, "Session shared successfully");
-                            let _ = update_tx
-                                .send(AppUpdate::Status(format!("Shared at: {}", share_info.url)));
+                            send_update(&update_tx, AppUpdate::Status(format!("Shared at: {}", share_info.url)));
                         }
                         Err(e) => {
                             warn!(error = %e, "Failed to share session");
-                            let _ = update_tx.send(AppUpdate::Error(format!("Share failed: {e}")));
+                            send_update(&update_tx, AppUpdate::Error(format!("Share failed: {e}")));
                         }
                     }
                 }
@@ -1287,14 +1286,14 @@ impl Runner {
                     info!("Unshare session requested");
                     // Unsharing requires the share secret which we don't store in the TUI
                     // This would need to be retrieved from session metadata
-                    let _ = update_tx.send(AppUpdate::Status(
+                    send_update(&update_tx, AppUpdate::Status(
                         "Unshare requires share secret - use CLI: wonopcode unshare".to_string(),
                     ));
                 }
                 AppAction::GotoMessage { message_id } => {
                     info!(message_id = %message_id, "Go to message requested");
                     // This is handled in the TUI (scroll to message)
-                    let _ = update_tx.send(AppUpdate::Status(format!(
+                    send_update(&update_tx, AppUpdate::Status(format!(
                         "Navigated to message {message_id}"
                     )));
                 }
@@ -1323,7 +1322,7 @@ impl Runner {
                                 SaveScope::Project => "project config",
                                 SaveScope::Global => "global config",
                             };
-                            let _ = update_tx.send(AppUpdate::SystemMessage(format!(
+                            send_update(&update_tx, AppUpdate::SystemMessage(format!(
                                 "Settings saved to {location}"
                             )));
 
@@ -1337,8 +1336,7 @@ impl Runner {
                         }
                         Err(e) => {
                             error!("Failed to save settings: {}", e);
-                            let _ = update_tx
-                                .send(AppUpdate::Error(format!("Failed to save settings: {e}")));
+                            send_update(&update_tx, AppUpdate::Error(format!("Failed to save settings: {e}")));
                         }
                     }
                 }
@@ -1430,7 +1428,7 @@ impl Runner {
                     },
                 })
                 .collect();
-            let _ = update_tx.send(AppUpdate::TodosUpdated(todo_updates));
+            send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
         }
     }
 
@@ -1459,7 +1457,7 @@ impl Runner {
         );
         if let Some(ref manager) = self.sandbox_manager {
             // Send starting status
-            let _ = update_tx.send(AppUpdate::SandboxUpdated(
+            send_update(&update_tx, AppUpdate::SandboxUpdated(
                 wonopcode_tui::SandboxStatusUpdate {
                     state: "starting".to_string(),
                     runtime_type: Some(manager.runtime_type_display()),
@@ -1491,7 +1489,7 @@ impl Runner {
                             error: None,
                         })
                         .await;
-                    let _ = update_tx.send(AppUpdate::SandboxUpdated(
+                    send_update(&update_tx, AppUpdate::SandboxUpdated(
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "running".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
@@ -1501,7 +1499,7 @@ impl Runner {
 
                     // Send system message about sandbox starting
                     let runtime = manager.runtime_type_display().to_lowercase();
-                    let _ = update_tx.send(AppUpdate::SystemMessage(format!(
+                    send_update(&update_tx, AppUpdate::SystemMessage(format!(
                         "⬡ Sandbox started ({runtime}) - commands will execute in isolated container"
                     )));
 
@@ -1517,7 +1515,7 @@ impl Runner {
                             error: Some(e.to_string()),
                         })
                         .await;
-                    let _ = update_tx.send(AppUpdate::SandboxUpdated(
+                    send_update(&update_tx, AppUpdate::SandboxUpdated(
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
@@ -1527,7 +1525,7 @@ impl Runner {
                 }
             }
         } else {
-            let _ = update_tx.send(AppUpdate::SandboxUpdated(
+            send_update(&update_tx, AppUpdate::SandboxUpdated(
                 wonopcode_tui::SandboxStatusUpdate {
                     state: "disabled".to_string(),
                     runtime_type: None,
@@ -1616,7 +1614,7 @@ impl Runner {
                             error: None,
                         })
                         .await;
-                    let _ = update_tx.send(AppUpdate::SandboxUpdated(
+                    send_update(&update_tx, AppUpdate::SandboxUpdated(
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "stopped".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
@@ -1625,7 +1623,7 @@ impl Runner {
                     ));
 
                     // Send system message about sandbox stopping
-                    let _ = update_tx.send(AppUpdate::SystemMessage(
+                    send_update(&update_tx, AppUpdate::SystemMessage(
                         "◇ Sandbox stopped - commands will execute directly on host".to_string(),
                     ));
 
@@ -1634,7 +1632,7 @@ impl Runner {
                 }
                 Err(e) => {
                     warn!(error = %e, "Failed to stop sandbox");
-                    let _ = update_tx.send(AppUpdate::SandboxUpdated(
+                    send_update(&update_tx, AppUpdate::SandboxUpdated(
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
@@ -1644,7 +1642,7 @@ impl Runner {
                 }
             }
         } else {
-            let _ = update_tx.send(AppUpdate::SandboxUpdated(
+            send_update(&update_tx, AppUpdate::SandboxUpdated(
                 wonopcode_tui::SandboxStatusUpdate {
                     state: "disabled".to_string(),
                     runtime_type: None,
@@ -1713,7 +1711,7 @@ impl Runner {
                 threshold = AUTO_COMPACT_MESSAGE_THRESHOLD,
                 "Message count exceeds threshold, triggering automatic compaction"
             );
-            let _ = update_tx.send(AppUpdate::Status(format!(
+            send_update(&update_tx, AppUpdate::Status(format!(
                 "Auto-compacting {} messages...",
                 messages.len()
             )));
@@ -1759,7 +1757,7 @@ impl Runner {
                         *history = messages.clone();
                     }
 
-                    let _ = update_tx.send(AppUpdate::Status(format!(
+                    send_update(&update_tx, AppUpdate::Status(format!(
                         "Auto-compacted {} → {} messages",
                         messages_before,
                         messages.len()
@@ -1793,7 +1791,7 @@ impl Runner {
                             *history = messages.clone();
                         }
 
-                        let _ = update_tx.send(AppUpdate::Status(format!(
+                        send_update(&update_tx, AppUpdate::Status(format!(
                             "Truncated {} → {} messages",
                             messages_before,
                             messages.len()
@@ -1813,7 +1811,7 @@ impl Runner {
                 context_limit = context_limit,
                 "Context approaching limit, attempting smart compaction"
             );
-            let _ = update_tx.send(AppUpdate::Status("Compacting conversation...".to_string()));
+            send_update(&update_tx, AppUpdate::Status("Compacting conversation...".to_string()));
 
             // Estimate token usage for compaction decision
             let estimated_tokens = compaction::estimate_token_usage(&messages);
@@ -1859,7 +1857,7 @@ impl Runner {
                     } else {
                         "Pruned old tool outputs to save context".to_string()
                     };
-                    let _ = update_tx.send(AppUpdate::Status(status));
+                    send_update(&update_tx, AppUpdate::Status(status));
                 }
                 CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
                     debug!("Compaction not needed or insufficient messages");
@@ -1925,7 +1923,17 @@ impl Runner {
         // Main loop
         loop {
             if cancel.is_cancelled() {
-                return Err("Cancelled".into());
+                // Save partial history before returning
+                if !final_text.is_empty() {
+                    let mut history = self.history.write().await;
+                    history.push(ProviderMessage::assistant(&final_text));
+                }
+                info!(
+                    partial_text_len = final_text.len(),
+                    "Prompt cancelled, partial response preserved"
+                );
+                // Return partial text as success so it gets displayed
+                return Ok(final_text);
             }
 
             if steps >= MAX_STEPS {
@@ -2012,7 +2020,17 @@ impl Runner {
             let mut chunk_count = 0u32;
             while let Some(chunk_result) = stream.next().await {
                 if cancel.is_cancelled() {
-                    return Err("Cancelled".into());
+                    // Save partial text collected so far and return it (not an error)
+                    if !current_text.is_empty() {
+                        let mut history = self.history.write().await;
+                        history.push(ProviderMessage::assistant(&current_text));
+                    }
+                    info!(
+                        partial_text_len = current_text.len(),
+                        "Stream cancelled, partial response preserved"
+                    );
+                    // Return the partial text as success so it gets displayed
+                    return Ok(current_text);
                 }
 
                 let chunk = match chunk_result {
@@ -2035,7 +2053,7 @@ impl Runner {
                     StreamChunk::TextStart => {}
                     StreamChunk::TextDelta(delta) => {
                         current_text.push_str(&delta);
-                        let _ = update_tx.send(AppUpdate::TextDelta(delta));
+                        send_update(&update_tx, AppUpdate::TextDelta(delta));
                     }
                     StreamChunk::TextEnd => {}
                     StreamChunk::ToolCallStart { id, name } => {
@@ -2069,7 +2087,7 @@ impl Runner {
                         debug!(id = %id, name = %name, "Tool observed (external execution)");
                         observed_tools.insert(id.clone(), (name.clone(), input.clone()));
                         // Notify the TUI
-                        let _ = update_tx.send(AppUpdate::ToolStarted { name, id, input });
+                        send_update(&update_tx, AppUpdate::ToolStarted { name, id, input });
                     }
                     StreamChunk::ToolResultObserved {
                         id,
@@ -2127,8 +2145,7 @@ impl Runner {
                                                 root,
                                                 connected: true,
                                             };
-                                            let _ = update_tx
-                                                .send(AppUpdate::LspUpdated(vec![lsp_update]));
+                                            send_update(&update_tx, AppUpdate::LspUpdated(vec![lsp_update]));
                                         }
                                     }
                                 }
@@ -2162,8 +2179,7 @@ impl Runner {
                                         })
                                         .collect();
                                     if !todo_updates.is_empty() {
-                                        let _ =
-                                            update_tx.send(AppUpdate::TodosUpdated(todo_updates));
+                                        send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
                                     }
                                 }
                             }
@@ -2175,8 +2191,7 @@ impl Runner {
                                     tool_name, input, &output,
                                 ) {
                                     debug!(path = %update.path, added = update.added, removed = update.removed, "Sending ModifiedFilesUpdated for observed tool");
-                                    let _ = update_tx
-                                        .send(AppUpdate::ModifiedFilesUpdated(vec![update]));
+                                    send_update(&update_tx, AppUpdate::ModifiedFilesUpdated(vec![update]));
                                 }
                             }
                         }
@@ -2189,7 +2204,7 @@ impl Runner {
                             })
                             .map(serde_json::Value::Object);
 
-                        let _ = update_tx.send(AppUpdate::ToolCompleted {
+                        send_update(&update_tx, AppUpdate::ToolCompleted {
                             id,
                             success,
                             output,
@@ -2215,7 +2230,7 @@ impl Runner {
                         };
 
                         // Send token usage update
-                        let _ = update_tx.send(AppUpdate::TokenUsage {
+                        send_update(&update_tx, AppUpdate::TokenUsage {
                             input: total_input + step_usage.input_tokens,
                             output: total_output + step_usage.output_tokens,
                             cost,
@@ -2305,7 +2320,7 @@ impl Runner {
                             }
                             Decision::Ask => {
                                 // For now, treat Ask as Deny with a warning
-                                let _ = update_tx.send(AppUpdate::Status(format!(
+                                send_update(&update_tx, AppUpdate::Status(format!(
                                     "Doom loop detected: '{tool_name}' called {DOOM_LOOP_THRESHOLD} times with identical args"
                                 )));
                                 doom_loop_blocked.push((call_id, tool_name, args_str));
@@ -2359,12 +2374,12 @@ impl Runner {
                         Please try a different approach or use different arguments."
                     );
 
-                    let _ = update_tx.send(AppUpdate::ToolStarted {
+                    send_update(&update_tx, AppUpdate::ToolStarted {
                         name: tool_name.clone(),
                         id: call_id.clone(),
                         input: "{}".to_string(),
                     });
-                    let _ = update_tx.send(AppUpdate::ToolCompleted {
+                    send_update(&update_tx, AppUpdate::ToolCompleted {
                         id: call_id.clone(),
                         success: false,
                         output: error_msg.clone(),
@@ -2381,12 +2396,12 @@ impl Runner {
                         The user has declined to allow this tool execution."
                     );
 
-                    let _ = update_tx.send(AppUpdate::ToolStarted {
+                    send_update(&update_tx, AppUpdate::ToolStarted {
                         name: tool_name.clone(),
                         id: call_id.clone(),
                         input: "{}".to_string(),
                     });
-                    let _ = update_tx.send(AppUpdate::ToolCompleted {
+                    send_update(&update_tx, AppUpdate::ToolCompleted {
                         id: call_id.clone(),
                         success: false,
                         output: error_msg.clone(),
@@ -2415,7 +2430,7 @@ impl Runner {
                         "Tool invoked"
                     );
 
-                    let _ = update_tx.send(AppUpdate::ToolStarted {
+                    send_update(&update_tx, AppUpdate::ToolStarted {
                         name: tool_name.clone(),
                         id: call_id.clone(),
                         input: args_str.clone(),
@@ -2423,13 +2438,13 @@ impl Runner {
                 }
 
                 if tool_calls.len() > 1 {
-                    let _ = update_tx.send(AppUpdate::Status(format!(
+                    send_update(&update_tx, AppUpdate::Status(format!(
                         "Running {} tools in parallel",
                         tool_calls.len()
                     )));
                 }
 
-                // Spawn all tools concurrently
+                // Spawn all tools concurrently (Box::pin for select_all compatibility)
                 let tool_futures: Vec<_> = tool_calls
                     .into_iter()
                     .map(|(call_id, tool_name, args_str)| {
@@ -2443,8 +2458,51 @@ impl Runner {
                         let file_time = self.file_time.clone();
                         let sandbox_manager = self.sandbox_manager.clone();
                         let todo_store = self.todo_store.clone();
+                        // Create event channel for immediate tool event notifications
+                        let (tool_event_tx, mut tool_event_rx) = tokio::sync::mpsc::unbounded_channel();
+                        let update_tx_for_events = update_tx.clone();
+                        
+                        // Spawn task to forward tool events to TUI updates
+                        tokio::spawn(async move {
+                            debug!("Tool event receiver task started");
+                            while let Some(event) = tool_event_rx.recv().await {
+                                match event {
+                                    wonopcode_tools::ToolEvent::TodosUpdated(todos) => {
+                                        debug!(
+                                            todo_count = todos.len(),
+                                            "Received TodosUpdated event via event_tx"
+                                        );
+                                        // Convert and send to TUI immediately
+                                        let todo_updates: Vec<TodoUpdate> = todos
+                                            .into_iter()
+                                            .map(|t| TodoUpdate {
+                                                id: t.id,
+                                                content: t.content,
+                                                status: match t.status {
+                                                    wonopcode_tools::todo::TodoStatus::Pending => "pending".to_string(),
+                                                    wonopcode_tools::todo::TodoStatus::InProgress => "in_progress".to_string(),
+                                                    wonopcode_tools::todo::TodoStatus::Completed => "completed".to_string(),
+                                                    wonopcode_tools::todo::TodoStatus::Cancelled => "cancelled".to_string(),
+                                                },
+                                                priority: match t.priority {
+                                                    wonopcode_tools::todo::TodoPriority::High => "high".to_string(),
+                                                    wonopcode_tools::todo::TodoPriority::Medium => "medium".to_string(),
+                                                    wonopcode_tools::todo::TodoPriority::Low => "low".to_string(),
+                                                },
+                                            })
+                                            .collect();
+                                        debug!(
+                                            update_count = todo_updates.len(),
+                                            "Sending TodosUpdated from event_tx path"
+                                        );
+                                        send_update(&update_tx_for_events, AppUpdate::TodosUpdated(todo_updates));
+                                    }
+                                }
+                            }
+                            debug!("Tool event receiver task ended");
+                        });
 
-                        async move {
+                        Box::pin(async move {
                             let tool_start = Instant::now();
                             let input: serde_json::Value =
                                 serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Null);
@@ -2456,12 +2514,12 @@ impl Runner {
                             let result = if tool_name == "task" {
                                 match serde_json::from_value::<task::TaskArgs>(input.clone()) {
                                     Ok(args) => {
-                                        let _ = update_tx.send(AppUpdate::Status(format!(
+                                        send_update(&update_tx, AppUpdate::Status(format!(
                                             "Running {} subagent: {}",
                                             args.subagent_type, args.description
                                         )));
 
-                                        match run_subagent_standalone(
+                                        let subagent_result = run_subagent_standalone(
                                             &args.subagent_type,
                                             &args.prompt,
                                             &cwd,
@@ -2473,8 +2531,37 @@ impl Runner {
                                             file_time.clone(),
                                             sandbox.clone(),
                                         )
-                                        .await
-                                        {
+                                        .await;
+
+                                        // Sync todos after subagent completes (subagents may have called todowrite)
+                                        let todos = todo::get_todos(todo_store.as_ref(), &cwd);
+                                        if !todos.is_empty() {
+                                            debug!(
+                                                todo_count = todos.len(),
+                                                "Syncing todos after subagent completion"
+                                            );
+                                            let todo_updates: Vec<TodoUpdate> = todos
+                                                .into_iter()
+                                                .map(|t| TodoUpdate {
+                                                    id: t.id,
+                                                    content: t.content,
+                                                    status: match t.status {
+                                                        todo::TodoStatus::Pending => "pending".to_string(),
+                                                        todo::TodoStatus::InProgress => "in_progress".to_string(),
+                                                        todo::TodoStatus::Completed => "completed".to_string(),
+                                                        todo::TodoStatus::Cancelled => "cancelled".to_string(),
+                                                    },
+                                                    priority: match t.priority {
+                                                        todo::TodoPriority::High => "high".to_string(),
+                                                        todo::TodoPriority::Medium => "medium".to_string(),
+                                                        todo::TodoPriority::Low => "low".to_string(),
+                                                    },
+                                                })
+                                                .collect();
+                                            send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+                                        }
+
+                                        match subagent_result {
                                             Ok(response) => Ok(wonopcode_tools::ToolOutput::new(
                                                 format!("Task completed: {}", args.description),
                                                 response,
@@ -2522,6 +2609,7 @@ impl Runner {
                                     snapshot_store,
                                     file_time,
                                     sandbox,
+                                    Some(tool_event_tx),
                                 )
                                 .await
                             };
@@ -2554,7 +2642,7 @@ impl Runner {
                             );
                             perf::log_tool(&tool_name, tool_duration, success);
 
-                            let _ = update_tx.send(AppUpdate::ToolCompleted {
+                            send_update(&update_tx, AppUpdate::ToolCompleted {
                                 id: call_id.clone(),
                                 success,
                                 output: output.clone(),
@@ -2567,7 +2655,7 @@ impl Runner {
                                     metadata.get("agent_change").and_then(|v| v.as_str())
                                 {
                                     info!(agent = %agent, "Agent changed via tool");
-                                    let _ = update_tx.send(AppUpdate::AgentChanged(agent.to_string()));
+                                    send_update(&update_tx, AppUpdate::AgentChanged(agent.to_string()));
                                 }
                             }
 
@@ -2628,8 +2716,7 @@ impl Runner {
                                     }
 
                                     if !updates.is_empty() {
-                                        let _ =
-                                            update_tx.send(AppUpdate::ModifiedFilesUpdated(updates));
+                                        send_update(&update_tx, AppUpdate::ModifiedFilesUpdated(updates));
                                     }
                                 }
                             }
@@ -2638,9 +2725,20 @@ impl Runner {
                             // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__todowrite"
                             let base_tool_name =
                                 tool_name.rsplit("__").next().unwrap_or(&tool_name);
+                            debug!(
+                                tool_name = %tool_name,
+                                base_tool_name = %base_tool_name,
+                                success = %success,
+                                "Checking if todo sync needed"
+                            );
                             if base_tool_name == "todowrite" && success {
                                 // Read todos from the file-based store (shared with MCP server)
                                 let todos = todo::get_todos(todo_store.as_ref(), &cwd);
+                                debug!(
+                                    todo_count = todos.len(),
+                                    cwd = %cwd.display(),
+                                    "Read todos from store for sync"
+                                );
                                 let todo_updates: Vec<TodoUpdate> = todos
                                     .into_iter()
                                     .map(|t| TodoUpdate {
@@ -2660,17 +2758,51 @@ impl Runner {
                                     })
                                     .collect();
                                 if !todo_updates.is_empty() {
-                                    let _ = update_tx.send(AppUpdate::TodosUpdated(todo_updates));
+                                    debug!(
+                                        update_count = todo_updates.len(),
+                                        "Sending TodosUpdated from fallback sync"
+                                    );
+                                    send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+                                } else {
+                                    warn!("Todo updates empty after todowrite - file may not have been written");
                                 }
                             }
 
                             (call_id, tool_name, output, success, metadata)
-                        }
+                        })
                     })
                     .collect();
 
-                // Wait for all tools to complete
-                let tool_results = futures::future::join_all(tool_futures).await;
+                // Wait for tools to complete, with cancellation support
+                // Use select_all in a loop so we can exit early on cancellation
+                // while preserving results from completed tools
+                let mut tool_results: Vec<(String, String, String, bool, serde_json::Value)> = Vec::new();
+                let mut remaining_futures = tool_futures;
+                let mut cancelled = false;
+
+                while !remaining_futures.is_empty() {
+                    let remaining_count = remaining_futures.len();
+                    tokio::select! {
+                        biased;
+
+                        // Check for cancellation
+                        _ = cancel.cancelled() => {
+                            info!(
+                                completed = tool_results.len(),
+                                remaining = remaining_count,
+                                "Tool execution cancelled, preserving completed results"
+                            );
+                            cancelled = true;
+                            break;
+                        }
+
+                        // Wait for the next tool to complete
+                        (result, _index, rest) = futures::future::select_all(remaining_futures) => {
+                            tool_results.push(result);
+                            remaining_futures = rest;
+                        }
+                    }
+                }
 
                 // Post-process results - add tool results to messages
                 // Note: Modified file and todo updates are now sent incrementally after each tool completes
@@ -2688,6 +2820,22 @@ impl Runner {
                 // Send LSP status update if LSP tool was used
                 if has_lsp_tool {
                     self.send_lsp_status(update_tx).await;
+                }
+
+                // If cancelled, save partial progress and return
+                if cancelled {
+                    // Save the assistant message with tool calls to history
+                    if !current_text.is_empty() {
+                        let mut history = self.history.write().await;
+                        history.push(ProviderMessage::assistant(&current_text));
+                    }
+                    info!(
+                        tool_results_completed = tool_results.len(),
+                        partial_text_len = current_text.len(),
+                        "Tool execution cancelled, partial results preserved"
+                    );
+                    // Return partial text as success so it gets displayed
+                    return Ok(current_text);
                 }
 
                 // Always continue after executing tool calls to get the model's response
@@ -2724,7 +2872,7 @@ impl Runner {
 
         match git.status() {
             Ok(status) => {
-                let _ = update_tx.send(AppUpdate::GitStatusUpdated(GitStatusUpdate {
+                send_update(&update_tx, AppUpdate::GitStatusUpdated(GitStatusUpdate {
                     branch: status.branch,
                     ahead: status.ahead,
                     behind: status.behind,
@@ -2751,7 +2899,7 @@ impl Runner {
                 }));
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2770,7 +2918,7 @@ impl Runner {
 
         match git.stage(&paths) {
             Ok(()) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: format!("Staged {} file(s)", paths.len()),
                 });
@@ -2778,7 +2926,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2797,7 +2945,7 @@ impl Runner {
 
         match git.unstage(&paths) {
             Ok(()) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: format!("Unstaged {} file(s)", paths.len()),
                 });
@@ -2805,7 +2953,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2824,7 +2972,7 @@ impl Runner {
 
         match git.checkout(&paths) {
             Ok(()) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: format!("Discarded changes to {} file(s)", paths.len()),
                 });
@@ -2832,7 +2980,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2851,7 +2999,7 @@ impl Runner {
 
         match git.commit(&message) {
             Ok(commit_info) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: format!("Committed: {}", commit_info.id),
                 });
@@ -2859,7 +3007,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2874,7 +3022,7 @@ impl Runner {
 
         match git.history(50) {
             Ok(commits) => {
-                let _ = update_tx.send(AppUpdate::GitHistoryUpdated(
+                send_update(&update_tx, AppUpdate::GitHistoryUpdated(
                     commits
                         .into_iter()
                         .map(|c| GitCommitUpdate {
@@ -2887,7 +3035,7 @@ impl Runner {
                 ));
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2902,7 +3050,7 @@ impl Runner {
 
         match git.push(None, None) {
             Ok(()) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: "Push successful".to_string(),
                 });
@@ -2910,7 +3058,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -2925,7 +3073,7 @@ impl Runner {
 
         match git.pull(None, None) {
             Ok(()) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: true,
                     message: "Pull successful".to_string(),
                 });
@@ -2933,7 +3081,7 @@ impl Runner {
                 self.handle_git_status(update_tx).await;
             }
             Err(e) => {
-                let _ = update_tx.send(AppUpdate::GitOperationResult {
+                send_update(&update_tx, AppUpdate::GitOperationResult {
                     success: false,
                     message: e.to_string(),
                 });
@@ -3141,6 +3289,7 @@ async fn run_subagent_standalone(
                     snapshot: snapshot_store.clone(),
                     file_time: Some(file_time.clone()),
                     sandbox: sandbox.clone(),
+                    event_tx: None, // Subagents don't need event_tx for now
                 };
 
                 match tool.execute(args, &ctx).await {
@@ -3185,6 +3334,7 @@ async fn execute_tool_standalone(
     snapshot_store: Option<Arc<SnapshotStore>>,
     file_time: Arc<FileTimeState>,
     sandbox: Option<Arc<dyn SandboxRuntime>>,
+    event_tx: Option<tokio::sync::mpsc::UnboundedSender<wonopcode_tools::ToolEvent>>,
 ) -> Result<wonopcode_tools::ToolOutput, wonopcode_tools::ToolError> {
     let tool = tools.get(tool_name).ok_or_else(|| {
         wonopcode_tools::ToolError::validation(format!("Unknown tool: {tool_name}"))
@@ -3200,6 +3350,7 @@ async fn execute_tool_standalone(
         snapshot: snapshot_store,
         file_time: Some(file_time),
         sandbox,
+        event_tx,
     };
 
     info!(tool = tool_name, "Executing tool");

@@ -1,6 +1,6 @@
 //! HTTP server for wonopcode.
 //!
-//! Provides REST API and SSE endpoints for the TUI and external clients.
+//! Provides REST API, SSE, and WebSocket endpoints for the TUI and external clients.
 
 pub mod git;
 pub mod headless;
@@ -8,6 +8,7 @@ pub mod prompt;
 pub mod routes;
 pub mod sse;
 pub mod state;
+pub mod ws;
 
 pub use git::{GitCommitInfo, GitError, GitFileState, GitFileStatus, GitOperations, GitStatus};
 pub use headless::{

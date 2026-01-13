@@ -279,6 +279,7 @@ impl Clone for ToolContext {
             snapshot: self.snapshot.clone(),
             file_time: self.file_time.clone(),
             sandbox: self.sandbox.clone(),
+            event_tx: self.event_tx.clone(),
         }
     }
 }

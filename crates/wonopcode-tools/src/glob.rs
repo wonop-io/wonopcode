@@ -243,6 +243,7 @@ mod tests {
             snapshot: None,
             file_time: None,
             sandbox: None,
+            event_tx: None,
         }
     }
 

@@ -360,6 +360,7 @@ impl Processor {
             snapshot: None,
             file_time: None,
             sandbox: None, // ACP tools run without sandbox for now
+            event_tx: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool.id());
