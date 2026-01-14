@@ -116,7 +116,7 @@ rand = "0.8"
 arboard = "3"
 walkdir = "2"
 serde_yaml = "0.9"
-bollard = "0.18"
+bollard = "0.20"
 bytesize = "1"
 
 [workspace.lints.clippy]
