@@ -3956,7 +3956,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "wonopcode"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3998,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-acp"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-auth"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "dirs",
  "serde",
@@ -4034,7 +4034,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4070,7 +4070,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-lsp"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lsp-types",
  "serde",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-mcp"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-protocol"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-provider"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-sandbox"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "bollard",
@@ -4157,7 +4157,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4188,7 +4188,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-snapshot"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "serde",
@@ -4203,7 +4203,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-storage"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -4217,7 +4217,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-tools"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -4246,7 +4246,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-tui"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "async-trait",
@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "wonopcode-util"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "dirs",
