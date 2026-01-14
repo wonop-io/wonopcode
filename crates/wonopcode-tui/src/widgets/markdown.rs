@@ -11,6 +11,30 @@ use crate::theme::{RenderSettings, Theme};
 /// Default width for code block backgrounds when width is not specified.
 const DEFAULT_CODE_WIDTH: usize = 80;
 
+/// A clickable code region in rendered markdown.
+#[derive(Debug, Clone)]
+pub struct CodeRegion {
+    /// Starting line index in the rendered output.
+    pub start_line: usize,
+    /// Ending line index (exclusive) in the rendered output.
+    pub end_line: usize,
+    /// The actual code content (for copying).
+    pub content: String,
+    /// Whether this is a fenced code block (```...```) or inline code (`...`).
+    pub is_block: bool,
+    /// The language tag (for code blocks).
+    pub language: String,
+}
+
+/// Result of markdown rendering with clickable regions.
+#[derive(Debug, Clone)]
+pub struct RenderedMarkdown {
+    /// The rendered text.
+    pub text: Text<'static>,
+    /// Clickable code regions.
+    pub code_regions: Vec<CodeRegion>,
+}
+
 /// Wrap a line of styled spans to fit within a given width.
 /// Returns multiple lines if the content exceeds the width.
 pub fn wrap_line(line: Line<'static>, max_width: usize) -> Vec<Line<'static>> {
@@ -128,6 +152,28 @@ pub fn render_markdown_with_settings(
         );
     }
 
+    render_markdown_internal(text, theme, width, settings).text
+}
+
+/// Render markdown text with custom render settings and return code regions for click detection.
+pub fn render_markdown_with_regions(
+    text: &str,
+    theme: &Theme,
+    width: usize,
+    settings: &RenderSettings,
+) -> RenderedMarkdown {
+    // If markdown is disabled, return plain text with no regions
+    if !settings.markdown_enabled {
+        return RenderedMarkdown {
+            text: Text::from(
+                text.lines()
+                    .map(|line| Line::from(Span::styled(line.to_string(), theme.text_style())))
+                    .collect::<Vec<_>>(),
+            ),
+            code_regions: vec![],
+        };
+    }
+
     render_markdown_internal(text, theme, width, settings)
 }
 
@@ -137,11 +183,13 @@ fn render_markdown_internal(
     theme: &Theme,
     width: usize,
     settings: &RenderSettings,
-) -> Text<'static> {
+) -> RenderedMarkdown {
     let mut lines = Vec::new();
+    let mut code_regions = Vec::new();
     let mut in_code_block = false;
     let mut code_block_lang = String::new();
     let mut code_lines: Vec<String> = Vec::new();
+    let mut code_block_start_line: usize = 0;
     let mut in_table = false;
     let mut table_lines: Vec<String> = Vec::new();
     let mut last_was_blank = false;
@@ -216,12 +264,22 @@ fn render_markdown_internal(
                     }
                 }
 
+                // Record the code region for click detection
+                code_regions.push(CodeRegion {
+                    start_line: code_block_start_line,
+                    end_line: lines.len(),
+                    content: code_content,
+                    is_block: true,
+                    language: code_block_lang.clone(),
+                });
+
                 code_lines.clear();
                 code_block_lang.clear();
                 in_code_block = false;
                 last_was_blank = false;
             } else {
-                // Start code block
+                // Start code block - record the starting line
+                code_block_start_line = lines.len();
                 code_block_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
                 in_code_block = true;
             }
@@ -437,9 +495,21 @@ fn render_markdown_internal(
                 settings,
             );
         }
+
+        // Record the unclosed code region for click detection
+        code_regions.push(CodeRegion {
+            start_line: code_block_start_line,
+            end_line: lines.len(),
+            content: code_content,
+            is_block: true,
+            language: code_block_lang,
+        });
     }
 
-    Text::from(lines)
+    RenderedMarkdown {
+        text: Text::from(lines),
+        code_regions,
+    }
 }
 
 /// Render a markdown table.

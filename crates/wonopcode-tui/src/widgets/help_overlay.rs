@@ -196,6 +196,11 @@ impl HelpOverlay {
                     category: "Clipboard",
                 },
                 HelpEntry {
+                    key: "Click",
+                    description: "Click code block to copy",
+                    category: "Clipboard",
+                },
+                HelpEntry {
                     key: "o",
                     description: "Expand/collapse tool output",
                     category: "View",

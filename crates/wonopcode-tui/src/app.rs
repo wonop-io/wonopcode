@@ -2554,10 +2554,21 @@ async function fetchUserData(userId) {
                         && y >= self.messages_area.y
                         && y < self.messages_area.y + self.messages_area.height
                     {
-                        // Focus messages (scroll mode)
-                        self.set_state(AppState::Scrolling);
-                        self.input.set_focused(false);
-                        self.messages.set_focused(true);
+                        // Check if clicking on a code block
+                        if let Some(code_content) = self.messages.handle_click(x, y) {
+                            // Copy code to clipboard
+                            if self.copy_to_clipboard(&code_content) {
+                                self.toasts.push(Toast::success("Code copied to clipboard"));
+                            } else {
+                                self.toasts
+                                    .push(Toast::error("Failed to copy to clipboard"));
+                            }
+                        } else {
+                            // Focus messages (scroll mode)
+                            self.set_state(AppState::Scrolling);
+                            self.input.set_focused(false);
+                            self.messages.set_focused(true);
+                        }
                     }
                 }
             }
