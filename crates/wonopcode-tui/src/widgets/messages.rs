@@ -1367,7 +1367,10 @@ impl MessagesWidget {
         let mut current_line = 0usize;
 
         for idx in 0..visible {
-            let msg_rendered_lines = self.rendered_cache.message_lines.get(idx)
+            let msg_rendered_lines = self
+                .rendered_cache
+                .message_lines
+                .get(idx)
                 .map(|l| l.len())
                 .unwrap_or(0);
 
@@ -1410,11 +1413,10 @@ impl MessagesWidget {
     #[cfg(test)]
     fn extract_inline_code(line: &str) -> Vec<String> {
         let mut codes = Vec::new();
-        let mut chars = line.chars().peekable();
         let mut in_code = false;
         let mut current_code = String::new();
 
-        while let Some(c) = chars.next() {
+        for c in line.chars() {
             if c == '`' {
                 if in_code {
                     // End of inline code
@@ -1492,7 +1494,11 @@ impl MessagesWidget {
 
     /// Extract code regions from content and add them to the provided regions vector.
     /// The line_offset is the cumulative line count before this message.
-    fn extract_code_regions_into(content: &str, line_offset: usize, regions: &mut Vec<ClickableCodeRegion>) {
+    fn extract_code_regions_into(
+        content: &str,
+        line_offset: usize,
+        regions: &mut Vec<ClickableCodeRegion>,
+    ) {
         let mut in_code_block = false;
         let mut code_block_lang = String::new();
         let mut code_lines: Vec<&str> = Vec::new();
@@ -1798,11 +1804,15 @@ impl MessagesWidget {
             // We need to extract content info before borrowing self mutably
             let (role, content) = {
                 let msg = &self.messages[idx];
-                (msg.role.clone(), msg.content.clone())
+                (msg.role, msg.content.clone())
             };
 
             if role == MessageRole::Assistant {
-                Self::extract_code_regions_into(&content, cumulative_line_offset, &mut self.code_regions);
+                Self::extract_code_regions_into(
+                    &content,
+                    cumulative_line_offset,
+                    &mut self.code_regions,
+                );
             }
 
             if self.rendered_cache.message_lines[idx].is_empty() {
@@ -3002,13 +3012,15 @@ mod tests {
         assert!(codes.is_empty());
 
         // Complex inline code
-        let codes = MessagesWidget::extract_inline_code("The function `fn main() {}` is the entry point");
+        let codes =
+            MessagesWidget::extract_inline_code("The function `fn main() {}` is the entry point");
         assert_eq!(codes, vec!["fn main() {}"]);
     }
 
     #[test]
     fn test_extract_code_blocks() {
-        let content = "Some text\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\nMore text";
+        let content =
+            "Some text\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\nMore text";
         let blocks = MessagesWidget::extract_code_blocks_from_content(content);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].0, "rust");

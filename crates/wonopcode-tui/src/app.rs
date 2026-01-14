@@ -2560,7 +2560,8 @@ async function fetchUserData(userId) {
                             if self.copy_to_clipboard(&code_content) {
                                 self.toasts.push(Toast::success("Code copied to clipboard"));
                             } else {
-                                self.toasts.push(Toast::error("Failed to copy to clipboard"));
+                                self.toasts
+                                    .push(Toast::error("Failed to copy to clipboard"));
                             }
                         } else {
                             // Focus messages (scroll mode)

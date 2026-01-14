@@ -33,7 +33,10 @@ pub use footer::{FooterStatus, FooterWidget};
 pub use help_overlay::{HelpContext, HelpEntry, HelpOverlay};
 pub use input::{InputAction, InputWidget, PromptHistory};
 pub use logo::LogoWidget;
-pub use markdown::{render_markdown, render_markdown_with_regions, render_markdown_with_width, CodeRegion, RenderedMarkdown};
+pub use markdown::{
+    render_markdown, render_markdown_with_regions, render_markdown_with_width, CodeRegion,
+    RenderedMarkdown,
+};
 pub use messages::{
     ClickableCodeRegion, DisplayMessage, DisplayToolCall, MessageRole, MessageSegment,
     MessagesWidget, ToolStatus,
