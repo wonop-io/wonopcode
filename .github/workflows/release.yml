@@ -12,8 +12,49 @@ permissions:
   contents: write
 
 jobs:
+  verify-version:
+    name: Verify Version Match
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract tag version
+        id: tag
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "tag_version=$TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "Tag version: $TAG_VERSION"
+
+      - name: Extract crate version
+        id: crate
+        run: |
+          # Extract version from Cargo.toml workspace
+          CRATE_VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "crate_version=$CRATE_VERSION" >> $GITHUB_OUTPUT
+          echo "Crate version: $CRATE_VERSION"
+
+      - name: Verify versions match
+        run: |
+          TAG_VERSION="${{ steps.tag.outputs.tag_version }}"
+          CRATE_VERSION="${{ steps.crate.outputs.crate_version }}"
+          
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "::error::Version mismatch! Tag version ($TAG_VERSION) does not match crate version ($CRATE_VERSION)"
+            echo ""
+            echo "To fix this:"
+            echo "  1. Update version in Cargo.toml to match the tag"
+            echo "  2. Commit and push the change"
+            echo "  3. Delete the tag: git tag -d $GITHUB_REF_NAME && git push origin :refs/tags/$GITHUB_REF_NAME"
+            echo "  4. Create a new tag: git tag $GITHUB_REF_NAME && git push origin $GITHUB_REF_NAME"
+            exit 1
+          fi
+          
+          echo "✓ Versions match: $TAG_VERSION"
+
   build:
     name: Build ${{ matrix.target }}
+    needs: verify-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
