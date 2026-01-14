@@ -720,6 +720,19 @@ struct RenderedLinesCache {
     valid: bool,
 }
 
+/// A clickable code region tracked after rendering.
+#[derive(Debug, Clone)]
+pub struct ClickableCodeRegion {
+    /// Starting line index (absolute, in rendered output).
+    pub start_line: usize,
+    /// Ending line index (exclusive).
+    pub end_line: usize,
+    /// The code content for copying.
+    pub content: String,
+    /// Language identifier.
+    pub language: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct MessagesWidget {
     messages: Vec<DisplayMessage>,
@@ -755,6 +768,12 @@ pub struct MessagesWidget {
     rendered_cache: RenderedLinesCache,
     /// Render settings for performance optimization.
     render_settings: RenderSettings,
+    /// Clickable code regions from the last render.
+    code_regions: Vec<ClickableCodeRegion>,
+    /// Last rendered scroll position (for click detection offset).
+    last_render_scroll: usize,
+    /// Last rendered area (for click coordinate conversion).
+    last_render_area: ratatui::layout::Rect,
 }
 
 impl Default for MessagesWidget {
@@ -779,6 +798,9 @@ impl Default for MessagesWidget {
             dirty: true,
             rendered_cache: RenderedLinesCache::default(),
             render_settings: RenderSettings::default(),
+            code_regions: Vec::new(),
+            last_render_scroll: 0,
+            last_render_area: ratatui::layout::Rect::default(),
         }
     }
 }
@@ -1306,6 +1328,235 @@ impl MessagesWidget {
         }
     }
 
+    /// Handle a click at the given terminal coordinates.
+    /// Returns the code content if a code block or inline code was clicked, None otherwise.
+    pub fn handle_click(&self, x: u16, y: u16) -> Option<String> {
+        // Check if click is within our rendered area
+        if x < self.last_render_area.x
+            || x >= self.last_render_area.x + self.last_render_area.width
+            || y < self.last_render_area.y
+            || y >= self.last_render_area.y + self.last_render_area.height
+        {
+            return None;
+        }
+
+        // Convert terminal y coordinate to line index in rendered content
+        // y is the terminal row, we need to find which line of content that corresponds to
+        let row_in_widget = (y - self.last_render_area.y) as usize;
+        let absolute_line = self.last_render_scroll + row_in_widget;
+
+        // Calculate column position within the widget
+        let col_in_widget = (x - self.last_render_area.x) as usize;
+
+        // Check if this line falls within any fenced code block region
+        for region in &self.code_regions {
+            if absolute_line >= region.start_line && absolute_line < region.end_line {
+                return Some(region.content.clone());
+            }
+        }
+
+        // If not in a fenced code block, check for inline code in the clicked line
+        // Try to find which message and line was clicked and extract inline code from it
+        self.find_inline_code_at_position(absolute_line, col_in_widget)
+    }
+
+    /// Try to find inline code at the given rendered line and column position.
+    /// This looks at the actual rendered spans to find inline code with background styling.
+    fn find_inline_code_at_position(&self, rendered_line: usize, col: usize) -> Option<String> {
+        let visible = self.visible_count();
+        let mut current_line = 0usize;
+
+        for idx in 0..visible {
+            let msg_rendered_lines = self.rendered_cache.message_lines.get(idx)
+                .map(|l| l.len())
+                .unwrap_or(0);
+
+            if current_line + msg_rendered_lines > rendered_line {
+                // This click is within this message's rendered lines
+                let line_in_msg = rendered_line - current_line;
+
+                // Get the actual rendered line and look for inline code spans
+                if let Some(msg_lines) = self.rendered_cache.message_lines.get(idx) {
+                    if let Some(line) = msg_lines.get(line_in_msg) {
+                        // Track horizontal position as we iterate through spans
+                        let mut current_col = 0usize;
+
+                        for span in &line.spans {
+                            let span_width = span.content.chars().count();
+                            let span_end = current_col + span_width;
+
+                            // Check if click is within this span AND span has background color
+                            if col >= current_col && col < span_end && span.style.bg.is_some() {
+                                let content = span.content.trim();
+                                if !content.is_empty() {
+                                    return Some(content.to_string());
+                                }
+                            }
+
+                            current_col = span_end;
+                        }
+                    }
+                }
+                return None;
+            }
+
+            current_line += msg_rendered_lines;
+        }
+
+        None
+    }
+
+    /// Extract all inline code snippets from a line.
+    #[cfg(test)]
+    fn extract_inline_code(line: &str) -> Vec<String> {
+        let mut codes = Vec::new();
+        let mut chars = line.chars().peekable();
+        let mut in_code = false;
+        let mut current_code = String::new();
+
+        while let Some(c) = chars.next() {
+            if c == '`' {
+                if in_code {
+                    // End of inline code
+                    if !current_code.is_empty() {
+                        codes.push(current_code.clone());
+                    }
+                    current_code.clear();
+                    in_code = false;
+                } else {
+                    // Start of inline code
+                    in_code = true;
+                }
+            } else if in_code {
+                current_code.push(c);
+            }
+        }
+
+        codes
+    }
+
+    /// Extract all code blocks from a piece of markdown content.
+    /// Returns a list of (start_line_in_rendered, end_line_in_rendered, code_content).
+    fn extract_code_blocks_from_content(content: &str) -> Vec<(String, String)> {
+        let mut blocks = Vec::new();
+        let mut in_code_block = false;
+        let mut code_block_lang = String::new();
+        let mut code_lines: Vec<&str> = Vec::new();
+
+        for line in content.lines() {
+            if line.starts_with("```") {
+                if in_code_block {
+                    // End of code block
+                    let code_content = code_lines.join("\n");
+                    blocks.push((code_block_lang.clone(), code_content));
+                    code_lines.clear();
+                    code_block_lang.clear();
+                    in_code_block = false;
+                } else {
+                    // Start of code block
+                    code_block_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
+                    in_code_block = true;
+                }
+            } else if in_code_block {
+                code_lines.push(line);
+            }
+        }
+
+        // Handle unclosed code block
+        if in_code_block && !code_lines.is_empty() {
+            blocks.push((code_block_lang, code_lines.join("\n")));
+        }
+
+        blocks
+    }
+
+    /// Get all code blocks from visible messages.
+    /// Returns a list of (language, content) pairs.
+    pub fn get_all_code_blocks(&self) -> Vec<(String, String)> {
+        let visible = self.visible_count();
+        let mut all_blocks = Vec::new();
+
+        for msg in self.messages.iter().take(visible) {
+            if msg.role == MessageRole::Assistant {
+                all_blocks.extend(Self::extract_code_blocks_from_content(&msg.content));
+            }
+        }
+
+        // Also check streaming content
+        if self.streaming && !self.streaming_text.is_empty() {
+            all_blocks.extend(Self::extract_code_blocks_from_content(&self.streaming_text));
+        }
+
+        all_blocks
+    }
+
+    /// Extract code regions from content and add them to the provided regions vector.
+    /// The line_offset is the cumulative line count before this message.
+    fn extract_code_regions_into(content: &str, line_offset: usize, regions: &mut Vec<ClickableCodeRegion>) {
+        let mut in_code_block = false;
+        let mut code_block_lang = String::new();
+        let mut code_lines: Vec<&str> = Vec::new();
+
+        // Track source line to rendered line mapping
+        // This is approximate - each code block header takes 1 line, each code line takes 1 line
+        // Plus indentation/wrapping which we estimate
+        let mut rendered_line = line_offset;
+
+        // Skip message header (role indicator) - approximately 1 line for assistant
+        rendered_line += 1;
+
+        for line in content.lines() {
+            if line.starts_with("```") {
+                if in_code_block {
+                    // End of code block
+                    let code_content = code_lines.join("\n");
+
+                    // Calculate approximate rendered line range
+                    // Header line + code lines
+                    let code_block_rendered_lines = 1 + code_lines.len();
+                    let start_rendered = rendered_line;
+                    let end_rendered = rendered_line + code_block_rendered_lines;
+
+                    regions.push(ClickableCodeRegion {
+                        start_line: start_rendered,
+                        end_line: end_rendered,
+                        content: code_content,
+                        language: code_block_lang.clone(),
+                    });
+
+                    rendered_line = end_rendered;
+                    code_lines.clear();
+                    code_block_lang.clear();
+                    in_code_block = false;
+                } else {
+                    // Start of code block
+                    code_block_lang = line.strip_prefix("```").unwrap_or("").trim().to_string();
+                    in_code_block = true;
+                }
+            } else if in_code_block {
+                code_lines.push(line);
+            } else {
+                // Regular text line - estimate 1 rendered line (may wrap, but approximate)
+                rendered_line += 1;
+            }
+        }
+
+        // Handle unclosed code block
+        if in_code_block && !code_lines.is_empty() {
+            let code_content = code_lines.join("\n");
+            let code_block_rendered_lines = 1 + code_lines.len();
+            let start_rendered = rendered_line;
+            let end_rendered = rendered_line + code_block_rendered_lines;
+
+            regions.push(ClickableCodeRegion {
+                start_line: start_rendered,
+                end_line: end_rendered,
+                content: code_content,
+                language: code_block_lang,
+            });
+        }
+    }
+
     /// Get the content of the last assistant message, if any.
     pub fn get_last_assistant_content(&self) -> Option<&str> {
         self.messages
@@ -1426,6 +1677,9 @@ impl MessagesWidget {
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let _timer = metrics::widget_timer("messages");
 
+        // Store area for click detection
+        self.last_render_area = area;
+
         let width = area.width as usize;
         self.render_width = width;
         let visible_count = self.visible_count();
@@ -1529,15 +1783,30 @@ impl MessagesWidget {
         };
 
         // ═══════════════════════════════════════════════════════════════════
-        // PHASE 5: Lazy render visible messages
+        // PHASE 5: Lazy render visible messages + build code regions
         // ═══════════════════════════════════════════════════════════════════
 
         let mut any_rendered = false;
+        // Clear and rebuild code regions (we track them per render)
+        self.code_regions.clear();
+        let mut cumulative_line_offset = 0usize;
+
         for idx in start_msg..end_msg {
+            let is_selected = self.selection.active && idx == self.selection.message_index;
+
+            // Extract code blocks from this message's content
+            // We need to extract content info before borrowing self mutably
+            let (role, content) = {
+                let msg = &self.messages[idx];
+                (msg.role.clone(), msg.content.clone())
+            };
+
+            if role == MessageRole::Assistant {
+                Self::extract_code_regions_into(&content, cumulative_line_offset, &mut self.code_regions);
+            }
+
             if self.rendered_cache.message_lines[idx].is_empty() {
                 let msg = &self.messages[idx];
-                let is_selected = self.selection.active && idx == self.selection.message_index;
-
                 let mut msg_lines: Vec<Line<'static>> = Vec::new();
                 self.render_message(&mut msg_lines, msg, theme, is_selected);
                 msg_lines.push(Line::from("")); // Spacing
@@ -1545,6 +1814,9 @@ impl MessagesWidget {
                 self.rendered_cache.message_lines[idx] = msg_lines;
                 any_rendered = true;
             }
+
+            // Update cumulative offset for next message
+            cumulative_line_offset += self.rendered_cache.message_lines[idx].len();
         }
 
         // Update cumulative counts if we rendered anything
@@ -1716,6 +1988,9 @@ impl MessagesWidget {
             // Not streaming: clamp scroll to actual content bounds
             self.scroll = self.scroll.min(final_max_scroll);
         }
+
+        // Store the final scroll position for click detection
+        self.last_render_scroll = self.scroll;
 
         // Calculate scroll offset within our sliced line buffer
         // We've already skipped `lines_skipped` lines, so we only need to scroll
@@ -2706,5 +2981,44 @@ mod tests {
         // Should select the last message (index 1) since no assistant messages
         assert_eq!(widget.selection.message_index, 1);
         assert_eq!(widget.get_selected_content().unwrap(), "World");
+    }
+
+    #[test]
+    fn test_extract_inline_code() {
+        // Single inline code
+        let codes = MessagesWidget::extract_inline_code("Use `cargo build` to compile");
+        assert_eq!(codes, vec!["cargo build"]);
+
+        // Multiple inline codes
+        let codes = MessagesWidget::extract_inline_code("Run `npm install` then `npm start`");
+        assert_eq!(codes, vec!["npm install", "npm start"]);
+
+        // No inline code
+        let codes = MessagesWidget::extract_inline_code("Just plain text here");
+        assert!(codes.is_empty());
+
+        // Empty inline code (should be ignored)
+        let codes = MessagesWidget::extract_inline_code("Empty `` code");
+        assert!(codes.is_empty());
+
+        // Complex inline code
+        let codes = MessagesWidget::extract_inline_code("The function `fn main() {}` is the entry point");
+        assert_eq!(codes, vec!["fn main() {}"]);
+    }
+
+    #[test]
+    fn test_extract_code_blocks() {
+        let content = "Some text\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\nMore text";
+        let blocks = MessagesWidget::extract_code_blocks_from_content(content);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].0, "rust");
+        assert_eq!(blocks[0].1, "fn main() {\n    println!(\"Hello\");\n}");
+
+        // Multiple code blocks
+        let content = "```python\nprint('hello')\n```\ntext\n```js\nconsole.log('hi')\n```";
+        let blocks = MessagesWidget::extract_code_blocks_from_content(content);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].0, "python");
+        assert_eq!(blocks[1].0, "js");
     }
 }
