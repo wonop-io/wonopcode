@@ -2,7 +2,7 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/wonop-io/wonopcode/ci.yml?branch=main)](https://github.com/wonop-io/wonopcode/actions)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white)](https://discord.gg/qg57vFvv)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white)](https://discord.gg/XHZ5Ty95FE)
 
 A high-performance AI-powered coding assistant for the terminal, inspired by [OpenCode](https://github.com/sst/opencode), designed to enhance developer productivity with seamless integration of AI capabilities.
 
