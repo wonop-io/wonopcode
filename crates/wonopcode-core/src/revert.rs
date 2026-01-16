@@ -37,6 +37,7 @@ impl SessionRevert {
     ///
     /// This marks the revert point in the session. The actual message cleanup
     /// happens when the user continues (via `cleanup`).
+    #[allow(clippy::cognitive_complexity)]
     pub async fn revert(&self, project_id: &str, input: RevertInput) -> CoreResult<Session> {
         info!(
             session_id = %input.session_id,
@@ -161,6 +162,7 @@ impl SessionRevert {
     /// Clean up after a revert when the user continues.
     ///
     /// This removes messages and parts after the revert point.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn cleanup(&self, project_id: &str, session_id: &str) -> CoreResult<()> {
         let session = self.session_repo.get(project_id, session_id).await?;
 

@@ -58,6 +58,7 @@ impl McpClient {
     }
 
     /// Add and connect to an MCP server.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn add_server(&self, config: ServerConfig) -> McpResult<()> {
         if !config.enabled {
             debug!(server = %config.name, "Server is disabled, skipping");
@@ -286,6 +287,7 @@ impl McpClient {
     /// Toggle a server's enabled state.
     /// If enabled, disconnect and mark as disabled. If disabled, mark as enabled but don't connect.
     /// Returns the new enabled state.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn toggle_server(&self, name: &str) -> McpResult<bool> {
         let mut servers = self.servers.write().await;
         if let Some(connection) = servers.get_mut(name) {

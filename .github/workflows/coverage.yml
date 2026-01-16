@@ -1,0 +1,79 @@
+# Code Coverage Workflow
+#
+# Generates and tracks code coverage using cargo-llvm-cov.
+# Coverage reports are uploaded as artifacts and can be viewed in PRs.
+
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@1.88
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate coverage report
+        run: |
+          cargo llvm-cov --all-features --workspace \
+            --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' \
+            --lcov --output-path lcov.info
+
+      - name: Generate coverage summary
+        run: |
+          cargo llvm-cov report --all-features --workspace \
+            --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' \
+            > coverage-summary.txt
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage-summary.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            lcov.info
+            coverage-summary.txt
+          retention-days: 30
+
+      - name: Check coverage threshold
+        run: |
+          # Extract total line coverage percentage
+          COVERAGE=$(cargo llvm-cov report --all-features --workspace \
+            --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' 2>/dev/null \
+            | grep -E '^TOTAL' | awk '{print $NF}' | tr -d '%')
+
+          echo "Total coverage: ${COVERAGE}%"
+
+          # Warn if coverage is below 20% (initial threshold)
+          if [ -n "$COVERAGE" ]; then
+            THRESHOLD=20
+            if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+              echo "::warning::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+            else
+              echo "Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+            fi
+          fi

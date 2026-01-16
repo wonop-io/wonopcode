@@ -178,6 +178,7 @@ pub fn render_markdown_with_regions(
 }
 
 /// Internal markdown rendering with settings support.
+#[allow(clippy::cognitive_complexity)]
 fn render_markdown_internal(
     text: &str,
     theme: &Theme,
@@ -758,6 +759,7 @@ fn calculate_display_width(text: &str) -> usize {
 }
 
 /// Render inline markdown formatting (bold, italic, code, links).
+#[allow(clippy::cognitive_complexity)]
 fn render_inline_markdown(line: &str, theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
     let mut current = String::new();

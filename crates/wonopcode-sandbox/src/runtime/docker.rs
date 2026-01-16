@@ -86,6 +86,7 @@ impl DockerRuntime {
     /// Cleanup orphaned wonopcode containers that are stopped.
     /// Only removes stopped containers to avoid disrupting other running agents.
     /// Running containers from other projects are left alone - they may be in use.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn cleanup_orphaned_containers(&self) -> SandboxResult<()> {
         let filters: HashMap<String, Vec<String>> = HashMap::from([
             ("label".to_string(), vec!["wonopcode=true".to_string()]),
@@ -153,6 +154,7 @@ impl DockerRuntime {
     }
 
     /// Ensure the container image is available.
+    #[allow(clippy::cognitive_complexity)]
     async fn ensure_image(&self) -> SandboxResult<()> {
         let image = self.config.image();
 

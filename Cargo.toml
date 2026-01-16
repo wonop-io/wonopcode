@@ -17,6 +17,7 @@ members = [
     "crates/wonopcode-sandbox",
     "crates/wonopcode-protocol",
     "crates/wonopcode-discover",
+    "crates/wonopcode-test-utils",
 ]
 
 [workspace.package]
@@ -47,6 +48,7 @@ wonopcode-auth = { path = "crates/wonopcode-auth" }
 wonopcode-sandbox = { path = "crates/wonopcode-sandbox" }
 wonopcode-protocol = { path = "crates/wonopcode-protocol" }
 wonopcode-discover = { path = "crates/wonopcode-discover" }
+wonopcode-test-utils = { path = "crates/wonopcode-test-utils" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -125,6 +127,9 @@ result_large_err = "warn"
 redundant_clone = "warn"
 large_enum_variant = "warn"
 too_many_arguments = "warn"
+
+# Complexity metrics - warn on overly complex functions
+cognitive_complexity = "allow"
 
 # Explicitly allow noisy style lints
 needless_borrow = "allow"

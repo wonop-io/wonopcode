@@ -79,6 +79,7 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> 
 }
 
 /// Handle an individual WebSocket connection.
+#[allow(clippy::cognitive_complexity)]
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
 

@@ -253,6 +253,7 @@ impl Default for OAuthCallbackServer {
 }
 
 /// Handle an incoming HTTP connection.
+#[allow(clippy::cognitive_complexity)]
 async fn handle_connection(
     mut stream: tokio::net::TcpStream,
     state: Arc<RwLock<CallbackServerState>>,

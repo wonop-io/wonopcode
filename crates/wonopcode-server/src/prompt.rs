@@ -246,6 +246,7 @@ impl ServerPromptRunner {
     }
 
     /// Run a prompt and stream events.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn run(
         &self,
         prompt: &str,

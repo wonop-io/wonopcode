@@ -287,11 +287,385 @@ impl Clone for ToolContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use tokio_util::sync::CancellationToken;
+
+    // Mock tool that always succeeds
+    struct MockSuccessTool {
+        name: String,
+    }
+
+    impl MockSuccessTool {
+        fn new(name: impl Into<String>) -> Self {
+            Self { name: name.into() }
+        }
+    }
+
+    #[async_trait]
+    impl Tool for MockSuccessTool {
+        fn id(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            "Mock tool for testing"
+        }
+
+        fn parameters_schema(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {
+                    "data": {"type": "string"}
+                }
+            })
+        }
+
+        async fn execute(&self, args: Value, _ctx: &ToolContext) -> ToolResult<ToolOutput> {
+            let data = args["data"].as_str().unwrap_or("default");
+            Ok(ToolOutput::new(
+                format!("{} executed", self.name),
+                format!("Processed: {}", data),
+            ))
+        }
+    }
+
+    // Mock tool that always fails
+    struct MockFailureTool {
+        name: String,
+    }
+
+    impl MockFailureTool {
+        fn new(name: impl Into<String>) -> Self {
+            Self { name: name.into() }
+        }
+    }
+
+    #[async_trait]
+    impl Tool for MockFailureTool {
+        fn id(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            "Mock tool that fails"
+        }
+
+        fn parameters_schema(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        async fn execute(&self, _args: Value, _ctx: &ToolContext) -> ToolResult<ToolOutput> {
+            Err(ToolError::execution_failed("Intentional failure"))
+        }
+    }
+
+    fn test_context() -> ToolContext {
+        ToolContext {
+            session_id: "test".to_string(),
+            message_id: "test".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: PathBuf::from("/tmp"),
+            cwd: PathBuf::from("/tmp"),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    fn create_test_registry() -> Arc<ToolRegistry> {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(MockSuccessTool::new("tool1")));
+        registry.register(Arc::new(MockSuccessTool::new("tool2")));
+        registry.register(Arc::new(MockSuccessTool::new("tool3")));
+        registry.register(Arc::new(MockFailureTool::new("failure_tool")));
+        Arc::new(registry)
+    }
 
     #[test]
     fn test_disallowed_tools() {
         assert!(DISALLOWED_TOOLS.contains(&"batch"));
         assert!(DISALLOWED_TOOLS.contains(&"patch"));
         assert!(DISALLOWED_TOOLS.contains(&"task"));
+    }
+
+    #[tokio::test]
+    async fn test_batch_single_tool() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "tool1",
+                    "parameters": {"data": "test_value"}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await.unwrap();
+
+        assert!(result.output.contains("All 1 tools executed successfully"));
+        assert!(result.output.contains("tool1 executed"));
+        assert!(result.output.contains("Processed: test_value"));
+        assert_eq!(result.metadata["total_calls"], 1);
+        assert_eq!(result.metadata["successful"], 1);
+        assert_eq!(result.metadata["failed"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_batch_multiple_tools() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "tool1",
+                    "parameters": {"data": "first"}
+                },
+                {
+                    "tool": "tool2",
+                    "parameters": {"data": "second"}
+                },
+                {
+                    "tool": "tool3",
+                    "parameters": {"data": "third"}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await.unwrap();
+
+        assert!(result.output.contains("All 3 tools executed successfully"));
+        assert!(result.output.contains("tool1"));
+        assert!(result.output.contains("tool2"));
+        assert!(result.output.contains("tool3"));
+        assert!(result.output.contains("Processed: first"));
+        assert!(result.output.contains("Processed: second"));
+        assert!(result.output.contains("Processed: third"));
+        assert_eq!(result.metadata["total_calls"], 3);
+        assert_eq!(result.metadata["successful"], 3);
+        assert_eq!(result.metadata["failed"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_batch_tool_error_handling() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "tool1",
+                    "parameters": {"data": "success"}
+                },
+                {
+                    "tool": "failure_tool",
+                    "parameters": {}
+                },
+                {
+                    "tool": "tool2",
+                    "parameters": {"data": "also_success"}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await.unwrap();
+
+        // Should report partial success
+        assert!(result
+            .output
+            .contains("Executed 2/3 tools successfully. 1 failed"));
+        assert!(result.output.contains("tool1"));
+        assert!(result.output.contains("tool2"));
+        assert!(result.output.contains("failure_tool (FAILED)"));
+        assert!(result.output.contains("Intentional failure"));
+        assert_eq!(result.metadata["total_calls"], 3);
+        assert_eq!(result.metadata["successful"], 2);
+        assert_eq!(result.metadata["failed"], 1);
+
+        // Verify details metadata
+        let details = result.metadata["details"].as_array().unwrap();
+        assert_eq!(details.len(), 3);
+
+        let success_count = details
+            .iter()
+            .filter(|d| d["success"].as_bool().unwrap_or(false))
+            .count();
+        let failure_count = details
+            .iter()
+            .filter(|d| !d["success"].as_bool().unwrap_or(true))
+            .count();
+        assert_eq!(success_count, 2);
+        assert_eq!(failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_batch_empty_tools() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        let args = json!({
+            "tool_calls": []
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(ToolError::Validation(msg)) => {
+                assert!(msg.contains("tool_calls array cannot be empty"));
+            }
+            _ => panic!("Expected validation error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_validation() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        // Test 1: Unknown tool
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "nonexistent_tool",
+                    "parameters": {}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await;
+        assert!(result.is_err());
+        match result {
+            Err(ToolError::Validation(msg)) => {
+                assert!(msg.contains("Unknown tool 'nonexistent_tool'"));
+            }
+            _ => panic!("Expected validation error for unknown tool"),
+        }
+
+        // Test 2: Disallowed tool (batch)
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "batch",
+                    "parameters": {}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await;
+        assert!(result.is_err());
+        match result {
+            Err(ToolError::Validation(msg)) => {
+                assert!(msg.contains("Tool 'batch' cannot be batched"));
+            }
+            _ => panic!("Expected validation error for disallowed tool"),
+        }
+
+        // Test 3: Disallowed tool (patch)
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "patch",
+                    "parameters": {}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await;
+        assert!(result.is_err());
+        match result {
+            Err(ToolError::Validation(msg)) => {
+                assert!(msg.contains("Tool 'patch' cannot be batched"));
+            }
+            _ => panic!("Expected validation error for disallowed tool"),
+        }
+
+        // Test 4: Exceeds max batch size
+        let mut tool_calls = Vec::new();
+        for i in 0..15 {
+            tool_calls.push(json!({
+                "tool": "tool1",
+                "parameters": {"data": format!("item_{}", i)}
+            }));
+        }
+
+        let args = json!({
+            "tool_calls": tool_calls
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await.unwrap();
+
+        // Only MAX_BATCH_SIZE tools should be executed
+        assert_eq!(result.metadata["total_calls"], MAX_BATCH_SIZE);
+        assert!(result.output.contains("Validation Error"));
+        assert!(result.output.contains("Exceeds maximum batch size"));
+    }
+
+    #[tokio::test]
+    async fn test_batch_invalid_arguments() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        // Test with missing tool_calls field
+        let args = json!({
+            "wrong_field": []
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await;
+        assert!(result.is_err());
+        match result {
+            Err(ToolError::Validation(msg)) => {
+                assert!(msg.contains("Invalid arguments"));
+            }
+            _ => panic!("Expected validation error for invalid arguments"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_metadata_structure() {
+        let registry = create_test_registry();
+        let batch_tool = BatchTool::new(registry);
+
+        let args = json!({
+            "tool_calls": [
+                {
+                    "tool": "tool1",
+                    "parameters": {"data": "test1"}
+                },
+                {
+                    "tool": "tool2",
+                    "parameters": {"data": "test2"}
+                }
+            ]
+        });
+
+        let result = batch_tool.execute(args, &test_context()).await.unwrap();
+
+        // Verify metadata structure
+        assert!(result.metadata.is_object());
+        assert!(result.metadata["total_calls"].is_number());
+        assert!(result.metadata["successful"].is_number());
+        assert!(result.metadata["failed"].is_number());
+        assert!(result.metadata["tools"].is_array());
+        assert!(result.metadata["details"].is_array());
+
+        let tools = result.metadata["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].as_str().unwrap(), "tool1");
+        assert_eq!(tools[1].as_str().unwrap(), "tool2");
+
+        let details = result.metadata["details"].as_array().unwrap();
+        assert_eq!(details.len(), 2);
+        for detail in details {
+            assert!(detail["tool"].is_string());
+            assert!(detail["success"].is_boolean());
+            if detail["success"].as_bool().unwrap() {
+                assert!(detail["title"].is_string());
+            }
+        }
     }
 }

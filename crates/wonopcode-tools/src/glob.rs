@@ -267,4 +267,188 @@ mod tests {
         assert!(result.output.contains("file2.txt"));
         assert!(!result.output.contains("file3.rs"));
     }
+
+    #[tokio::test]
+    async fn test_glob_empty_results() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("file1.txt"), "").unwrap();
+        std::fs::write(dir.path().join("file2.rs"), "").unwrap();
+
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "*.js" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.output, "");
+        assert!(result.title.contains("(0 files)"));
+        assert_eq!(result.metadata["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_glob_recursive() {
+        let dir = tempdir().unwrap();
+
+        // Create nested directory structure
+        std::fs::create_dir_all(dir.path().join("src/components")).unwrap();
+        std::fs::create_dir_all(dir.path().join("src/utils")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+
+        // Create files in various locations
+        std::fs::write(dir.path().join("file.rs"), "").unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "").unwrap();
+        std::fs::write(dir.path().join("src/components/button.rs"), "").unwrap();
+        std::fs::write(dir.path().join("src/utils/helper.rs"), "").unwrap();
+        std::fs::write(dir.path().join("tests/test.rs"), "").unwrap();
+        std::fs::write(dir.path().join("README.md"), "").unwrap();
+
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "**/*.rs" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        // Should find all .rs files recursively
+        assert!(result.output.contains("file.rs"));
+        assert!(result.output.contains("main.rs"));
+        assert!(result.output.contains("button.rs"));
+        assert!(result.output.contains("helper.rs"));
+        assert!(result.output.contains("test.rs"));
+        assert!(!result.output.contains("README.md"));
+        assert_eq!(result.metadata["count"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_glob_extensions() {
+        let dir = tempdir().unwrap();
+
+        // Create files with different extensions
+        std::fs::write(dir.path().join("file1.js"), "").unwrap();
+        std::fs::write(dir.path().join("file2.ts"), "").unwrap();
+        std::fs::write(dir.path().join("file3.jsx"), "").unwrap();
+        std::fs::write(dir.path().join("file4.tsx"), "").unwrap();
+        std::fs::write(dir.path().join("file5.rs"), "").unwrap();
+
+        let tool = GlobTool;
+
+        // Test single extension
+        let result = tool
+            .execute(
+                json!({ "pattern": "*.rs" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("file5.rs"));
+        assert!(!result.output.contains("file1.js"));
+        assert_eq!(result.metadata["count"], 1);
+
+        // Test multiple extensions with brace expansion
+        let result = tool
+            .execute(
+                json!({ "pattern": "*.{js,ts}" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("file1.js"));
+        assert!(result.output.contains("file2.ts"));
+        assert!(!result.output.contains("file3.jsx"));
+        assert!(!result.output.contains("file4.tsx"));
+        assert_eq!(result.metadata["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_glob_absolute_path() {
+        let dir = tempdir().unwrap();
+
+        // Create a subdirectory with files
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(dir.path().join("root.txt"), "").unwrap();
+        std::fs::write(subdir.join("sub1.txt"), "").unwrap();
+        std::fs::write(subdir.join("sub2.txt"), "").unwrap();
+
+        let tool = GlobTool;
+
+        // Search in the subdirectory using absolute path
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "*.txt",
+                    "path": subdir.to_str().unwrap()
+                }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        // Should only find files in subdirectory
+        assert!(result.output.contains("sub1.txt"));
+        assert!(result.output.contains("sub2.txt"));
+        assert!(!result.output.contains("root.txt"));
+        assert_eq!(result.metadata["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_glob_head_limit() {
+        let dir = tempdir().unwrap();
+
+        // Create multiple files
+        for i in 1..=10 {
+            std::fs::write(dir.path().join(format!("file{}.txt", i)), "").unwrap();
+        }
+
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "*.txt" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        // Without limit, should find all 10 files
+        assert_eq!(result.metadata["count"], 10);
+        let lines: Vec<&str> = result.output.lines().collect();
+        assert_eq!(lines.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_glob_offset() {
+        let dir = tempdir().unwrap();
+
+        // Create multiple files with predictable names
+        for i in 1..=5 {
+            std::fs::write(dir.path().join(format!("file{}.txt", i)), "").unwrap();
+        }
+
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "*.txt" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        // Should find all 5 files
+        assert_eq!(result.metadata["count"], 5);
+        let lines: Vec<&str> = result.output.lines().collect();
+        assert_eq!(lines.len(), 5);
+
+        // Verify all files are present
+        for i in 1..=5 {
+            let expected = format!("file{}.txt", i);
+            assert!(result.output.contains(&expected));
+        }
+    }
 }

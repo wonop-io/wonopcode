@@ -69,6 +69,7 @@ impl FileDiff {
     }
 
     /// Parse a unified diff string.
+    #[allow(clippy::cognitive_complexity)]
     pub fn parse_unified(diff: &str) -> Vec<FileDiff> {
         let mut diffs = Vec::new();
         let mut current_diff: Option<FileDiff> = None;

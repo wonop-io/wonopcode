@@ -86,6 +86,7 @@ impl TimingGuard {
 }
 
 impl Drop for TimingGuard {
+    #[allow(clippy::cognitive_complexity)]
     fn drop(&mut self) {
         let duration = self.start.elapsed();
         let duration_ms = duration.as_millis();

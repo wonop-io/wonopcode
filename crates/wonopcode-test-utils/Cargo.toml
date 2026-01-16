@@ -1,0 +1,44 @@
+[package]
+name = "wonopcode-test-utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Testing utilities, fixtures, and mocks for wonopcode"
+
+[dependencies]
+# Workspace crates for types
+wonopcode-provider = { workspace = true }
+wonopcode-sandbox = { workspace = true }
+
+# Async runtime
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Testing tools
+tempfile.workspace = true
+
+# Text diffing for assertions
+similar.workspace = true
+
+# UUID generation
+uuid.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+[lints]
+workspace = true

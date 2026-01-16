@@ -372,6 +372,7 @@ impl PermissionManager {
     }
 
     /// Ask the user for permission.
+    #[allow(clippy::cognitive_complexity)]
     async fn ask_user(&self, session_id: &str, check: PermissionCheck) -> bool {
         let (tx, rx) = oneshot::channel();
 

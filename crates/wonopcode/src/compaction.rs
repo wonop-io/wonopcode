@@ -151,6 +151,7 @@ struct PrunablePart {
 /// Goes backwards through messages, protecting the last 40K tokens of tool
 /// outputs, then marks older outputs as compacted if they would prune >20K tokens.
 ///
+#[allow(clippy::cognitive_complexity)]
 fn prune_tool_outputs(messages: &mut [ProviderMessage], config: &CompactionConfig) -> u32 {
     if !config.prune {
         return 0;

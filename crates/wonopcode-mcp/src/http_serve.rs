@@ -151,6 +151,7 @@ impl McpHttpState {
     }
 
     /// Handle a JSON-RPC request.
+    #[allow(clippy::cognitive_complexity)]
     async fn handle_request(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
         debug!(method = %request.method, id = ?request.id, "Handling MCP request");
 
@@ -231,6 +232,7 @@ impl McpHttpState {
     }
 
     /// Handle the tools/call request.
+    #[allow(clippy::cognitive_complexity)]
     async fn handle_call_tool(&self, id: u64, params: Option<Value>) -> JsonRpcResponse {
         // Parse parameters
         let params: CallToolParams = match params {

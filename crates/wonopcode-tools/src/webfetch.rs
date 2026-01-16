@@ -322,6 +322,7 @@ fn html_to_text(html: &str) -> String {
 }
 
 /// Convert HTML to Markdown.
+#[allow(clippy::cognitive_complexity)]
 fn html_to_markdown(html: &str) -> String {
     // Start with text conversion
     let mut result = String::with_capacity(html.len());

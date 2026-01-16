@@ -36,6 +36,29 @@ test-one NAME:
 test-crate CRATE:
     cargo test -p {{CRATE}}
 
+# === Code Coverage ===
+
+# Generate code coverage report (requires cargo-llvm-cov)
+coverage:
+    cargo llvm-cov --all-features --workspace \
+        --ignore-filename-regex '(tests/|test\.rs|mock\.rs)'
+
+# Generate coverage report as HTML
+coverage-html:
+    cargo llvm-cov --all-features --workspace \
+        --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' \
+        --html --output-dir coverage
+
+# Generate coverage report as LCOV for CI
+coverage-lcov:
+    cargo llvm-cov --all-features --workspace \
+        --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' \
+        --lcov --output-path lcov.info
+
+# Open coverage report in browser
+coverage-open: coverage-html
+    open coverage/html/index.html
+
 # === Linting & Formatting ===
 
 # Run all checks (format, lint, test)
@@ -98,6 +121,10 @@ clean:
 # Clean and rebuild
 rebuild: clean build
 
+# Clean coverage artifacts
+clean-coverage:
+    rm -rf coverage lcov.info
+
 # === Documentation ===
 
 # Generate documentation
@@ -146,6 +173,7 @@ install-tools:
     cargo install cargo-outdated
     cargo install cargo-audit
     cargo install cargo-deny
+    cargo install cargo-llvm-cov
     @echo "Tools installed!"
 
 # Install the application locally
@@ -165,6 +193,10 @@ tree-dupes:
 # Count lines of code (requires tokei)
 loc:
     tokei --exclude target
+
+# Show code complexity metrics
+complexity:
+    cargo clippy --all-targets --all-features -- -W clippy::cognitive_complexity 2>&1 | grep -E "cognitive_complexity|warning:"
 
 # === Release ===
 
