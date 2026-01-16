@@ -556,6 +556,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         allow_all_in_sandbox,
         mcp_url,          // Use background MCP server for custom tools
         mcp_secret: None, // No auth needed for local MCP server in TUI mode
+        external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
     };
 
     // Get MCP config from config file
@@ -919,6 +920,7 @@ async fn run_headless(
         allow_all_in_sandbox,
         mcp_url: Some(mcp_sse_url), // Use HTTP transport for MCP
         mcp_secret: secret.clone(),
+        external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
     };
 
     // Get MCP config

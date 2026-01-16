@@ -387,7 +387,7 @@ impl ClaudeCliProvider {
             "Generated MCP HTTP config"
         );
 
-        // Add external MCP servers
+        // Add external MCP servers (stdio-based, command-line programs)
         for (name, server) in &mcp_config.external_servers {
             let mut server_env = serde_json::Map::new();
             for (k, v) in &server.env {
@@ -397,10 +397,17 @@ impl ClaudeCliProvider {
             mcp_servers.insert(
                 name.clone(),
                 serde_json::json!({
-                    "type": "sse",
-                    "url": server.command,
-                    "headers": server_env
+                    "command": server.command,
+                    "args": server.args,
+                    "env": server_env
                 }),
+            );
+
+            info!(
+                server_name = %name,
+                command = %server.command,
+                args = ?server.args,
+                "Added external stdio MCP server"
             );
         }
 

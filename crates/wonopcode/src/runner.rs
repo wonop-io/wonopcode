@@ -158,6 +158,9 @@ pub struct RunnerConfig {
     /// Secret for MCP server authentication.
     /// When set, the Claude CLI provider will include this in requests to the MCP server.
     pub mcp_secret: Option<String>,
+    /// External MCP servers (local/stdio) to pass to Claude CLI.
+    /// These are servers configured in .mcp.json that use command/args format.
+    pub external_mcp_servers: HashMap<String, (Vec<String>, HashMap<String, String>)>,
 }
 
 impl Default for RunnerConfig {
@@ -175,6 +178,7 @@ impl Default for RunnerConfig {
             allow_all_in_sandbox: true,
             mcp_url: None,
             mcp_secret: None,
+            external_mcp_servers: HashMap::new(),
         }
     }
 }
@@ -195,6 +199,11 @@ pub struct Runner {
     snapshot_store: Option<Arc<SnapshotStore>>,
     /// MCP client for external tools.
     mcp_client: Option<Arc<McpClient>>,
+    /// External MCP servers (local/stdio) passed to Claude CLI.
+    /// These work through the Claude CLI provider, not wonopcode's MCP client.
+    external_mcp_server_names: Vec<String>,
+    /// Unsupported/disabled MCP servers that should be shown in sidebar.
+    unsupported_mcp_servers: Vec<(String, String)>, // (name, reason)
     /// Doom loop detector for preventing infinite tool call loops.
     doom_loop_detector: RwLock<DoomLoopDetector>,
     /// Permission manager for tool execution control.
@@ -275,6 +284,8 @@ impl Runner {
             compaction_config: CompactionConfig::default(),
             snapshot_store: None, // Will be initialized async in new_with_features
             mcp_client: None,     // Will be initialized async if configured
+            external_mcp_server_names: Vec::new(), // Will be populated by initialize_mcp
+            unsupported_mcp_servers: Vec::new(),   // Will be populated by initialize_mcp
             doom_loop_detector: RwLock::new(DoomLoopDetector::new()),
             permission_manager,
             bus,
@@ -310,7 +321,7 @@ impl Runner {
     /// When using a shared PermissionManager, the caller is responsible for initializing
     /// permission rules before calling this function. The runner will skip rule initialization.
     pub async fn new_with_shared(
-        config: RunnerConfig,
+        mut config: RunnerConfig,
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
         shared_bus: Option<Bus>,
@@ -319,8 +330,28 @@ impl Runner {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
 
+        // Extract external (local/stdio) MCP servers BEFORE creating the provider
+        // These need to be in the config so create_provider() can pass them to Claude CLI
+        let mut external_server_names: Vec<String> = Vec::new();
+        if let Some(ref configs) = mcp_configs {
+            for (name, mcp_config) in configs {
+                if let McpConfig::Local(local_config) = mcp_config {
+                    if local_config.enabled != Some(false) {
+                        let env = local_config.environment.clone().unwrap_or_default();
+                        config
+                            .external_mcp_servers
+                            .insert(name.clone(), (local_config.command.clone(), env));
+                        external_server_names.push(name.clone());
+                    }
+                }
+            }
+        }
+
         let mut runner =
             Self::new_with_bus(config, instance, shared_bus, shared_permission_manager)?;
+
+        // Store external server names for status reporting
+        runner.external_mcp_server_names = external_server_names;
 
         // Load core config for permission and sandbox initialization
         let core_config = runner.instance.config().await;
@@ -514,28 +545,40 @@ impl Runner {
     async fn initialize_mcp(&mut self, configs: HashMap<String, McpConfig>) {
         let mcp_client = Arc::new(McpClient::new());
 
-        // Collect enabled server configs for parallel connection
+        // Collect enabled remote server configs for parallel connection
+        // Note: Local (stdio) servers were already extracted in new_with_shared and
+        // stored in config.external_mcp_servers for the Claude CLI provider
         let mut server_configs: Vec<(String, McpServerConfig)> = Vec::new();
+        // Track disabled servers for display in sidebar
+        let mut unsupported: Vec<(String, String)> = Vec::new();
 
         for (name, config) in configs {
             match &config {
-                McpConfig::Local(_local_config) => {
-                    // Local (stdio) MCP servers are no longer supported
-                    warn!(server = %name, "Local (stdio) MCP servers are no longer supported. Use remote (HTTP/SSE) servers instead.");
-                    continue;
+                McpConfig::Local(local_config) => {
+                    // Local (stdio) MCP servers are already handled via config.external_mcp_servers
+                    // Just track disabled ones for the sidebar
+                    if local_config.enabled == Some(false) {
+                        debug!(server = %name, "MCP server disabled");
+                        unsupported.push((name, "disabled".to_string()));
+                    }
+                    // Note: enabled local servers are already in self.external_mcp_server_names
                 }
                 McpConfig::Remote(remote_config) => {
                     // Check if enabled
                     if remote_config.enabled == Some(false) {
                         debug!(server = %name, "MCP server disabled, skipping");
+                        unsupported.push((name, "disabled".to_string()));
                         continue;
                     }
-                    // Convert to McpServerConfig
+                    // Convert to McpServerConfig for wonopcode's MCP client
                     let server_config = convert_mcp_remote_config(&name, remote_config);
                     server_configs.push((name, server_config));
                 }
             }
         }
+
+        // Store disabled servers for status reporting
+        self.unsupported_mcp_servers = unsupported;
 
         // Connect to all servers in parallel
         let connection_futures: Vec<_> = server_configs
@@ -683,6 +726,7 @@ impl Runner {
                 allow_all_in_sandbox: old_config.allow_all_in_sandbox,
                 mcp_url: old_config.mcp_url.clone(),
                 mcp_secret: old_config.mcp_secret.clone(),
+                external_mcp_servers: old_config.external_mcp_servers.clone(),
             }
         };
 
@@ -779,19 +823,9 @@ impl Runner {
             );
         }
 
-        // Send initial MCP status
-        if let Some(ref mcp_client) = self.mcp_client {
-            let mcp_updates: Vec<McpStatusUpdate> = mcp_client
-                .list_servers()
-                .await
-                .into_iter()
-                .map(|(name, connected, error)| McpStatusUpdate {
-                    name,
-                    connected,
-                    error,
-                })
-                .collect();
-
+        // Send initial MCP status (including unsupported servers)
+        {
+            let mcp_updates = self.build_mcp_status().await;
             if !mcp_updates.is_empty() {
                 send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
             }
@@ -1192,17 +1226,8 @@ impl Runner {
                                     AppUpdate::Status(format!("MCP server '{name}' {status}")),
                                 );
 
-                                // Send updated MCP status
-                                let mcp_updates: Vec<McpStatusUpdate> = mcp_client
-                                    .list_servers()
-                                    .await
-                                    .into_iter()
-                                    .map(|(name, connected, error)| McpStatusUpdate {
-                                        name,
-                                        connected,
-                                        error,
-                                    })
-                                    .collect();
+                                // Send updated MCP status (including unsupported servers)
+                                let mcp_updates = self.build_mcp_status().await;
                                 send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
                             }
                             Err(e) => {
@@ -1235,17 +1260,8 @@ impl Runner {
                                     AppUpdate::Status(format!("Reconnected to '{name}'")),
                                 );
 
-                                // Send updated MCP status
-                                let mcp_updates: Vec<McpStatusUpdate> = mcp_client
-                                    .list_servers()
-                                    .await
-                                    .into_iter()
-                                    .map(|(name, connected, error)| McpStatusUpdate {
-                                        name,
-                                        connected,
-                                        error,
-                                    })
-                                    .collect();
+                                // Send updated MCP status (including unsupported servers)
+                                let mcp_updates = self.build_mcp_status().await;
                                 send_update(&update_tx, AppUpdate::McpUpdated(mcp_updates));
                             }
                             Err(e) => {
@@ -3244,6 +3260,46 @@ impl Runner {
             }
         }
     }
+
+    /// Build the full MCP status including external and unsupported servers.
+    async fn build_mcp_status(&self) -> Vec<McpStatusUpdate> {
+        let mut mcp_updates: Vec<McpStatusUpdate> = Vec::new();
+
+        // Add external servers (local/stdio passed to Claude CLI) as connected
+        for name in &self.external_mcp_server_names {
+            mcp_updates.push(McpStatusUpdate {
+                name: name.clone(),
+                connected: true, // These work through Claude CLI
+                error: None,
+            });
+        }
+
+        // Add unsupported/disabled servers
+        for (name, reason) in &self.unsupported_mcp_servers {
+            mcp_updates.push(McpStatusUpdate {
+                name: name.clone(),
+                connected: false,
+                error: Some(reason.clone()),
+            });
+        }
+
+        // Add connected servers from MCP client (remote HTTP/SSE servers)
+        if let Some(ref mcp_client) = self.mcp_client {
+            let client_servers: Vec<McpStatusUpdate> = mcp_client
+                .list_servers()
+                .await
+                .into_iter()
+                .map(|(name, connected, error)| McpStatusUpdate {
+                    name,
+                    connected,
+                    error,
+                })
+                .collect();
+            mcp_updates.extend(client_servers);
+        }
+
+        mcp_updates
+    }
 }
 
 /// Run a subagent standalone (without self reference).
@@ -3644,12 +3700,41 @@ fn create_provider(
                         info!("Using Claude CLI for subscription-based access with custom tools");
                         // MCP requires HTTP transport - mcp_url must be provided
                         if let Some(ref mcp_url) = config.mcp_url {
-                            info!(mcp_url = %mcp_url, has_secret = config.mcp_secret.is_some(), "Using MCP HTTP transport");
-                            let provider = wonopcode_provider::claude_cli::with_custom_tools(
-                                model_info,
-                                mcp_url.clone(),
-                                config.mcp_secret.clone(),
-                            )?;
+                            info!(
+                                mcp_url = %mcp_url,
+                                has_secret = config.mcp_secret.is_some(),
+                                external_servers = config.external_mcp_servers.len(),
+                                "Using MCP HTTP transport"
+                            );
+
+                            // Build MCP config with external servers
+                            let mut mcp_config = if let Some(ref secret) = config.mcp_secret {
+                                wonopcode_provider::claude_cli::McpCliConfig::with_secret(
+                                    mcp_url.clone(),
+                                    secret.clone(),
+                                )
+                            } else {
+                                wonopcode_provider::claude_cli::McpCliConfig::new(mcp_url.clone())
+                            };
+
+                            // Add external MCP servers (local/stdio servers from .mcp.json)
+                            for (name, (command_args, env)) in &config.external_mcp_servers {
+                                if let Some((command, args)) = command_args.split_first() {
+                                    let external_server =
+                                        wonopcode_provider::claude_cli::ExternalMcpServer {
+                                            command: command.clone(),
+                                            args: args.to_vec(),
+                                            env: env.clone(),
+                                        };
+                                    mcp_config = mcp_config.with_external_server(name, external_server);
+                                    info!(server = %name, "Added external MCP server");
+                                }
+                            }
+
+                            let provider =
+                                wonopcode_provider::claude_cli::ClaudeCliProvider::with_mcp_config(
+                                    model_info, mcp_config,
+                                )?;
                             Ok(Arc::new(provider))
                         } else {
                             // No MCP URL provided - use Claude CLI without custom tools

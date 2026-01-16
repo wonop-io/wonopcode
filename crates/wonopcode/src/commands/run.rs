@@ -176,6 +176,7 @@ pub async fn run_command(
         allow_all_in_sandbox,
         mcp_url, // Use background MCP server for custom tools
         mcp_secret: secret,
+        external_mcp_servers: std::collections::HashMap::new(),
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aup": {
+      "command": "/Users/tfr/.cargo/bin/aup",
+	"args": ["serve", "--project-root", "."]
+    }
+  }
+}
