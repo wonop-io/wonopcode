@@ -4,11 +4,45 @@
 //! 1. Global config: `~/.config/wonopcode/config.json`
 //! 2. Environment variable: `WONOPCODE_CONFIG_CONTENT`
 //! 3. Project config: `wonopcode.json` or `wonopcode.jsonc` in project directory
-//! 4. Environment overrides: `WONOPCODE_*` variables
+//! 4. MCP server config: `.mcp.json` in project directory (standard MCP format)
+//! 5. Environment overrides: `WONOPCODE_*` variables
 //!
 //! Supports JSONC (JSON with comments) and variable substitution:
 //! - `{env:VAR_NAME}` - Substitute environment variable
 //! - `{file:path}` - Substitute file contents
+//!
+//! ## MCP Server Configuration
+//!
+//! MCP servers can be configured in two ways:
+//!
+//! 1. **In `wonopcode.json`** (wonopcode format):
+//! ```json
+//! {
+//!   "mcp": {
+//!     "my-server": {
+//!       "type": "local",
+//!       "command": ["npx", "-y", "@example/mcp-server"]
+//!     },
+//!     "remote-server": {
+//!       "type": "remote",
+//!       "url": "https://api.example.com/mcp"
+//!     }
+//!   }
+//! }
+//! ```
+//!
+//! 2. **In `.mcp.json`** (standard MCP format, compatible with Claude Desktop/VS Code):
+//! ```json
+//! {
+//!   "mcpServers": {
+//!     "my-server": {
+//!       "command": "npx",
+//!       "args": ["-y", "@example/mcp-server"],
+//!       "env": { "API_KEY": "..." }
+//!     }
+//!   }
+//! }
+//! ```
 
 use crate::error::{ConfigError, CoreResult};
 use serde::{Deserialize, Serialize};
@@ -25,6 +59,136 @@ fn var_regex() -> &'static regex::Regex {
         regex::Regex::new(r"\{(env|file):([^}]+)\}")
             .expect("Invalid regex pattern - this is a compile-time constant")
     })
+}
+
+/// Strip JSON comments (// and /* */).
+fn strip_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    while let Some(c) = chars.next() {
+        if escape_next {
+            result.push(c);
+            escape_next = false;
+            continue;
+        }
+
+        if c == '\\' && in_string {
+            result.push(c);
+            escape_next = true;
+            continue;
+        }
+
+        if c == '"' {
+            in_string = !in_string;
+            result.push(c);
+            continue;
+        }
+
+        if in_string {
+            result.push(c);
+            continue;
+        }
+
+        // Check for comments
+        if c == '/' {
+            if let Some(&next) = chars.peek() {
+                if next == '/' {
+                    // Line comment - skip to end of line
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == '\n' {
+                            result.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                } else if next == '*' {
+                    // Block comment - skip to */
+                    chars.next();
+                    let mut prev = ' ';
+                    for c in chars.by_ref() {
+                        if prev == '*' && c == '/' {
+                            break;
+                        }
+                        // Preserve newlines for error reporting
+                        if c == '\n' {
+                            result.push('\n');
+                        }
+                        prev = c;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        result.push(c);
+    }
+
+    result
+}
+
+/// Substitute variables in config content.
+///
+/// Supports:
+/// - `{env:VAR_NAME}` - Environment variable
+/// - `{file:path}` - File contents (relative to config file)
+fn substitute_variables(content: &str, config_path: &Path) -> CoreResult<String> {
+    let re = var_regex();
+    let config_dir = config_path.parent().unwrap_or(Path::new("."));
+
+    let mut result = content.to_string();
+    let mut last_error: Option<ConfigError> = None;
+
+    // Process all substitutions
+    for cap in re.captures_iter(content) {
+        // These are guaranteed by the regex pattern to exist
+        let Some(full_match) = cap.get(0).map(|m| m.as_str()) else {
+            continue;
+        };
+        let Some(kind) = cap.get(1).map(|m| m.as_str()) else {
+            continue;
+        };
+        let Some(value) = cap.get(2).map(|m| m.as_str()) else {
+            continue;
+        };
+
+        let replacement = match kind {
+            "env" => match std::env::var(value) {
+                Ok(v) => v,
+                Err(_) => {
+                    last_error = Some(ConfigError::EnvVarNotFound {
+                        name: value.to_string(),
+                    });
+                    continue;
+                }
+            },
+            "file" => {
+                let file_path = config_dir.join(value);
+                match std::fs::read_to_string(&file_path) {
+                    Ok(v) => v.trim().to_string(),
+                    Err(_) => {
+                        last_error = Some(ConfigError::FileRefNotFound {
+                            path: file_path.display().to_string(),
+                        });
+                        continue;
+                    }
+                }
+            }
+            _ => continue,
+        };
+
+        result = result.replace(full_match, &replacement);
+    }
+
+    // Return error if any substitution failed
+    if let Some(e) = last_error {
+        return Err(e.into());
+    }
+
+    Ok(result)
 }
 
 /// Main configuration structure.
@@ -652,6 +816,204 @@ pub struct McpOAuthConfig {
     pub scope: Option<String>,
 }
 
+// ============================================================================
+// Standard MCP JSON format (compatible with Claude Desktop, VS Code, etc.)
+// ============================================================================
+
+/// Standard MCP JSON configuration file format.
+///
+/// This is the format used by Claude Desktop, VS Code, and other MCP clients.
+/// File: `.mcp.json` or `.vscode/mcp.json`
+///
+/// Supports both formats:
+/// - Claude Desktop: `mcpServers` key
+/// - VS Code: `servers` key
+///
+/// Example (Claude Desktop format):
+/// ```json
+/// {
+///   "mcpServers": {
+///     "my-server": {
+///       "command": "npx",
+///       "args": ["-y", "@example/server"],
+///       "env": { "API_KEY": "..." }
+///     }
+///   }
+/// }
+/// ```
+///
+/// Example (VS Code format):
+/// ```json
+/// {
+///   "servers": {
+///     "my-server": {
+///       "command": "npx",
+///       "args": ["-y", "@example/server"]
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpJsonFile {
+    /// MCP server configurations (Claude Desktop format).
+    #[serde(rename = "mcpServers", skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<HashMap<String, McpJsonServer>>,
+
+    /// MCP server configurations (VS Code format).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub servers: Option<HashMap<String, McpJsonServer>>,
+
+    /// Input variables for sensitive data (VS Code format).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<Vec<McpJsonInput>>,
+}
+
+/// Standard MCP server configuration in `.mcp.json`.
+///
+/// Supports both stdio (local) and HTTP/SSE (remote) servers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpJsonServer {
+    /// Standard stdio server (command + args).
+    Stdio(McpJsonStdioServer),
+    /// HTTP/SSE remote server.
+    Remote(McpJsonRemoteServer),
+}
+
+/// Stdio (local) MCP server in standard format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpJsonStdioServer {
+    /// Command to run (e.g., "npx", "python", "node").
+    pub command: String,
+
+    /// Arguments for the command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+
+    /// Environment variables.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
+
+    /// Working directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+
+    /// Server type hint (usually "stdio" or omitted).
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub server_type: Option<String>,
+}
+
+/// HTTP/SSE remote MCP server in standard format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpJsonRemoteServer {
+    /// Server type: "http", "sse", or "streamable-http".
+    #[serde(rename = "type")]
+    pub server_type: String,
+
+    /// Server URL.
+    pub url: String,
+
+    /// HTTP headers for authentication.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
+}
+
+/// Input variable definition for `.mcp.json` (VS Code format).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpJsonInput {
+    /// Input type (e.g., "promptString").
+    #[serde(rename = "type")]
+    pub input_type: String,
+
+    /// Unique identifier.
+    pub id: String,
+
+    /// User-friendly description.
+    pub description: String,
+
+    /// Whether to mask input (for passwords/API keys).
+    #[serde(default)]
+    pub password: bool,
+}
+
+impl McpJsonFile {
+    /// Load and parse a `.mcp.json` file.
+    pub async fn load(path: &Path) -> CoreResult<Self> {
+        let content = tokio::fs::read_to_string(path).await?;
+        let content = substitute_variables(&content, path)?;
+        let content = strip_comments(&content);
+
+        serde_json::from_str(&content).map_err(|e| {
+            ConfigError::InvalidJson {
+                path: path.display().to_string(),
+                message: e.to_string(),
+            }
+            .into()
+        })
+    }
+
+    /// Convert to wonopcode MCP config format.
+    ///
+    /// Merges servers from both `mcpServers` (Claude Desktop format) and
+    /// `servers` (VS Code format) keys.
+    pub fn to_mcp_configs(&self) -> HashMap<String, McpConfig> {
+        let mut configs = HashMap::new();
+
+        // Helper to convert a single server
+        let convert_server = |server: &McpJsonServer| -> McpConfig {
+            match server {
+                McpJsonServer::Stdio(stdio) => {
+                    // Convert stdio server to local config
+                    let mut command = vec![stdio.command.clone()];
+                    command.extend(stdio.args.clone());
+
+                    McpConfig::Local(McpLocalConfig {
+                        command,
+                        environment: if stdio.env.is_empty() {
+                            None
+                        } else {
+                            Some(stdio.env.clone())
+                        },
+                        enabled: Some(true),
+                        timeout: None,
+                    })
+                }
+                McpJsonServer::Remote(remote) => {
+                    // Convert remote server to remote config
+                    McpConfig::Remote(McpRemoteConfig {
+                        url: remote.url.clone(),
+                        enabled: Some(true),
+                        headers: if remote.headers.is_empty() {
+                            None
+                        } else {
+                            Some(remote.headers.clone())
+                        },
+                        oauth: None,
+                        timeout: None,
+                    })
+                }
+            }
+        };
+
+        // Load from mcpServers (Claude Desktop format)
+        if let Some(servers) = &self.mcp_servers {
+            for (name, server) in servers {
+                configs.insert(name.clone(), convert_server(server));
+            }
+        }
+
+        // Load from servers (VS Code format) - these override mcpServers if same name
+        if let Some(servers) = &self.servers {
+            for (name, server) in servers {
+                configs.insert(name.clone(), convert_server(server));
+            }
+        }
+
+        configs
+    }
+}
+
 /// Global permission configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -812,8 +1174,11 @@ impl Config {
     ///
     /// Loading order (later sources override earlier):
     /// 1. Global config from `~/.config/wonopcode/`
-    /// 2. `WONOPCODE_CONFIG_CONTENT` environment variable
-    /// 3. Project config from working directory
+    /// 2. Global `.mcp.json` from `~/.config/wonopcode/`
+    /// 3. `WONOPCODE_CONFIG_CONTENT` environment variable
+    /// 4. Project config from working directory
+    /// 5. Project `.mcp.json` from working directory
+    /// 6. `.vscode/mcp.json` from working directory (VS Code format)
     pub async fn load(project_dir: Option<&Path>) -> CoreResult<(Self, Vec<PathBuf>)> {
         let mut config = Config::default();
         let mut sources = Vec::new();
@@ -829,15 +1194,41 @@ impl Config {
                     break;
                 }
             }
+
+            // 2. Load global .mcp.json if it exists
+            let global_mcp_path = global_dir.join(".mcp.json");
+            if global_mcp_path.exists() {
+                match McpJsonFile::load(&global_mcp_path).await {
+                    Ok(mcp_json) => {
+                        let mcp_configs = mcp_json.to_mcp_configs();
+                        if !mcp_configs.is_empty() {
+                            tracing::info!(
+                                path = %global_mcp_path.display(),
+                                servers = mcp_configs.len(),
+                                "Loaded global MCP servers from .mcp.json"
+                            );
+                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            sources.push(global_mcp_path);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %global_mcp_path.display(),
+                            error = %e,
+                            "Failed to load global .mcp.json"
+                        );
+                    }
+                }
+            }
         }
 
-        // 2. Load from environment variable
+        // 3. Load from environment variable
         if let Ok(content) = std::env::var("WONOPCODE_CONFIG_CONTENT") {
             let loaded = Self::parse_jsonc(&content, "<env>")?;
             config = config.merge(loaded);
         }
 
-        // 3. Load project config (walk up from project_dir)
+        // 4. Load project config (walk up from project_dir)
         if let Some(dir) = project_dir {
             for name in &["wonopcode.jsonc", "wonopcode.json"] {
                 let path = dir.join(name);
@@ -846,6 +1237,58 @@ impl Config {
                     config = config.merge(loaded);
                     sources.push(path);
                     break;
+                }
+            }
+
+            // 5. Load project .mcp.json if it exists
+            let project_mcp_path = dir.join(".mcp.json");
+            if project_mcp_path.exists() {
+                match McpJsonFile::load(&project_mcp_path).await {
+                    Ok(mcp_json) => {
+                        let mcp_configs = mcp_json.to_mcp_configs();
+                        if !mcp_configs.is_empty() {
+                            tracing::info!(
+                                path = %project_mcp_path.display(),
+                                servers = mcp_configs.len(),
+                                "Loaded project MCP servers from .mcp.json"
+                            );
+                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            sources.push(project_mcp_path);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %project_mcp_path.display(),
+                            error = %e,
+                            "Failed to load project .mcp.json"
+                        );
+                    }
+                }
+            }
+
+            // 6. Load VS Code .vscode/mcp.json if it exists
+            let vscode_mcp_path = dir.join(".vscode").join("mcp.json");
+            if vscode_mcp_path.exists() {
+                match McpJsonFile::load(&vscode_mcp_path).await {
+                    Ok(mcp_json) => {
+                        let mcp_configs = mcp_json.to_mcp_configs();
+                        if !mcp_configs.is_empty() {
+                            tracing::info!(
+                                path = %vscode_mcp_path.display(),
+                                servers = mcp_configs.len(),
+                                "Loaded VS Code MCP servers from .vscode/mcp.json"
+                            );
+                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            sources.push(vscode_mcp_path);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %vscode_mcp_path.display(),
+                            error = %e,
+                            "Failed to load VS Code .vscode/mcp.json"
+                        );
+                    }
                 }
             }
         }
@@ -897,7 +1340,7 @@ impl Config {
     /// Load configuration from a file.
     pub async fn load_file(path: &Path) -> CoreResult<Self> {
         let content = tokio::fs::read_to_string(path).await?;
-        let content = Self::substitute_variables(&content, path)?;
+        let content = substitute_variables(&content, path)?;
         Self::parse_jsonc(&content, &path.display().to_string())
     }
 
@@ -966,7 +1409,7 @@ impl Config {
     /// Parse JSONC (JSON with comments).
     fn parse_jsonc(content: &str, source: &str) -> CoreResult<Self> {
         // Strip comments (// and /* */)
-        let stripped = Self::strip_comments(content);
+        let stripped = strip_comments(content);
 
         serde_json::from_str(&stripped).map_err(|e| {
             ConfigError::InvalidJson {
@@ -977,135 +1420,7 @@ impl Config {
         })
     }
 
-    /// Strip JSON comments.
-    fn strip_comments(input: &str) -> String {
-        let mut result = String::with_capacity(input.len());
-        let mut chars = input.chars().peekable();
-        let mut in_string = false;
-        let mut escape_next = false;
 
-        while let Some(c) = chars.next() {
-            if escape_next {
-                result.push(c);
-                escape_next = false;
-                continue;
-            }
-
-            if c == '\\' && in_string {
-                result.push(c);
-                escape_next = true;
-                continue;
-            }
-
-            if c == '"' {
-                in_string = !in_string;
-                result.push(c);
-                continue;
-            }
-
-            if in_string {
-                result.push(c);
-                continue;
-            }
-
-            // Check for comments
-            if c == '/' {
-                if let Some(&next) = chars.peek() {
-                    if next == '/' {
-                        // Line comment - skip to end of line
-                        chars.next();
-                        for c in chars.by_ref() {
-                            if c == '\n' {
-                                result.push('\n');
-                                break;
-                            }
-                        }
-                        continue;
-                    } else if next == '*' {
-                        // Block comment - skip to */
-                        chars.next();
-                        let mut prev = ' ';
-                        for c in chars.by_ref() {
-                            if prev == '*' && c == '/' {
-                                break;
-                            }
-                            // Preserve newlines for error reporting
-                            if c == '\n' {
-                                result.push('\n');
-                            }
-                            prev = c;
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            result.push(c);
-        }
-
-        result
-    }
-
-    /// Substitute variables in config content.
-    ///
-    /// Supports:
-    /// - `{env:VAR_NAME}` - Environment variable
-    /// - `{file:path}` - File contents (relative to config file)
-    fn substitute_variables(content: &str, config_path: &Path) -> CoreResult<String> {
-        let re = var_regex();
-        let config_dir = config_path.parent().unwrap_or(Path::new("."));
-
-        let mut result = content.to_string();
-        let mut last_error: Option<ConfigError> = None;
-
-        // Process all substitutions
-        for cap in re.captures_iter(content) {
-            // These are guaranteed by the regex pattern to exist
-            let Some(full_match) = cap.get(0).map(|m| m.as_str()) else {
-                continue;
-            };
-            let Some(kind) = cap.get(1).map(|m| m.as_str()) else {
-                continue;
-            };
-            let Some(value) = cap.get(2).map(|m| m.as_str()) else {
-                continue;
-            };
-
-            let replacement = match kind {
-                "env" => match std::env::var(value) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        last_error = Some(ConfigError::EnvVarNotFound {
-                            name: value.to_string(),
-                        });
-                        continue;
-                    }
-                },
-                "file" => {
-                    let file_path = config_dir.join(value);
-                    match std::fs::read_to_string(&file_path) {
-                        Ok(v) => v.trim().to_string(),
-                        Err(_) => {
-                            last_error = Some(ConfigError::FileRefNotFound {
-                                path: file_path.display().to_string(),
-                            });
-                            continue;
-                        }
-                    }
-                }
-                _ => continue,
-            };
-
-            result = result.replace(full_match, &replacement);
-        }
-
-        // Return error if any substitution failed
-        if let Some(e) = last_error {
-            return Err(e.into());
-        }
-
-        Ok(result)
-    }
 
     /// Merge another config into this one (other takes precedence).
     pub fn merge(mut self, other: Self) -> Self {
@@ -1217,7 +1532,7 @@ mod tests {
             "key2": "val/*not a comment*/ue"
         }"#;
 
-        let result = Config::strip_comments(input);
+        let result = strip_comments(input);
         assert!(!result.contains("Line comment"));
         assert!(!result.contains("trailing comment"));
         assert!(!result.contains("block comment"));
@@ -1404,5 +1719,205 @@ mod tests {
         assert_eq!(tui.markdown, Some(false)); // Updated
         assert_eq!(tui.syntax_highlighting, Some(true)); // Preserved
         assert_eq!(loaded.theme, Some("dark".to_string())); // Preserved
+    }
+
+    #[tokio::test]
+    async fn test_mcp_json_stdio_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let mcp_path = dir.path().join(".mcp.json");
+
+        // Create .mcp.json with stdio server (Claude Desktop format)
+        let mcp_json = r#"{
+            "mcpServers": {
+                "my-server": {
+                    "command": "npx",
+                    "args": ["-y", "@example/mcp-server"],
+                    "env": {
+                        "API_KEY": "test-key"
+                    }
+                }
+            }
+        }"#;
+        tokio::fs::write(&mcp_path, mcp_json).await.unwrap();
+
+        // Load and verify
+        let mcp_file = McpJsonFile::load(&mcp_path).await.unwrap();
+        let configs = mcp_file.to_mcp_configs();
+
+        assert_eq!(configs.len(), 1);
+        let config = configs.get("my-server").unwrap();
+        match config {
+            McpConfig::Local(local) => {
+                assert_eq!(local.command, vec!["npx", "-y", "@example/mcp-server"]);
+                let env = local.environment.as_ref().unwrap();
+                assert_eq!(env.get("API_KEY"), Some(&"test-key".to_string()));
+            }
+            McpConfig::Remote(_) => panic!("Expected local config"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mcp_json_remote_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let mcp_path = dir.path().join(".mcp.json");
+
+        // Create .mcp.json with remote server
+        let mcp_json = r#"{
+            "mcpServers": {
+                "remote-server": {
+                    "type": "sse",
+                    "url": "https://api.example.com/mcp",
+                    "headers": {
+                        "Authorization": "Bearer token123"
+                    }
+                }
+            }
+        }"#;
+        tokio::fs::write(&mcp_path, mcp_json).await.unwrap();
+
+        // Load and verify
+        let mcp_file = McpJsonFile::load(&mcp_path).await.unwrap();
+        let configs = mcp_file.to_mcp_configs();
+
+        assert_eq!(configs.len(), 1);
+        let config = configs.get("remote-server").unwrap();
+        match config {
+            McpConfig::Remote(remote) => {
+                assert_eq!(remote.url, "https://api.example.com/mcp");
+                let headers = remote.headers.as_ref().unwrap();
+                assert_eq!(
+                    headers.get("Authorization"),
+                    Some(&"Bearer token123".to_string())
+                );
+            }
+            McpConfig::Local(_) => panic!("Expected remote config"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mcp_json_loaded_with_config() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create .mcp.json with a server
+        let mcp_json = r#"{
+            "mcpServers": {
+                "test-server": {
+                    "command": "node",
+                    "args": ["server.js"]
+                }
+            }
+        }"#;
+        tokio::fs::write(dir.path().join(".mcp.json"), mcp_json)
+            .await
+            .unwrap();
+
+        // Load config from directory
+        let (config, sources) = Config::load(Some(dir.path())).await.unwrap();
+
+        // Verify .mcp.json was loaded
+        assert!(sources
+            .iter()
+            .any(|s| s.file_name() == Some(std::ffi::OsStr::new(".mcp.json"))));
+
+        // Verify MCP servers were loaded
+        let mcp = config.mcp.expect("MCP config should be present");
+        assert!(mcp.contains_key("test-server"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_json_merged_with_wonopcode_config() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create wonopcode.json with one MCP server
+        let wonop_json = r#"{
+            "mcp": {
+                "wonop-server": {
+                    "type": "remote",
+                    "url": "https://wonop.example.com/mcp"
+                }
+            }
+        }"#;
+        tokio::fs::write(dir.path().join("wonopcode.json"), wonop_json)
+            .await
+            .unwrap();
+
+        // Create .mcp.json with another server
+        let mcp_json = r#"{
+            "mcpServers": {
+                "mcp-server": {
+                    "command": "npx",
+                    "args": ["server"]
+                }
+            }
+        }"#;
+        tokio::fs::write(dir.path().join(".mcp.json"), mcp_json)
+            .await
+            .unwrap();
+
+        // Load config from directory
+        let (config, _) = Config::load(Some(dir.path())).await.unwrap();
+
+        // Verify both servers were loaded
+        let mcp = config.mcp.expect("MCP config should be present");
+        assert_eq!(mcp.len(), 2);
+        assert!(mcp.contains_key("wonop-server"));
+        assert!(mcp.contains_key("mcp-server"));
+    }
+
+    #[tokio::test]
+    async fn test_vscode_mcp_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let mcp_path = dir.path().join(".mcp.json");
+
+        // Create .mcp.json with VS Code format (servers key)
+        let mcp_json = r#"{
+            "servers": {
+                "vscode-server": {
+                    "command": "npx",
+                    "args": ["-y", "@vscode/mcp-server"]
+                }
+            }
+        }"#;
+        tokio::fs::write(&mcp_path, mcp_json).await.unwrap();
+
+        // Load and verify
+        let mcp_file = McpJsonFile::load(&mcp_path).await.unwrap();
+        let configs = mcp_file.to_mcp_configs();
+
+        assert_eq!(configs.len(), 1);
+        assert!(configs.contains_key("vscode-server"));
+    }
+
+    #[tokio::test]
+    async fn test_vscode_mcp_json_in_dotdir() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create .vscode directory and mcp.json
+        let vscode_dir = dir.path().join(".vscode");
+        tokio::fs::create_dir_all(&vscode_dir).await.unwrap();
+
+        let mcp_json = r#"{
+            "servers": {
+                "vscode-server": {
+                    "command": "node",
+                    "args": ["server.js"]
+                }
+            }
+        }"#;
+        tokio::fs::write(vscode_dir.join("mcp.json"), mcp_json)
+            .await
+            .unwrap();
+
+        // Load config from directory
+        let (config, sources) = Config::load(Some(dir.path())).await.unwrap();
+
+        // Verify .vscode/mcp.json was loaded
+        assert!(sources.iter().any(|s| s
+            .to_string_lossy()
+            .contains(".vscode/mcp.json")));
+
+        // Verify MCP servers were loaded
+        let mcp = config.mcp.expect("MCP config should be present");
+        assert!(mcp.contains_key("vscode-server"));
     }
 }
