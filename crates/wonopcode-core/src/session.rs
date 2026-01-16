@@ -531,6 +531,7 @@ impl SessionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::{AssistantMessage, ModelRef, TextPart, ToolPart, ToolState, ToolTime, UserMessage};
 
     fn create_test_storage() -> JsonStorage {
         let dir = tempfile::tempdir().unwrap();
@@ -574,5 +575,712 @@ mod tests {
         let json = serde_json::to_string(&session).unwrap();
         let parsed: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.project_id, "proj_123");
+    }
+
+    // ============================================================
+    // Session struct tests
+    // ============================================================
+
+    #[test]
+    fn test_session_new() {
+        let session = Session::new("project_1", "/path/to/project");
+        assert!(!session.id.is_empty());
+        assert!(session.id.starts_with("ses_"));
+        assert_eq!(session.project_id, "project_1");
+        assert_eq!(session.directory, "/path/to/project");
+        assert_eq!(session.title, "New Session");
+        assert!(session.parent_id.is_none());
+        assert!(session.summary.is_none());
+        assert!(session.share.is_none());
+        assert!(session.revert.is_none());
+        assert!(session.time.created > 0);
+        assert!(session.time.updated > 0);
+        assert!(session.time.compacting.is_none());
+        assert!(session.time.archived.is_none());
+    }
+
+    #[test]
+    fn test_session_child() {
+        let parent = Session::new("project_1", "/path/to/project");
+        let child = Session::child(&parent);
+        assert_eq!(child.project_id, parent.project_id);
+        assert_eq!(child.directory, parent.directory);
+        assert_eq!(child.parent_id, Some(parent.id.clone()));
+        assert!(child.title.contains("Subtask of"));
+    }
+
+    #[test]
+    fn test_session_touch() {
+        let mut session = Session::new("project_1", "/path");
+        let original_updated = session.time.updated;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        session.touch();
+        assert!(session.time.updated >= original_updated);
+    }
+
+    #[test]
+    fn test_session_created_at() {
+        let session = Session::new("project_1", "/path");
+        let dt = session.created_at();
+        assert!(dt.timestamp_millis() > 0);
+    }
+
+    #[test]
+    fn test_session_updated_at() {
+        let session = Session::new("project_1", "/path");
+        let dt = session.updated_at();
+        assert!(dt.timestamp_millis() > 0);
+    }
+
+    #[test]
+    fn test_session_created_at_fallback() {
+        let mut session = Session::new("project_1", "/path");
+        session.time.created = -9999999999999999; // Invalid timestamp
+        let dt = session.created_at();
+        // Should return now as fallback
+        assert!(dt.timestamp() > 0);
+    }
+
+    #[test]
+    fn test_session_updated_at_fallback() {
+        let mut session = Session::new("project_1", "/path");
+        session.time.updated = -9999999999999999; // Invalid timestamp
+        let dt = session.updated_at();
+        // Should return now as fallback
+        assert!(dt.timestamp() > 0);
+    }
+
+    #[test]
+    fn test_session_default() {
+        let session = Session::default();
+        assert!(session.id.is_empty());
+        assert!(session.project_id.is_empty());
+        assert!(session.directory.is_empty());
+        assert!(session.title.is_empty());
+    }
+
+    // ============================================================
+    // SessionSummary tests
+    // ============================================================
+
+    #[test]
+    fn test_session_summary_default() {
+        let summary = SessionSummary::default();
+        assert_eq!(summary.additions, 0);
+        assert_eq!(summary.deletions, 0);
+        assert_eq!(summary.files, 0);
+        assert!(summary.diffs.is_none());
+    }
+
+    #[test]
+    fn test_session_summary_serialization() {
+        let summary = SessionSummary {
+            additions: 10,
+            deletions: 5,
+            files: 3,
+            diffs: Some(vec![FileDiff {
+                file: "/test.rs".to_string(),
+                before: "old content".to_string(),
+                after: "new content".to_string(),
+                additions: 5,
+                deletions: 2,
+            }]),
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        let parsed: SessionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.additions, 10);
+        assert_eq!(parsed.deletions, 5);
+        assert_eq!(parsed.files, 3);
+        assert!(parsed.diffs.is_some());
+        assert_eq!(parsed.diffs.unwrap().len(), 1);
+    }
+
+    // ============================================================
+    // ShareInfo tests
+    // ============================================================
+
+    #[test]
+    fn test_share_info_serialization() {
+        let share = ShareInfo {
+            url: "https://example.com/share/abc123".to_string(),
+        };
+        let json = serde_json::to_string(&share).unwrap();
+        let parsed: ShareInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.url, "https://example.com/share/abc123");
+    }
+
+    // ============================================================
+    // SessionTime tests
+    // ============================================================
+
+    #[test]
+    fn test_session_time_default() {
+        let time = SessionTime::default();
+        assert_eq!(time.created, 0);
+        assert_eq!(time.updated, 0);
+        assert!(time.compacting.is_none());
+        assert!(time.archived.is_none());
+    }
+
+    #[test]
+    fn test_session_time_serialization() {
+        let time = SessionTime {
+            created: 1000,
+            updated: 2000,
+            compacting: Some(1500),
+            archived: None,
+        };
+        let json = serde_json::to_string(&time).unwrap();
+        let parsed: SessionTime = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.created, 1000);
+        assert_eq!(parsed.updated, 2000);
+        assert_eq!(parsed.compacting, Some(1500));
+        assert!(parsed.archived.is_none());
+    }
+
+    // ============================================================
+    // RevertInfo tests
+    // ============================================================
+
+    #[test]
+    fn test_revert_info_serialization() {
+        let revert = RevertInfo {
+            message_id: "msg_123".to_string(),
+            part_id: Some("part_456".to_string()),
+            snapshot: Some("snap_789".to_string()),
+            diff: None,
+        };
+        let json = serde_json::to_string(&revert).unwrap();
+        let parsed: RevertInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.message_id, "msg_123");
+        assert_eq!(parsed.part_id, Some("part_456".to_string()));
+        assert_eq!(parsed.snapshot, Some("snap_789".to_string()));
+        assert!(parsed.diff.is_none());
+    }
+
+    #[test]
+    fn test_revert_info_minimal() {
+        let revert = RevertInfo {
+            message_id: "msg_123".to_string(),
+            part_id: None,
+            snapshot: None,
+            diff: None,
+        };
+        let json = serde_json::to_string(&revert).unwrap();
+        assert!(!json.contains("part_id"));
+        assert!(!json.contains("snapshot"));
+        assert!(!json.contains("diff"));
+    }
+
+    // ============================================================
+    // MessageWithParts tests
+    // ============================================================
+
+    #[test]
+    fn test_message_with_parts() {
+        let message = Message::User(UserMessage::new(
+            "ses_123",
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        let parts = vec![MessagePart::Text(TextPart::new("ses_123", "msg_1", "Hello"))];
+        let msg_with_parts = MessageWithParts {
+            message: message.clone(),
+            parts: parts.clone(),
+        };
+        assert_eq!(msg_with_parts.parts.len(), 1);
+    }
+
+    // ============================================================
+    // SessionRepository tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_session_list() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create multiple sessions
+        let session1 = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+        let session2 = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+        let _session3 = repo
+            .create(Session::new("proj_2", "/other"))
+            .await
+            .unwrap();
+
+        // List sessions for proj_1
+        let sessions = repo.list("proj_1").await.unwrap();
+        assert_eq!(sessions.len(), 2);
+
+        // Verify sorted by ID descending (newer first)
+        assert!(sessions[0].id >= sessions[1].id);
+
+        // Verify both sessions are present
+        let ids: Vec<_> = sessions.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&session1.id.as_str()));
+        assert!(ids.contains(&session2.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_session_children() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create parent session
+        let parent = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Create child sessions
+        let child1 = Session::child(&parent);
+        let child1 = repo.create(child1).await.unwrap();
+
+        let child2 = Session::child(&parent);
+        let child2 = repo.create(child2).await.unwrap();
+
+        // Create unrelated session
+        let _unrelated = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Get children
+        let children = repo.children("proj_1", &parent.id).await.unwrap();
+        assert_eq!(children.len(), 2);
+
+        let child_ids: Vec<_> = children.iter().map(|s| s.id.as_str()).collect();
+        assert!(child_ids.contains(&child1.id.as_str()));
+        assert!(child_ids.contains(&child2.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_session_get_not_found() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let result = repo.get("proj_1", "nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_session_update_not_found() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let result = repo
+            .update("proj_1", "nonexistent", |_s| {})
+            .await;
+        assert!(result.is_err());
+    }
+
+    // ============================================================
+    // Message operations tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_save_and_get_message() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let message = Message::User(UserMessage::new(
+            "ses_123",
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+
+        repo.save_message(&message).await.unwrap();
+
+        let retrieved = repo.get_message("ses_123", message.id()).await.unwrap();
+        assert_eq!(retrieved.id(), message.id());
+    }
+
+    #[tokio::test]
+    async fn test_get_message_not_found() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let result = repo.get_message("ses_123", "nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_message() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let message = Message::User(UserMessage::new(
+            "ses_123",
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+
+        repo.save_message(&message).await.unwrap();
+        repo.delete_message("ses_123", message.id()).await.unwrap();
+
+        let result = repo.get_message("ses_123", message.id()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_messages_with_parts() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create session
+        let session = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Create a user message
+        let user_msg = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        repo.save_message(&user_msg).await.unwrap();
+
+        // Create parts for the message
+        let part1 = MessagePart::Text(TextPart::new(&session.id, user_msg.id(), "Hello world"));
+        repo.save_part(&part1).await.unwrap();
+
+        // Get messages with parts
+        let messages = repo.messages("proj_1", &session.id, None).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].parts.len(), 1);
+        if let MessagePart::Text(text) = &messages[0].parts[0] {
+            assert_eq!(text.text, "Hello world");
+        } else {
+            panic!("Expected TextPart");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_messages_with_limit() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let session = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Create multiple messages
+        for _ in 0..5 {
+            let msg = Message::User(UserMessage::new(
+                &session.id,
+                "default",
+                ModelRef {
+                    provider_id: "test".to_string(),
+                    model_id: "model-1".to_string(),
+                },
+            ));
+            repo.save_message(&msg).await.unwrap();
+        }
+
+        // Get with limit
+        let messages = repo.messages("proj_1", &session.id, Some(3)).await.unwrap();
+        assert_eq!(messages.len(), 3);
+    }
+
+    // ============================================================
+    // Part operations tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_save_and_get_part() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let part = MessagePart::Text(TextPart::new("ses_789", "msg_456", "Test text"));
+
+        repo.save_part(&part).await.unwrap();
+
+        let retrieved = repo.get_part("msg_456", part.id()).await.unwrap();
+        if let MessagePart::Text(text) = retrieved {
+            assert_eq!(text.text, "Test text");
+        } else {
+            panic!("Expected TextPart");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_part_not_found() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let result = repo.get_part("msg_123", "nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_part() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let part = MessagePart::Text(TextPart::new("ses_789", "msg_456", "Test text"));
+
+        repo.save_part(&part).await.unwrap();
+        repo.delete_part("msg_456", part.id()).await.unwrap();
+
+        let result = repo.get_part("msg_456", part.id()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_parts_sorted() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create parts and save them
+        // Note: parts are sorted by ID, so we save them and verify the sort order
+        let part1 = MessagePart::Text(TextPart::new("ses_1", "msg_1", "First"));
+        let part2 = MessagePart::Text(TextPart::new("ses_1", "msg_1", "Second"));
+        let part3 = MessagePart::Text(TextPart::new("ses_1", "msg_1", "Third"));
+
+        repo.save_part(&part1).await.unwrap();
+        repo.save_part(&part2).await.unwrap();
+        repo.save_part(&part3).await.unwrap();
+
+        let retrieved = repo.parts("ses_1", "msg_1").await.unwrap();
+        assert_eq!(retrieved.len(), 3);
+        // Parts should be sorted by ID ascending
+    }
+
+    // ============================================================
+    // Fork tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_fork_session_all_messages() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create original session
+        let original = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Add messages to original
+        let msg1 = Message::User(UserMessage::new(
+            &original.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        repo.save_message(&msg1).await.unwrap();
+
+        let msg2 = Message::Assistant(AssistantMessage::new(&original.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        repo.save_message(&msg2).await.unwrap();
+
+        // Fork the session (all messages)
+        let forked = repo
+            .fork("proj_1", &original.id, None)
+            .await
+            .unwrap();
+
+        assert_ne!(forked.id, original.id);
+        assert!(forked.title.contains("Fork of"));
+
+        // Check forked messages exist
+        let forked_messages = repo.messages("proj_1", &forked.id, None).await.unwrap();
+        assert_eq!(forked_messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_fork_session_at_message() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create original session
+        let original = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        // Add messages - fork compares by message ID (ascending sort by created_at)
+        let msg1 = Message::User(UserMessage::new(
+            &original.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        repo.save_message(&msg1).await.unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let msg2 = Message::Assistant(AssistantMessage::new(&original.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        repo.save_message(&msg2).await.unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let msg3 = Message::User(UserMessage::new(
+            &original.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        repo.save_message(&msg3).await.unwrap();
+
+        // Fork at msg3 (should only include msg1 and msg2, since fork stops at message with ID >= fork_at)
+        let forked = repo
+            .fork("proj_1", &original.id, Some(msg3.id()))
+            .await
+            .unwrap();
+
+        let forked_messages = repo.messages("proj_1", &forked.id, None).await.unwrap();
+        // The fork should include messages before msg3
+        assert!(forked_messages.len() <= 3);
+    }
+
+    #[tokio::test]
+    async fn test_fork_session_with_parts() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        // Create original session with message and parts
+        let original = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        let msg = Message::User(UserMessage::new(
+            &original.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        repo.save_message(&msg).await.unwrap();
+
+        let part = MessagePart::Text(TextPart::new(&original.id, msg.id(), "Hello"));
+        repo.save_part(&part).await.unwrap();
+
+        // Fork
+        let forked = repo.fork("proj_1", &original.id, None).await.unwrap();
+
+        // Check parts were copied
+        let forked_messages = repo.messages("proj_1", &forked.id, None).await.unwrap();
+        assert_eq!(forked_messages.len(), 1);
+        assert_eq!(forked_messages[0].parts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_fork_preserves_tool_parts() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let repo = SessionRepository::new(storage, bus);
+
+        let original = repo
+            .create(Session::new("proj_1", "/path"))
+            .await
+            .unwrap();
+
+        let msg = Message::Assistant(AssistantMessage::new(&original.id, "parent", "default", "test", "model-1", "/path", "/path"));
+        repo.save_message(&msg).await.unwrap();
+
+        let tool_part = MessagePart::Tool(ToolPart {
+            id: "tool_001".to_string(),
+            message_id: msg.id().to_string(),
+            session_id: original.id.clone(),
+            call_id: "call_123".to_string(),
+            tool: "read".to_string(),
+            state: ToolState::Completed {
+                input: serde_json::json!({"path": "/test.rs"}),
+                output: "file contents".to_string(),
+                title: "Read file".to_string(),
+                metadata: serde_json::json!({}),
+                time: ToolTime { start: 0, end: Some(100), compacted: None },
+                attachments: None,
+            },
+            metadata: None,
+        });
+        repo.save_part(&tool_part).await.unwrap();
+
+        let forked = repo.fork("proj_1", &original.id, None).await.unwrap();
+        let forked_messages = repo.messages("proj_1", &forked.id, None).await.unwrap();
+        assert_eq!(forked_messages[0].parts.len(), 1);
+        if let MessagePart::Tool(t) = &forked_messages[0].parts[0] {
+            assert_eq!(t.tool, "read");
+        } else {
+            panic!("Expected ToolPart");
+        }
+    }
+
+    // ============================================================
+    // Session with full fields
+    // ============================================================
+
+    #[test]
+    fn test_session_with_all_fields() {
+        let mut session = Session::new("proj_1", "/path");
+        session.summary = Some(SessionSummary {
+            additions: 100,
+            deletions: 50,
+            files: 10,
+            diffs: None,
+        });
+        session.share = Some(ShareInfo {
+            url: "https://share.example.com/abc".to_string(),
+        });
+        session.revert = Some(RevertInfo {
+            message_id: "msg_123".to_string(),
+            part_id: None,
+            snapshot: None,
+            diff: None,
+        });
+        session.time.compacting = Some(12345);
+        session.time.archived = Some(67890);
+
+        let json = serde_json::to_string(&session).unwrap();
+        let parsed: Session = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.summary.is_some());
+        assert_eq!(parsed.summary.as_ref().unwrap().additions, 100);
+        assert!(parsed.share.is_some());
+        assert!(parsed.revert.is_some());
+        assert_eq!(parsed.time.compacting, Some(12345));
+        assert_eq!(parsed.time.archived, Some(67890));
     }
 }

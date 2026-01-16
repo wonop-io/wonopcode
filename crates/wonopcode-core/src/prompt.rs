@@ -489,5 +489,159 @@ mod tests {
         let config = PromptConfig::default();
         assert_eq!(config.max_steps, MAX_STEPS);
         assert!(config.max_tokens.is_some());
+        assert_eq!(config.max_tokens, Some(8192));
+        assert_eq!(config.temperature, Some(0.7));
+        assert!(config.system.is_none());
+    }
+
+    #[test]
+    fn test_prompt_config_custom() {
+        let config = PromptConfig {
+            max_tokens: Some(4096),
+            temperature: Some(0.5),
+            system: Some("You are a helpful assistant".to_string()),
+            max_steps: 50,
+        };
+        assert_eq!(config.max_tokens, Some(4096));
+        assert_eq!(config.temperature, Some(0.5));
+        assert_eq!(config.system, Some("You are a helpful assistant".to_string()));
+        assert_eq!(config.max_steps, 50);
+    }
+
+    #[test]
+    fn test_prompt_config_debug() {
+        let config = PromptConfig::default();
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("PromptConfig"));
+        assert!(debug_str.contains("max_tokens"));
+    }
+
+    #[test]
+    fn test_prompt_config_clone() {
+        let config = PromptConfig {
+            max_tokens: Some(1024),
+            temperature: Some(0.9),
+            system: Some("Test system".to_string()),
+            max_steps: 10,
+        };
+        let cloned = config.clone();
+        assert_eq!(cloned.max_tokens, config.max_tokens);
+        assert_eq!(cloned.temperature, config.temperature);
+        assert_eq!(cloned.system, config.system);
+        assert_eq!(cloned.max_steps, config.max_steps);
+    }
+
+    // ============================================================
+    // PromptResult tests
+    // ============================================================
+
+    #[test]
+    fn test_prompt_result_debug() {
+        let result = PromptResult {
+            text: "Hello world".to_string(),
+            tool_calls: vec![],
+            tokens_input: 100,
+            tokens_output: 50,
+            finish_reason: FinishReason::EndTurn,
+            steps: 1,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("PromptResult"));
+        assert!(debug_str.contains("Hello world"));
+    }
+
+    #[test]
+    fn test_prompt_result_with_tool_calls() {
+        let result = PromptResult {
+            text: "Used a tool".to_string(),
+            tool_calls: vec![
+                ToolCallResult {
+                    tool: "read".to_string(),
+                    input: serde_json::json!({"path": "/test.rs"}),
+                    output: "file contents".to_string(),
+                    success: true,
+                },
+                ToolCallResult {
+                    tool: "write".to_string(),
+                    input: serde_json::json!({"path": "/out.txt", "content": "data"}),
+                    output: "written".to_string(),
+                    success: true,
+                },
+            ],
+            tokens_input: 200,
+            tokens_output: 100,
+            finish_reason: FinishReason::ToolUse,
+            steps: 2,
+        };
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0].tool, "read");
+        assert!(result.tool_calls[0].success);
+        assert_eq!(result.steps, 2);
+    }
+
+    // ============================================================
+    // ToolCallResult tests
+    // ============================================================
+
+    #[test]
+    fn test_tool_call_result_success() {
+        let result = ToolCallResult {
+            tool: "bash".to_string(),
+            input: serde_json::json!({"command": "ls"}),
+            output: "file1\nfile2".to_string(),
+            success: true,
+        };
+        assert_eq!(result.tool, "bash");
+        assert!(result.success);
+        assert!(result.output.contains("file1"));
+    }
+
+    #[test]
+    fn test_tool_call_result_failure() {
+        let result = ToolCallResult {
+            tool: "read".to_string(),
+            input: serde_json::json!({"path": "/nonexistent"}),
+            output: "Error: file not found".to_string(),
+            success: false,
+        };
+        assert!(!result.success);
+        assert!(result.output.contains("Error"));
+    }
+
+    #[test]
+    fn test_tool_call_result_debug() {
+        let result = ToolCallResult {
+            tool: "test_tool".to_string(),
+            input: serde_json::json!({}),
+            output: "output".to_string(),
+            success: true,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("ToolCallResult"));
+        assert!(debug_str.contains("test_tool"));
+    }
+
+    #[test]
+    fn test_tool_call_result_clone() {
+        let result = ToolCallResult {
+            tool: "cloneable".to_string(),
+            input: serde_json::json!({"key": "value"}),
+            output: "result".to_string(),
+            success: true,
+        };
+        let cloned = result.clone();
+        assert_eq!(cloned.tool, result.tool);
+        assert_eq!(cloned.input, result.input);
+        assert_eq!(cloned.output, result.output);
+        assert_eq!(cloned.success, result.success);
+    }
+
+    // ============================================================
+    // MAX_STEPS constant test
+    // ============================================================
+
+    #[test]
+    fn test_max_steps_constant() {
+        assert_eq!(MAX_STEPS, 100);
     }
 }

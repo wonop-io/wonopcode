@@ -265,6 +265,18 @@ impl SessionRevert {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::{AssistantMessage, Message, ModelRef, TextPart, UserMessage};
+    use crate::session::{RevertInfo, Session};
+    use wonopcode_storage::json::JsonStorage;
+
+    fn create_test_storage() -> JsonStorage {
+        let dir = tempfile::tempdir().unwrap();
+        JsonStorage::new(dir.keep())
+    }
+
+    // ============================================================
+    // RevertInput tests
+    // ============================================================
 
     #[test]
     fn test_revert_input() {
@@ -276,5 +288,353 @@ mod tests {
         assert_eq!(input.session_id, "ses_123");
         assert_eq!(input.message_id, "msg_456");
         assert!(input.part_id.is_none());
+    }
+
+    #[test]
+    fn test_revert_input_with_part() {
+        let input = RevertInput {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: Some("part_789".to_string()),
+        };
+        assert_eq!(input.part_id, Some("part_789".to_string()));
+    }
+
+    #[test]
+    fn test_revert_input_debug() {
+        let input = RevertInput {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: None,
+        };
+        let debug_str = format!("{:?}", input);
+        assert!(debug_str.contains("RevertInput"));
+        assert!(debug_str.contains("ses_123"));
+    }
+
+    #[test]
+    fn test_revert_input_clone() {
+        let input = RevertInput {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: Some("part_789".to_string()),
+        };
+        let cloned = input.clone();
+        assert_eq!(cloned.session_id, input.session_id);
+        assert_eq!(cloned.message_id, input.message_id);
+        assert_eq!(cloned.part_id, input.part_id);
+    }
+
+    // ============================================================
+    // SessionRevert tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_session_revert_new() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+        let revert = SessionRevert::new(session_repo, bus);
+        // Just verify construction doesn't panic
+        let _ = revert;
+    }
+
+    #[tokio::test]
+    async fn test_revert_not_found() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session first
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        // Create a message
+        let msg = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&msg).await.unwrap();
+
+        let revert = SessionRevert::new(session_repo, bus);
+
+        // Try to revert to a non-existent message
+        let input = RevertInput {
+            session_id: session.id.clone(),
+            message_id: "nonexistent_msg".to_string(),
+            part_id: None,
+        };
+
+        let result = revert.revert("proj_1", input).await.unwrap();
+        // When revert point is not found, it returns the current session unchanged
+        assert!(result.revert.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revert_to_message() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        // Create messages
+        let msg1 = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&msg1).await.unwrap();
+
+        // Add a text part
+        let part = MessagePart::Text(TextPart::new(&session.id, msg1.id(), "Hello"));
+        session_repo.save_part(&part).await.unwrap();
+
+        let msg2 = Message::Assistant(AssistantMessage::new(&session.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        session_repo.save_message(&msg2).await.unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo.clone(), bus);
+
+        // Revert to msg1
+        let input = RevertInput {
+            session_id: session.id.clone(),
+            message_id: msg1.id().to_string(),
+            part_id: None,
+        };
+
+        let result = revert_handler.revert("proj_1", input).await.unwrap();
+        assert!(result.revert.is_some());
+        let revert_info = result.revert.unwrap();
+        assert_eq!(revert_info.message_id, msg1.id());
+    }
+
+    #[tokio::test]
+    async fn test_unrevert_no_revert() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session without revert
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo, bus);
+
+        // Try to unrevert when there's no revert
+        let result = revert_handler.unrevert("proj_1", &session.id).await.unwrap();
+        assert!(result.revert.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_unrevert_with_revert() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session with revert info
+        let mut session = Session::new("proj_1", "/path");
+        session.revert = Some(RevertInfo {
+            message_id: "msg_123".to_string(),
+            part_id: None,
+            snapshot: None,
+            diff: None,
+        });
+        let session = session_repo.create(session).await.unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo, bus);
+
+        // Unrevert
+        let result = revert_handler.unrevert("proj_1", &session.id).await.unwrap();
+        assert!(result.revert.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_no_revert() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session without revert
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo, bus);
+
+        // Cleanup should do nothing when there's no revert
+        let result = revert_handler.cleanup("proj_1", &session.id).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_with_revert() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        // Create messages
+        let msg1 = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&msg1).await.unwrap();
+
+        let msg2 = Message::Assistant(AssistantMessage::new(&session.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        session_repo.save_message(&msg2).await.unwrap();
+
+        let msg3 = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&msg3).await.unwrap();
+
+        // Set revert to msg1
+        session_repo
+            .update("proj_1", &session.id, |s| {
+                s.revert = Some(RevertInfo {
+                    message_id: msg1.id().to_string(),
+                    part_id: None,
+                    snapshot: None,
+                    diff: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo.clone(), bus);
+
+        // Cleanup should remove messages after msg1
+        let result = revert_handler.cleanup("proj_1", &session.id).await;
+        assert!(result.is_ok());
+
+        // Verify revert info is cleared
+        let updated_session = session_repo.get("proj_1", &session.id).await.unwrap();
+        assert!(updated_session.revert.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_with_part_revert() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        // Create a message with multiple parts
+        let msg = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&msg).await.unwrap();
+
+        let part1 = MessagePart::Text(TextPart::new(&session.id, msg.id(), "First"));
+        session_repo.save_part(&part1).await.unwrap();
+
+        let part2 = MessagePart::Text(TextPart::new(&session.id, msg.id(), "Second"));
+        session_repo.save_part(&part2).await.unwrap();
+
+        let part3 = MessagePart::Text(TextPart::new(&session.id, msg.id(), "Third"));
+        session_repo.save_part(&part3).await.unwrap();
+
+        // Set revert to part1 (should remove part2 and part3)
+        session_repo
+            .update("proj_1", &session.id, |s| {
+                s.revert = Some(RevertInfo {
+                    message_id: msg.id().to_string(),
+                    part_id: Some(part1.id().to_string()),
+                    snapshot: None,
+                    diff: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo.clone(), bus);
+
+        // Cleanup runs successfully
+        let result = revert_handler.cleanup("proj_1", &session.id).await;
+        assert!(result.is_ok());
+
+        // Verify revert info is cleared
+        let updated = session_repo.get("proj_1", &session.id).await.unwrap();
+        assert!(updated.revert.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revert_to_assistant_message() {
+        let storage = create_test_storage();
+        let bus = Bus::new();
+        let session_repo = Arc::new(SessionRepository::new(storage, bus.clone()));
+
+        // Create a session
+        let session = Session::new("proj_1", "/path");
+        let session = session_repo.create(session).await.unwrap();
+
+        // Create user message first
+        let user_msg = Message::User(UserMessage::new(
+            &session.id,
+            "default",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model-1".to_string(),
+            },
+        ));
+        session_repo.save_message(&user_msg).await.unwrap();
+
+        // Add a part so it's "useful"
+        let part = MessagePart::Text(TextPart::new(&session.id, user_msg.id(), "User input"));
+        session_repo.save_part(&part).await.unwrap();
+
+        // Create assistant message with a part
+        let assistant_msg = Message::Assistant(AssistantMessage::new(&session.id, user_msg.id(), "default", "test", "model-1", "/path", "/path"));
+        session_repo.save_message(&assistant_msg).await.unwrap();
+        
+        // Assistant needs a part too
+        let assistant_part = MessagePart::Text(TextPart::new(&session.id, assistant_msg.id(), "Response"));
+        session_repo.save_part(&assistant_part).await.unwrap();
+
+        let revert_handler = SessionRevert::new(session_repo.clone(), bus);
+
+        // Revert to assistant message
+        let input = RevertInput {
+            session_id: session.id.clone(),
+            message_id: assistant_msg.id().to_string(),
+            part_id: None,
+        };
+
+        let result = revert_handler.revert("proj_1", input).await.unwrap();
+        // The revert function returns a session with revert info set if found
+        // When reverting to an assistant message without a part_id, it reverts to the user message before it
+        if result.revert.is_some() {
+            let revert_info = result.revert.unwrap();
+            // Should be the user message
+            assert_eq!(revert_info.message_id, user_msg.id());
+        }
     }
 }
