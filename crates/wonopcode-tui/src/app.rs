@@ -84,6 +84,57 @@ pub fn install_panic_hook() {
     }));
 }
 
+/// RAII guard for terminal state management.
+///
+/// This struct ensures that the terminal is properly restored to its normal state
+/// when it goes out of scope, regardless of how the scope is exited (normal return,
+/// early return via `?`, or drop due to unwinding).
+///
+/// # Example
+/// ```ignore
+/// let _guard = TerminalGuard::new()?;
+/// // Terminal is now in raw mode with alternate screen
+/// // ... do TUI stuff ...
+/// // Terminal is automatically restored when _guard is dropped
+/// ```
+pub struct TerminalGuard {
+    /// Whether the terminal was successfully set up.
+    /// If false, we don't try to restore on drop.
+    initialized: bool,
+}
+
+impl TerminalGuard {
+    /// Create a new terminal guard and set up the terminal for TUI mode.
+    ///
+    /// This enables raw mode, enters the alternate screen, enables mouse capture,
+    /// and enables bracketed paste.
+    pub fn new() -> io::Result<Self> {
+        enable_raw_mode()?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
+        Ok(Self { initialized: true })
+    }
+
+    /// Create a guard without initializing the terminal.
+    /// Useful for tests or when terminal is already set up.
+    #[allow(dead_code)]
+    pub fn already_initialized() -> Self {
+        Self { initialized: true }
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        if self.initialized {
+            restore_terminal();
+        }
+    }
+}
+
 /// Current view/route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Route {
@@ -1720,16 +1771,10 @@ async function fetchUserData(userId) {
         // Initialize performance metrics
         metrics::init();
 
-        // Setup terminal
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            EnterAlternateScreen,
-            EnableMouseCapture,
-            EnableBracketedPaste
-        )?;
-        let backend = CrosstermBackend::new(stdout);
+        // Setup terminal with RAII guard - terminal will be restored when _guard is dropped,
+        // regardless of how this function exits (normal return, early return via ?, or panic)
+        let _guard = TerminalGuard::new()?;
+        let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
 
         // Start event loop
@@ -1807,9 +1852,9 @@ async function fetchUserData(userId) {
             );
         }
 
-        // Cleanup
+        // Cleanup - event loop abort
+        // Note: terminal restoration is handled by TerminalGuard's Drop impl
         event_loop.abort();
-        restore_terminal();
 
         Ok(())
     }

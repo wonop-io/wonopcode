@@ -14,7 +14,8 @@ pub mod widgets;
 pub use app::{
     install_panic_hook, restore_terminal, ActiveDialog, App, AppAction, AppState, AppUpdate,
     GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate, McpStatusUpdate,
-    ModifiedFileUpdate, PermissionRequestUpdate, Route, SandboxStatusUpdate, SaveScope, TodoUpdate,
+    ModifiedFileUpdate, PermissionRequestUpdate, Route, SandboxStatusUpdate, SaveScope,
+    TerminalGuard, TodoUpdate,
 };
 pub use backend::{Backend, BackendError, BackendResult, LocalBackend, RemoteBackend};
 pub use event::{Event, EventHandler};
