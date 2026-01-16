@@ -408,15 +408,86 @@ mod tests {
     }
 
     #[test]
+    fn test_html_escape_single_quote() {
+        assert_eq!(html_escape("it's"), "it&#39;s");
+    }
+
+    #[test]
+    fn test_html_escape_combined() {
+        assert_eq!(
+            html_escape("<a href=\"test?a=1&b=2\">"),
+            "&lt;a href=&quot;test?a=1&amp;b=2&quot;&gt;"
+        );
+    }
+
+    #[test]
+    fn test_html_escape_empty() {
+        assert_eq!(html_escape(""), "");
+    }
+
+    #[test]
+    fn test_html_escape_no_special_chars() {
+        assert_eq!(html_escape("hello world"), "hello world");
+    }
+
+    #[test]
     fn test_html_error() {
         let html = html_error("Test error");
         assert!(html.contains("Test error"));
         assert!(html.contains("Authorization Failed"));
     }
 
+    #[test]
+    fn test_html_error_with_special_chars() {
+        let html = html_error("<script>alert('xss')</script>");
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(!html.contains("<script>alert"));
+    }
+
+    #[test]
+    fn test_html_success_content() {
+        assert!(HTML_SUCCESS.contains("Authorization Successful"));
+        assert!(HTML_SUCCESS.contains("window.close()"));
+        assert!(HTML_SUCCESS.contains("<!DOCTYPE html>"));
+    }
+
     #[tokio::test]
     async fn test_callback_server_creation() {
         let server = OAuthCallbackServer::new();
         assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_default() {
+        let server = OAuthCallbackServer::default();
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_stop_when_not_running() {
+        let server = OAuthCallbackServer::new();
+        
+        // Stop the server when not started should be safe
+        server.stop().await;
+        
+        // Should not be running
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_multiple_stops() {
+        let server = OAuthCallbackServer::new();
+        
+        // Multiple stops should be safe
+        server.stop().await;
+        server.stop().await;
+        
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_port_in_use() {
+        // This test just checks the function runs without panicking
+        let _ = OAuthCallbackServer::is_port_in_use().await;
     }
 }

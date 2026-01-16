@@ -365,6 +365,23 @@ mod tests {
         assert_eq!(client.next_request_id(), 2);
     }
 
+    #[test]
+    fn test_client_default() {
+        let client = McpClient::default();
+        assert_eq!(client.next_request_id(), 1);
+    }
+
+    #[test]
+    fn test_request_id_increments() {
+        let client = McpClient::new();
+        let id1 = client.next_request_id();
+        let id2 = client.next_request_id();
+        let id3 = client.next_request_id();
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(id3, 3);
+    }
+
     #[tokio::test]
     async fn test_list_tools_empty() {
         let client = McpClient::new();
@@ -377,5 +394,84 @@ mod tests {
         let client = McpClient::new();
         let result = client.call_tool("nonexistent", serde_json::json!({})).await;
         assert!(matches!(result, Err(McpError::ToolNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_server_names_empty() {
+        let client = McpClient::new();
+        let servers = client.server_names().await;
+        assert!(servers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_server_state_nonexistent() {
+        let client = McpClient::new();
+        let state = client.server_state("nonexistent").await;
+        assert!(state.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent_server() {
+        let client = McpClient::new();
+        // Should not panic when removing a server that doesn't exist
+        let _ = client.remove_server("nonexistent").await;
+    }
+
+    #[tokio::test]
+    async fn test_add_disabled_server() {
+        let client = McpClient::new();
+        let config = ServerConfig::sse("test-server", "http://localhost:8080").disabled();
+        
+        // Adding a disabled server should succeed but not connect
+        let result = client.add_server(config).await;
+        assert!(result.is_ok());
+        
+        // Should not be in the connected servers
+        let servers = client.server_names().await;
+        assert!(servers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_servers_empty() {
+        let client = McpClient::new();
+        let servers = client.list_servers().await;
+        assert!(servers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_close_all_empty() {
+        let client = McpClient::new();
+        let result = client.close_all().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_toggle_server_nonexistent() {
+        let client = McpClient::new();
+        let result = client.toggle_server("nonexistent").await;
+        // Should return error since server doesn't exist
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_server_nonexistent() {
+        let client = McpClient::new();
+        let result = client.reconnect_server("nonexistent").await;
+        // Should return error since server doesn't exist
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_is_server_enabled_nonexistent() {
+        let client = McpClient::new();
+        let enabled = client.is_server_enabled("nonexistent").await;
+        assert!(enabled.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_tools_from_server_nonexistent() {
+        let client = McpClient::new();
+        let result = client.list_tools_from_server("nonexistent").await;
+        assert!(result.is_err());
     }
 }
