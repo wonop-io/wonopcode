@@ -1625,6 +1625,43 @@ mod tests {
     }
 
     #[test]
+    fn test_strip_comments_escaped_quotes() {
+        // Test that escaped quotes in strings don't break comment detection
+        let input = r#"{"key": "value with \"escaped\" quote"}"#;
+        let result = strip_comments(input);
+        assert_eq!(result, input); // No change expected
+    }
+
+    #[test]
+    fn test_strip_comments_multiline_block() {
+        // Test multi-line block comment with newlines preserved
+        let input = "{\n/* comment\nspanning\nlines */\n\"key\": \"value\"\n}";
+        let result = strip_comments(input);
+        assert!(result.contains("\"key\""));
+        assert!(!result.contains("comment"));
+        assert!(!result.contains("spanning"));
+        // Newlines should be preserved
+        assert!(result.contains('\n'));
+    }
+
+    #[test]
+    fn test_strip_comments_no_comments() {
+        // Test input without any comments
+        let input = r#"{"key": "value"}"#;
+        let result = strip_comments(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_strip_comments_line_ending() {
+        // Test line comment at end of input (no newline)
+        let input = r#"{"key": "value"} // end comment"#;
+        let result = strip_comments(input);
+        assert!(result.contains("\"key\""));
+        assert!(!result.contains("end comment"));
+    }
+
+    #[test]
     fn test_parse_jsonc() {
         let input = r#"{
             // This is a comment
@@ -2281,6 +2318,469 @@ mod tests {
         assert_eq!(merged.mouse, Some(true)); // Preserved
         assert_eq!(merged.markdown, Some(false)); // Updated
         assert_eq!(merged.syntax_highlighting, Some(true)); // Preserved
+    }
+
+    #[test]
+    fn tui_config_merge_all_fields() {
+        // Test that all TuiConfig fields can be merged
+        let base = TuiConfig {
+            disabled: Some(false),
+            mouse: Some(true),
+            paste: Some(PasteMode::Bracketed),
+            markdown: Some(true),
+            syntax_highlighting: Some(true),
+            code_backgrounds: Some(false),
+            tables: Some(true),
+            streaming_fps: Some(30),
+            max_messages: Some(100),
+            low_memory_mode: Some(false),
+            enable_test_commands: Some(false),
+            test_model_enabled: Some(false),
+            test_emulate_thinking: Some(false),
+            test_emulate_tool_calls: Some(false),
+            test_emulate_tool_observed: Some(false),
+            test_emulate_streaming: Some(false),
+        };
+
+        // Update with new values for all fields
+        let update = TuiConfig {
+            disabled: Some(true),
+            mouse: Some(false),
+            paste: Some(PasteMode::Direct),
+            markdown: Some(false),
+            syntax_highlighting: Some(false),
+            code_backgrounds: Some(true),
+            tables: Some(false),
+            streaming_fps: Some(60),
+            max_messages: Some(200),
+            low_memory_mode: Some(true),
+            enable_test_commands: Some(true),
+            test_model_enabled: Some(true),
+            test_emulate_thinking: Some(true),
+            test_emulate_tool_calls: Some(true),
+            test_emulate_tool_observed: Some(true),
+            test_emulate_streaming: Some(true),
+        };
+
+        let merged = base.merge(update);
+
+        // All fields should be updated
+        assert_eq!(merged.disabled, Some(true));
+        assert_eq!(merged.mouse, Some(false));
+        assert_eq!(merged.paste, Some(PasteMode::Direct));
+        assert_eq!(merged.markdown, Some(false));
+        assert_eq!(merged.syntax_highlighting, Some(false));
+        assert_eq!(merged.code_backgrounds, Some(true));
+        assert_eq!(merged.tables, Some(false));
+        assert_eq!(merged.streaming_fps, Some(60));
+        assert_eq!(merged.max_messages, Some(200));
+        assert_eq!(merged.low_memory_mode, Some(true));
+        assert_eq!(merged.enable_test_commands, Some(true));
+        assert_eq!(merged.test_model_enabled, Some(true));
+        assert_eq!(merged.test_emulate_thinking, Some(true));
+        assert_eq!(merged.test_emulate_tool_calls, Some(true));
+        assert_eq!(merged.test_emulate_tool_observed, Some(true));
+        assert_eq!(merged.test_emulate_streaming, Some(true));
+    }
+
+    #[test]
+    fn tui_config_default() {
+        let config = TuiConfig::default();
+        assert!(config.disabled.is_none());
+        assert!(config.mouse.is_none());
+        assert!(config.paste.is_none());
+        assert!(config.markdown.is_none());
+        assert!(config.syntax_highlighting.is_none());
+        assert!(config.code_backgrounds.is_none());
+        assert!(config.tables.is_none());
+        assert!(config.streaming_fps.is_none());
+        assert!(config.max_messages.is_none());
+        assert!(config.low_memory_mode.is_none());
+        assert!(config.enable_test_commands.is_none());
+        assert!(config.test_model_enabled.is_none());
+        assert!(config.test_emulate_thinking.is_none());
+        assert!(config.test_emulate_tool_calls.is_none());
+        assert!(config.test_emulate_tool_observed.is_none());
+        assert!(config.test_emulate_streaming.is_none());
+    }
+
+    #[test]
+    fn paste_mode_serialization() {
+        let bracketed = PasteMode::Bracketed;
+        let json = serde_json::to_string(&bracketed).unwrap();
+        assert_eq!(json, r#""bracketed""#);
+
+        let direct = PasteMode::Direct;
+        let json = serde_json::to_string(&direct).unwrap();
+        assert_eq!(json, r#""direct""#);
+
+        let parsed: PasteMode = serde_json::from_str(r#""bracketed""#).unwrap();
+        assert_eq!(parsed, PasteMode::Bracketed);
+    }
+
+    #[test]
+    fn log_level_serialization() {
+        let debug = LogLevel::Debug;
+        let json = serde_json::to_string(&debug).unwrap();
+        assert_eq!(json, r#""debug""#);
+
+        let info = LogLevel::Info;
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#""info""#);
+
+        let warn = LogLevel::Warn;
+        let json = serde_json::to_string(&warn).unwrap();
+        assert_eq!(json, r#""warn""#);
+
+        let error = LogLevel::Error;
+        let json = serde_json::to_string(&error).unwrap();
+        assert_eq!(json, r#""error""#);
+
+        let parsed: LogLevel = serde_json::from_str(r#""debug""#).unwrap();
+        assert_eq!(parsed, LogLevel::Debug);
+    }
+
+    #[test]
+    fn share_mode_serialization() {
+        let manual = ShareMode::Manual;
+        let json = serde_json::to_string(&manual).unwrap();
+        assert_eq!(json, r#""manual""#);
+
+        let auto = ShareMode::Auto;
+        let json = serde_json::to_string(&auto).unwrap();
+        assert_eq!(json, r#""auto""#);
+
+        let disabled = ShareMode::Disabled;
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, r#""disabled""#);
+
+        let parsed: ShareMode = serde_json::from_str(r#""manual""#).unwrap();
+        assert_eq!(parsed, ShareMode::Manual);
+    }
+
+    #[test]
+    fn auto_update_serialization() {
+        let enabled = AutoUpdate::Bool(true);
+        let json = serde_json::to_string(&enabled).unwrap();
+        assert_eq!(json, "true");
+
+        let disabled = AutoUpdate::Bool(false);
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, "false");
+
+        let parsed: AutoUpdate = serde_json::from_str("true").unwrap();
+        assert_eq!(parsed, AutoUpdate::Bool(true));
+    }
+
+    #[test]
+    fn agent_mode_serialization() {
+        let subagent = AgentMode::Subagent;
+        let json = serde_json::to_string(&subagent).unwrap();
+        assert_eq!(json, r#""subagent""#);
+
+        let primary = AgentMode::Primary;
+        let json = serde_json::to_string(&primary).unwrap();
+        assert_eq!(json, r#""primary""#);
+
+        let all = AgentMode::All;
+        let json = serde_json::to_string(&all).unwrap();
+        assert_eq!(json, r#""all""#);
+
+        let parsed: AgentMode = serde_json::from_str(r#""subagent""#).unwrap();
+        assert_eq!(parsed, AgentMode::Subagent);
+    }
+
+    #[test]
+    fn timeout_config_serialization() {
+        let disabled = TimeoutConfig::Disabled(false);
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, "false");
+
+        let ms = TimeoutConfig::Milliseconds(5000);
+        let json = serde_json::to_string(&ms).unwrap();
+        assert_eq!(json, "5000");
+
+        let parsed: TimeoutConfig = serde_json::from_str("false").unwrap();
+        match parsed {
+            TimeoutConfig::Disabled(v) => assert!(!v),
+            _ => panic!("Expected Disabled"),
+        }
+
+        let parsed: TimeoutConfig = serde_json::from_str("5000").unwrap();
+        match parsed {
+            TimeoutConfig::Milliseconds(v) => assert_eq!(v, 5000),
+            _ => panic!("Expected Milliseconds"),
+        }
+    }
+
+    #[test]
+    fn auto_update_mode_serialization() {
+        let auto = AutoUpdateMode::Auto;
+        let json = serde_json::to_string(&auto).unwrap();
+        assert_eq!(json, r#""auto""#);
+
+        let notify = AutoUpdateMode::Notify;
+        let json = serde_json::to_string(&notify).unwrap();
+        assert_eq!(json, r#""notify""#);
+
+        let disabled = AutoUpdateMode::Disabled;
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, r#""disabled""#);
+
+        let parsed: AutoUpdateMode = serde_json::from_str(r#""auto""#).unwrap();
+        assert_eq!(parsed, AutoUpdateMode::Auto);
+
+        // Test default
+        let default = AutoUpdateMode::default();
+        assert_eq!(default, AutoUpdateMode::Notify);
+    }
+
+    #[test]
+    fn config_default() {
+        let config = Config::default();
+        assert!(config.schema.is_none());
+        assert!(config.theme.is_none());
+        assert!(config.log_level.is_none());
+        assert!(config.model.is_none());
+        assert!(config.small_model.is_none());
+        assert!(config.default_agent.is_none());
+        assert!(config.username.is_none());
+        assert!(config.snapshot.is_none());
+        assert!(config.share.is_none());
+        assert!(config.autoupdate.is_none());
+    }
+
+    #[test]
+    fn mcp_local_config_serialization() {
+        let config = McpLocalConfig {
+            command: vec!["npx".to_string(), "server".to_string()],
+            environment: Some([("KEY".to_string(), "value".to_string())].into()),
+            enabled: Some(true),
+            timeout: Some(5000),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("npx"));
+        assert!(json.contains("KEY"));
+
+        let parsed: McpLocalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.command, vec!["npx", "server"]);
+        assert_eq!(parsed.enabled, Some(true));
+        assert_eq!(parsed.timeout, Some(5000));
+    }
+
+    #[test]
+    fn mcp_remote_config_serialization() {
+        let config = McpRemoteConfig {
+            url: "https://example.com/mcp".to_string(),
+            enabled: Some(true),
+            headers: Some([("Auth".to_string(), "token".to_string())].into()),
+            oauth: None,
+            timeout: Some(10000),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("example.com"));
+
+        let parsed: McpRemoteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.url, "https://example.com/mcp");
+        assert_eq!(parsed.timeout, Some(10000));
+    }
+
+    #[test]
+    fn mcp_oauth_config_default() {
+        let oauth = McpOAuthConfig::default();
+        assert!(oauth.client_id.is_none());
+        assert!(oauth.client_secret.is_none());
+        assert!(oauth.scope.is_none());
+    }
+
+    #[test]
+    fn keybinds_config_default() {
+        let config = KeybindsConfig::default();
+        assert!(config.leader.is_none());
+        assert!(config.app_exit.is_none());
+        assert!(config.editor_open.is_none());
+        assert!(config.theme_list.is_none());
+        assert!(config.sidebar_toggle.is_none());
+        assert!(config.session_new.is_none());
+        assert!(config.session_list.is_none());
+        assert!(config.extra.is_empty());
+    }
+
+    #[test]
+    fn server_config_default() {
+        let config = ServerConfig::default();
+        assert!(config.disabled.is_none());
+        assert!(config.port.is_none());
+        assert!(config.api_key.is_none());
+    }
+
+    #[test]
+    fn agent_config_default() {
+        let config = AgentConfig::default();
+        assert!(config.model.is_none());
+        assert!(config.temperature.is_none());
+        assert!(config.top_p.is_none());
+        assert!(config.prompt.is_none());
+        assert!(config.tools.is_none());
+        assert!(config.disable.is_none());
+        assert!(config.description.is_none());
+        assert!(config.mode.is_none());
+        assert!(config.color.is_none());
+        assert!(config.max_steps.is_none());
+        assert!(config.permission.is_none());
+        assert!(config.sandbox.is_none());
+    }
+
+    #[test]
+    fn provider_config_default() {
+        let config = ProviderConfig::default();
+        assert!(config.api.is_none());
+        assert!(config.name.is_none());
+        assert!(config.env.is_none());
+        assert!(config.id.is_none());
+        assert!(config.whitelist.is_none());
+        assert!(config.blacklist.is_none());
+        assert!(config.models.is_none());
+        assert!(config.options.is_none());
+    }
+
+    #[test]
+    fn provider_options_default() {
+        let options = ProviderOptions::default();
+        assert!(options.api_key.is_none());
+        assert!(options.base_url.is_none());
+        assert!(options.timeout.is_none());
+        assert!(options.extra.is_empty());
+    }
+
+    #[test]
+    fn model_override_default() {
+        let override_ = ModelOverride::default();
+        assert!(override_.name.is_none());
+        assert!(override_.context_length.is_none());
+        assert!(override_.max_tokens.is_none());
+    }
+
+    #[test]
+    fn permission_config_default() {
+        let config = PermissionConfig::default();
+        assert!(config.edit.is_none());
+        assert!(config.bash.is_none());
+        assert!(config.webfetch.is_none());
+        assert!(config.external_directory.is_none());
+        assert!(config.allow_all_in_sandbox.is_none());
+    }
+
+    #[test]
+    fn compaction_config_default() {
+        let config = CompactionConfig::default();
+        assert!(config.auto.is_none());
+        assert!(config.prune.is_none());
+    }
+
+    #[test]
+    fn enterprise_config_default() {
+        let config = EnterpriseConfig::default();
+        assert!(config.url.is_none());
+    }
+
+    #[test]
+    fn experimental_config_default() {
+        let config = ExperimentalConfig::default();
+        assert!(config.flags.is_empty());
+    }
+
+    #[test]
+    fn sandbox_config_default() {
+        let config = SandboxConfig::default();
+        assert!(config.enabled.is_none());
+        assert!(config.runtime.is_none());
+        assert!(config.image.is_none());
+        assert!(config.resources.is_none());
+        assert!(config.network.is_none());
+        assert!(config.mounts.is_none());
+        assert!(config.bypass_tools.is_none());
+        assert!(config.keep_alive.is_none());
+    }
+
+    #[test]
+    fn sandbox_resources_config_default() {
+        let config = SandboxResourcesConfig::default();
+        assert!(config.memory.is_none());
+        assert!(config.cpus.is_none());
+        assert!(config.pids.is_none());
+    }
+
+    #[test]
+    fn sandbox_mounts_config_default() {
+        let config = SandboxMountsConfig::default();
+        assert!(config.workspace_writable.is_none());
+        assert!(config.persist_caches.is_none());
+        assert!(config.workspace_path.is_none());
+    }
+
+    #[test]
+    fn update_config_default() {
+        let config = UpdateConfig::default();
+        assert!(config.auto.is_none());
+        assert!(config.channel.is_none());
+        assert!(config.check_interval.is_none());
+    }
+
+    #[test]
+    fn agent_sandbox_config_default() {
+        let config = AgentSandboxConfig::default();
+        assert!(config.enabled.is_none());
+        assert!(config.workspace_writable.is_none());
+        assert!(config.network.is_none());
+        assert!(config.bypass_tools.is_none());
+        assert!(config.resources.is_none());
+    }
+
+    #[test]
+    fn agent_permission_config_default() {
+        let config = AgentPermissionConfig::default();
+        assert!(config.edit.is_none());
+        assert!(config.bash.is_none());
+        assert!(config.skill.is_none());
+        assert!(config.webfetch.is_none());
+        assert!(config.doom_loop.is_none());
+        assert!(config.external_directory.is_none());
+    }
+
+    #[test]
+    fn mcp_json_file_default() {
+        let file = McpJsonFile::default();
+        assert!(file.mcp_servers.is_none());
+        assert!(file.servers.is_none());
+        assert!(file.inputs.is_none());
+    }
+
+    #[test]
+    fn test_global_config_dir() {
+        // Just verify it doesn't panic
+        let dir = Config::global_config_dir();
+        if let Some(d) = dir {
+            assert!(!d.as_os_str().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_all_global_config_dirs() {
+        let dirs = Config::all_global_config_dirs();
+        // Should return at least one directory
+        assert!(!dirs.is_empty());
+    }
+
+    #[test]
+    fn test_data_dir() {
+        // Just verify it doesn't panic
+        let dir = Config::data_dir();
+        if let Some(d) = dir {
+            assert!(!d.as_os_str().is_empty());
+        }
     }
 
     // =========================================================================
