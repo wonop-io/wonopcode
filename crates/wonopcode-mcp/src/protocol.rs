@@ -345,4 +345,219 @@ mod tests {
             _ => panic!("Expected Text content"),
         }
     }
+
+    #[test]
+    fn test_json_rpc_request_is_notification() {
+        let req = JsonRpcRequest::new(1, "test", None);
+        assert!(!req.is_notification());
+
+        let notification = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            method: "notify".to_string(),
+            params: None,
+        };
+        assert!(notification.is_notification());
+    }
+
+    #[test]
+    fn test_json_rpc_notification() {
+        let notif = JsonRpcNotification::new("notify/update", Some(serde_json::json!({"data": "test"})));
+        assert_eq!(notif.jsonrpc, "2.0");
+        assert_eq!(notif.method, "notify/update");
+        assert!(notif.params.is_some());
+    }
+
+    #[test]
+    fn test_json_rpc_response_serialization() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: Some(serde_json::json!({"success": true})),
+            error: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"id\":1"));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn test_json_rpc_error_response() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32600,
+                message: "Invalid Request".to_string(),
+                data: None,
+            }),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"code\":-32600"));
+        assert!(json.contains("Invalid Request"));
+    }
+
+    #[test]
+    fn test_client_info_default() {
+        let info = ClientInfo::default();
+        assert_eq!(info.name, "wonopcode");
+        assert!(!info.version.is_empty());
+    }
+
+    #[test]
+    fn test_server_capabilities_default() {
+        let caps = ServerCapabilities::default();
+        assert!(caps.tools.is_none());
+        assert!(caps.resources.is_none());
+        assert!(caps.prompts.is_none());
+    }
+
+    #[test]
+    fn test_client_capabilities_default() {
+        let caps = ClientCapabilities::default();
+        assert!(caps.roots.is_none());
+        assert!(caps.sampling.is_none());
+    }
+
+    #[test]
+    fn test_mcp_tool_serialization() {
+        let tool = McpTool {
+            name: "read".to_string(),
+            description: Some("Read a file".to_string()),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                }
+            })),
+        };
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("\"name\":\"read\""));
+    }
+
+    #[test]
+    fn test_list_tools_result() {
+        let result = ListToolsResult {
+            tools: vec![
+                McpTool {
+                    name: "tool1".to_string(),
+                    description: None,
+                    input_schema: None,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"tools\""));
+    }
+
+    #[test]
+    fn test_call_tool_params() {
+        let params = CallToolParams {
+            name: "bash".to_string(),
+            arguments: Some(serde_json::json!({"command": "ls"})),
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        assert!(json.contains("\"name\":\"bash\""));
+    }
+
+    #[test]
+    fn test_tool_call_result() {
+        let result = ToolCallResult {
+            content: vec![ToolContent::Text { text: "output".to_string() }],
+            is_error: false,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"isError\":false"));
+    }
+
+    #[test]
+    fn test_tool_content_image() {
+        let content = ToolContent::Image {
+            data: "base64data".to_string(),
+            mime_type: "image/png".to_string(),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains("\"type\":\"image\""));
+        assert!(json.contains("\"mimeType\":\"image/png\""));
+    }
+
+    #[test]
+    fn test_tool_content_resource() {
+        let content = ToolContent::Resource {
+            resource: ResourceContent {
+                uri: "file:///test.txt".to_string(),
+                mime_type: Some("text/plain".to_string()),
+                text: Some("content".to_string()),
+                blob: None,
+            },
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains("\"type\":\"resource\""));
+        assert!(json.contains("file:///test.txt"));
+    }
+
+    #[test]
+    fn test_permission_request_params() {
+        let params = PermissionRequestParams {
+            request_id: "req_123".to_string(),
+            tool: "bash".to_string(),
+            action: "execute".to_string(),
+            description: "Run a shell command".to_string(),
+            path: Some("/tmp".to_string()),
+            details: Some(serde_json::json!({"command": "ls"})),
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        assert!(json.contains("\"requestId\":\"req_123\""));
+        assert!(json.contains("\"tool\":\"bash\""));
+    }
+
+    #[test]
+    fn test_permission_response_params() {
+        let params = PermissionResponseParams {
+            request_id: "req_123".to_string(),
+            allow: true,
+            remember: true,
+        };
+        let json = serde_json::to_string(&params).unwrap();
+        assert!(json.contains("\"requestId\":\"req_123\""));
+        assert!(json.contains("\"allow\":true"));
+        assert!(json.contains("\"remember\":true"));
+    }
+
+    #[test]
+    fn test_permission_response_result() {
+        let result = PermissionResponseResult {
+            success: true,
+            message: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn test_protocol_constants() {
+        assert_eq!(PROTOCOL_VERSION, "2024-11-05");
+        assert_eq!(METHOD_PERMISSION_REQUEST, "wonopcode/permissionRequest");
+        assert_eq!(METHOD_PERMISSION_RESPONSE, "wonopcode/permissionResponse");
+    }
+
+    #[test]
+    fn test_initialize_result() {
+        let result = InitializeResult {
+            protocol_version: PROTOCOL_VERSION.to_string(),
+            capabilities: ServerCapabilities {
+                tools: Some(ToolsCapability { list_changed: true }),
+                resources: None,
+                prompts: None,
+            },
+            server_info: ServerInfo {
+                name: "test-server".to_string(),
+                version: Some("1.0.0".to_string()),
+            },
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"protocolVersion\""));
+        assert!(json.contains("\"listChanged\":true"));
+    }
 }
