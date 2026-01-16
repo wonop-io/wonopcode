@@ -693,4 +693,396 @@ mod tests {
         let json = serde_json::to_string(&pending).unwrap();
         assert!(json.contains(r#""status":"pending""#));
     }
+
+    #[test]
+    fn test_message_methods() {
+        let user_msg = UserMessage::new(
+            "ses_123",
+            "agent",
+            ModelRef {
+                provider_id: "test".to_string(),
+                model_id: "model".to_string(),
+            },
+        );
+        let user = Message::User(user_msg.clone());
+
+        assert!(user.is_user());
+        assert!(!user.is_assistant());
+        assert_eq!(user.id(), user_msg.id);
+        assert_eq!(user.session_id(), "ses_123");
+        assert!(user.created_at() > 0);
+    }
+
+    #[test]
+    fn test_assistant_message_methods() {
+        let assistant_msg = AssistantMessage::new(
+            "ses_123",
+            "msg_parent",
+            "agent",
+            "anthropic",
+            "claude",
+            "/cwd",
+            "/root",
+        );
+        let assistant = Message::Assistant(assistant_msg.clone());
+
+        assert!(!assistant.is_user());
+        assert!(assistant.is_assistant());
+        assert_eq!(assistant.id(), assistant_msg.id);
+        assert_eq!(assistant.session_id(), "ses_123");
+        assert!(assistant.created_at() > 0);
+    }
+
+    #[test]
+    fn test_assistant_message_complete() {
+        let mut assistant = AssistantMessage::new(
+            "ses_123",
+            "msg_parent",
+            "agent",
+            "anthropic",
+            "claude",
+            "/cwd",
+            "/root",
+        );
+        assert!(assistant.time.completed.is_none());
+        assert!(assistant.finish.is_none());
+
+        assistant.complete(Some("end_turn".to_string()));
+
+        assert!(assistant.time.completed.is_some());
+        assert_eq!(assistant.finish, Some("end_turn".to_string()));
+    }
+
+    #[test]
+    fn test_message_time() {
+        let time = MessageTime::now();
+        assert!(time.created > 0);
+    }
+
+    #[test]
+    fn test_assistant_time() {
+        let time = AssistantTime::started();
+        assert!(time.created > 0);
+        assert!(time.completed.is_none());
+    }
+
+    #[test]
+    fn test_part_time() {
+        let mut time = PartTime::started();
+        assert!(time.start > 0);
+        assert!(time.end.is_none());
+
+        time.finish();
+        assert!(time.end.is_some());
+        assert!(time.end.unwrap() >= time.start);
+    }
+
+    #[test]
+    fn test_tool_time() {
+        let time = ToolTime::started();
+        assert!(time.start > 0);
+        assert!(time.end.is_none());
+        assert!(time.compacted.is_none());
+    }
+
+    #[test]
+    fn test_part_base() {
+        let base = PartBase::new("ses_123", "msg_456");
+        assert!(!base.id.is_empty());
+        assert_eq!(base.session_id, "ses_123");
+        assert_eq!(base.message_id, "msg_456");
+    }
+
+    #[test]
+    fn test_reasoning_part() {
+        let part = ReasoningPart::new("ses_123", "msg_456", "thinking...");
+        assert!(!part.id.is_empty());
+        assert_eq!(part.session_id, "ses_123");
+        assert_eq!(part.message_id, "msg_456");
+        assert_eq!(part.text, "thinking...");
+        assert!(part.time.is_some());
+    }
+
+    #[test]
+    fn test_tool_part() {
+        let part = ToolPart::new(
+            "ses_123",
+            "msg_456",
+            "call_789",
+            "Read",
+            serde_json::json!({"filePath": "/test.txt"}),
+            r#"{"filePath": "/test.txt"}"#,
+        );
+        assert!(!part.id.is_empty());
+        assert_eq!(part.session_id, "ses_123");
+        assert_eq!(part.message_id, "msg_456");
+        assert_eq!(part.call_id, "call_789");
+        assert_eq!(part.tool, "Read");
+        assert!(matches!(part.state, ToolState::Pending { .. }));
+    }
+
+    #[test]
+    fn test_message_part_accessors() {
+        // Test Text
+        let text_part = MessagePart::Text(TextPart::new("ses_1", "msg_1", "hello"));
+        assert!(!text_part.id().is_empty());
+        assert_eq!(text_part.message_id(), "msg_1");
+        assert_eq!(text_part.session_id(), "ses_1");
+
+        // Test Reasoning
+        let reasoning = MessagePart::Reasoning(ReasoningPart::new("ses_2", "msg_2", "think"));
+        assert!(!reasoning.id().is_empty());
+        assert_eq!(reasoning.message_id(), "msg_2");
+        assert_eq!(reasoning.session_id(), "ses_2");
+
+        // Test Tool
+        let tool = MessagePart::Tool(ToolPart::new(
+            "ses_3",
+            "msg_3",
+            "call_1",
+            "Bash",
+            serde_json::json!({}),
+            "{}",
+        ));
+        assert!(!tool.id().is_empty());
+        assert_eq!(tool.message_id(), "msg_3");
+        assert_eq!(tool.session_id(), "ses_3");
+    }
+
+    #[test]
+    fn test_file_part() {
+        let part = MessagePart::File(FilePart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            path: "/path/to/file.txt".to_string(),
+            mime: "text/plain".to_string(),
+            url: Some("file:///path/to/file.txt".to_string()),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.message_id(), "msg_1");
+        assert_eq!(part.session_id(), "ses_1");
+    }
+
+    #[test]
+    fn test_step_parts() {
+        let start = MessagePart::StepStart(StepStartPart {
+            id: "part_start".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+        });
+        assert_eq!(start.id(), "part_start");
+        assert_eq!(start.session_id(), "ses_1");
+
+        let finish = MessagePart::StepFinish(StepFinishPart {
+            id: "part_finish".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            reason: "end_turn".to_string(),
+            snapshot: None,
+            cost: 0.01,
+            tokens: TokenUsage::default(),
+        });
+        assert_eq!(finish.id(), "part_finish");
+        assert_eq!(finish.message_id(), "msg_1");
+    }
+
+    #[test]
+    fn test_snapshot_part() {
+        let part = MessagePart::Snapshot(SnapshotPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            snapshot: "snap_123".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.session_id(), "ses_1");
+    }
+
+    #[test]
+    fn test_patch_part() {
+        let part = MessagePart::Patch(PatchPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            patch: "+line\n-line".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.message_id(), "msg_1");
+    }
+
+    #[test]
+    fn test_subtask_part() {
+        let part = MessagePart::Subtask(SubtaskPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            subtask_session_id: "sub_ses_1".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.session_id(), "ses_1");
+    }
+
+    #[test]
+    fn test_agent_part() {
+        let part = MessagePart::Agent(AgentPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            agent: "explorer".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.session_id(), "ses_1");
+    }
+
+    #[test]
+    fn test_retry_part() {
+        let part = MessagePart::Retry(RetryPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            reason: "rate_limit".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.message_id(), "msg_1");
+    }
+
+    #[test]
+    fn test_compaction_part() {
+        let part = MessagePart::Compaction(CompactionPart {
+            id: "part_1".to_string(),
+            session_id: "ses_1".to_string(),
+            message_id: "msg_1".to_string(),
+            original_message_id: "msg_original".to_string(),
+        });
+        assert_eq!(part.id(), "part_1");
+        assert_eq!(part.session_id(), "ses_1");
+    }
+
+    #[test]
+    fn test_token_usage_default() {
+        let usage = TokenUsage::default();
+        assert_eq!(usage.input, 0);
+        assert_eq!(usage.output, 0);
+        assert_eq!(usage.reasoning, 0);
+        assert_eq!(usage.cache.read, 0);
+        assert_eq!(usage.cache.write, 0);
+    }
+
+    #[test]
+    fn test_user_summary() {
+        let summary = UserSummary {
+            title: Some("Test title".to_string()),
+            body: Some("Test body".to_string()),
+            diffs: vec![FileDiff {
+                file: "test.txt".to_string(),
+                before: "old".to_string(),
+                after: "new".to_string(),
+                additions: 1,
+                deletions: 1,
+            }],
+        };
+        assert_eq!(summary.title, Some("Test title".to_string()));
+        assert_eq!(summary.diffs.len(), 1);
+    }
+
+    #[test]
+    fn test_model_ref() {
+        let model = ModelRef {
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-3-5-sonnet".to_string(),
+        };
+        let json = serde_json::to_string(&model).unwrap();
+        let parsed: ModelRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.provider_id, "anthropic");
+        assert_eq!(parsed.model_id, "claude-3-5-sonnet");
+    }
+
+    #[test]
+    fn test_path_context() {
+        let ctx = PathContext {
+            cwd: "/home/user/project".to_string(),
+            root: "/home/user/project".to_string(),
+        };
+        let json = serde_json::to_string(&ctx).unwrap();
+        let parsed: PathContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cwd, "/home/user/project");
+    }
+
+    #[test]
+    fn test_message_error_variants() {
+        let errors = vec![
+            MessageError::Auth {
+                message: "Invalid API key".to_string(),
+            },
+            MessageError::Unknown {
+                message: "Unknown error".to_string(),
+            },
+            MessageError::OutputLength {
+                message: "Output too long".to_string(),
+            },
+            MessageError::Aborted,
+            MessageError::Api {
+                status: 500,
+                message: "Server error".to_string(),
+            },
+        ];
+
+        for err in errors {
+            let json = serde_json::to_string(&err).unwrap();
+            let _parsed: MessageError = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_tool_state_variants() {
+        let running = ToolState::Running {
+            input: serde_json::json!({}),
+            title: Some("Running tool".to_string()),
+            metadata: None,
+            time: ToolTime::started(),
+        };
+        let json = serde_json::to_string(&running).unwrap();
+        assert!(json.contains(r#""status":"running""#));
+
+        let completed = ToolState::Completed {
+            input: serde_json::json!({}),
+            output: "result".to_string(),
+            title: "Done".to_string(),
+            metadata: serde_json::json!({}),
+            time: ToolTime::started(),
+            attachments: None,
+        };
+        let json = serde_json::to_string(&completed).unwrap();
+        assert!(json.contains(r#""status":"completed""#));
+
+        let error = ToolState::Error {
+            input: serde_json::json!({}),
+            error: "failed".to_string(),
+            metadata: None,
+            time: ToolTime::started(),
+        };
+        let json = serde_json::to_string(&error).unwrap();
+        assert!(json.contains(r#""status":"error""#));
+    }
+
+    #[test]
+    fn test_assistant_message_serialization() {
+        let assistant = AssistantMessage::new(
+            "ses_123",
+            "msg_parent",
+            "default",
+            "anthropic",
+            "claude-3-5-sonnet",
+            "/cwd",
+            "/root",
+        );
+
+        let msg = Message::Assistant(assistant);
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""role":"assistant""#));
+
+        let parsed: Message = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_assistant());
+    }
 }

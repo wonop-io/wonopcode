@@ -377,4 +377,244 @@ mod tests {
         assert_eq!(HookEvent::parse("file_edited"), Some(HookEvent::FileEdited));
         assert_eq!(HookEvent::parse("unknown"), None);
     }
+
+    #[test]
+    fn test_hook_new() {
+        let hook = Hook::new(vec!["echo".to_string(), "hello".to_string()]);
+        assert_eq!(hook.command, vec!["echo", "hello"]);
+        assert!(hook.environment.is_empty());
+    }
+
+    #[test]
+    fn test_hook_with_env() {
+        let mut env = HashMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+
+        let hook = Hook::new(vec!["test".to_string()]).with_env(env);
+        assert_eq!(hook.environment.get("FOO"), Some(&"bar".to_string()));
+    }
+
+    #[test]
+    fn test_hook_serialization() {
+        let hook = Hook::new(vec!["echo".to_string(), "$FILE".to_string()]);
+        let json = serde_json::to_string(&hook).unwrap();
+        let parsed: Hook = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.command, hook.command);
+    }
+
+    #[test]
+    fn test_hook_context_default() {
+        let context = HookContext::default();
+        assert!(context.env.is_empty());
+        assert!(context.cwd.is_none());
+    }
+
+    #[test]
+    fn test_hook_context_with_cwd() {
+        let context = HookContext::new().with_cwd("/tmp/test");
+        assert_eq!(context.cwd, Some(std::path::PathBuf::from("/tmp/test")));
+    }
+
+    #[tokio::test]
+    async fn test_hook_execute_empty_command() {
+        let hook = Hook::new(vec![]);
+        let context = HookContext::new();
+        let result = hook.execute(&context).await;
+        assert!(matches!(result, Err(HookError::InvalidCommand(_))));
+    }
+
+    #[tokio::test]
+    async fn test_hook_execute_success() {
+        let hook = Hook::new(vec!["echo".to_string(), "hello".to_string()]);
+        let context = HookContext::new();
+        let result = hook.execute(&context).await.unwrap();
+        assert!(result.success);
+        assert!(result.stdout.contains("hello"));
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_hook_execute_with_variable_substitution() {
+        let hook = Hook::new(vec!["echo".to_string(), "$MSG".to_string()]);
+        let context = HookContext::new().with_env("MSG", "test_message");
+        let result = hook.execute(&context).await.unwrap();
+        assert!(result.success);
+        assert!(result.stdout.contains("test_message"));
+    }
+
+    #[tokio::test]
+    async fn test_hook_execute_with_cwd() {
+        let hook = Hook::new(vec!["pwd".to_string()]);
+        let context = HookContext::new().with_cwd("/tmp");
+        let result = hook.execute(&context).await.unwrap();
+        assert!(result.success);
+        // On macOS /tmp is a symlink to /private/tmp
+        assert!(result.stdout.contains("tmp"));
+    }
+
+    #[tokio::test]
+    async fn test_hook_execute_failure() {
+        let hook = Hook::new(vec!["false".to_string()]);
+        let context = HookContext::new();
+        let result = hook.execute(&context).await;
+        assert!(matches!(result, Err(HookError::ExecutionFailed(_))));
+    }
+
+    #[test]
+    fn test_hook_registry_new() {
+        let registry = HookRegistry::new();
+        assert!(!registry.has_hooks(HookEvent::FileEdited));
+        assert_eq!(registry.count(HookEvent::FileEdited), 0);
+    }
+
+    #[test]
+    fn test_hook_registry_register() {
+        let mut registry = HookRegistry::new();
+        registry.register(HookEvent::FileEdited, Hook::new(vec!["test".to_string()]));
+
+        assert!(registry.has_hooks(HookEvent::FileEdited));
+        assert_eq!(registry.count(HookEvent::FileEdited), 1);
+        assert!(!registry.has_hooks(HookEvent::SessionCompleted));
+    }
+
+    #[test]
+    fn test_hook_registry_register_multiple() {
+        let mut registry = HookRegistry::new();
+        registry.register(HookEvent::FileEdited, Hook::new(vec!["cmd1".to_string()]));
+        registry.register(HookEvent::FileEdited, Hook::new(vec!["cmd2".to_string()]));
+
+        assert_eq!(registry.count(HookEvent::FileEdited), 2);
+    }
+
+    #[test]
+    fn test_hook_registry_register_file_hook() {
+        let mut registry = HookRegistry::new();
+        registry.register_file_hook("*.rs", Hook::new(vec!["rustfmt".to_string()]));
+
+        assert!(registry.file_hooks.contains_key("*.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_hook_registry_trigger() {
+        let mut registry = HookRegistry::new();
+        registry.register(
+            HookEvent::FileEdited,
+            Hook::new(vec!["echo".to_string(), "triggered".to_string()]),
+        );
+
+        let context = HookContext::new();
+        registry.trigger(HookEvent::FileEdited, &context).await;
+        // Just verifying it doesn't panic
+    }
+
+    #[tokio::test]
+    async fn test_hook_registry_trigger_file_edited() {
+        let mut registry = HookRegistry::new();
+        registry.register(
+            HookEvent::FileEdited,
+            Hook::new(vec!["echo".to_string(), "generic".to_string()]),
+        );
+        registry.register_file_hook(
+            "*.rs",
+            Hook::new(vec!["echo".to_string(), "rust file".to_string()]),
+        );
+
+        let context = HookContext::new().with_env("FILE", "/test/main.rs");
+        registry
+            .trigger_file_edited(Path::new("/test/main.rs"), &context)
+            .await;
+        // Just verifying it doesn't panic
+    }
+
+    #[tokio::test]
+    async fn test_hook_registry_trigger_file_edited_exact_match() {
+        let mut registry = HookRegistry::new();
+        registry.register_file_hook(
+            "Cargo.toml",
+            Hook::new(vec!["echo".to_string(), "cargo file".to_string()]),
+        );
+
+        let context = HookContext::new();
+        registry
+            .trigger_file_edited(Path::new("/project/Cargo.toml"), &context)
+            .await;
+    }
+
+    #[test]
+    fn test_hook_error_display() {
+        let invalid_cmd = HookError::InvalidCommand("empty".to_string());
+        assert!(invalid_cmd.to_string().contains("Invalid command"));
+
+        let exec_failed = HookError::ExecutionFailed("process failed".to_string());
+        assert!(exec_failed.to_string().contains("Execution failed"));
+    }
+
+    #[test]
+    fn test_hook_event_all_variants() {
+        assert_eq!(HookEvent::FileEdited.as_str(), "file_edited");
+        assert_eq!(HookEvent::SessionCompleted.as_str(), "session_completed");
+        assert_eq!(HookEvent::MessageSent.as_str(), "message_sent");
+        assert_eq!(HookEvent::ToolExecuted.as_str(), "tool_executed");
+
+        assert_eq!(HookEvent::parse("file_edited"), Some(HookEvent::FileEdited));
+        assert_eq!(
+            HookEvent::parse("session_completed"),
+            Some(HookEvent::SessionCompleted)
+        );
+        assert_eq!(
+            HookEvent::parse("message_sent"),
+            Some(HookEvent::MessageSent)
+        );
+        assert_eq!(
+            HookEvent::parse("tool_executed"),
+            Some(HookEvent::ToolExecuted)
+        );
+        assert_eq!(HookEvent::parse("invalid"), None);
+    }
+
+    #[test]
+    fn test_hook_event_equality() {
+        assert_eq!(HookEvent::FileEdited, HookEvent::FileEdited);
+        assert_ne!(HookEvent::FileEdited, HookEvent::SessionCompleted);
+    }
+
+    #[test]
+    fn test_glob_match_edge_cases() {
+        // Multiple wildcards
+        assert!(glob_match("a*b*c", "aXXbYYc"));
+        assert!(!glob_match("a*b*c", "aXXc"));
+
+        // Pattern at start
+        assert!(glob_match("hello*", "hello world"));
+        assert!(!glob_match("hello*", "world hello"));
+
+        // Pattern at end
+        assert!(glob_match("*.txt", "file.txt"));
+        assert!(!glob_match("*.txt", "file.rs"));
+    }
+
+    #[test]
+    fn test_substitute_variables_no_variables() {
+        let context = HookContext::new();
+        assert_eq!(
+            substitute_variables("no variables here", &context),
+            "no variables here"
+        );
+    }
+
+    #[test]
+    fn test_substitute_variables_multiple() {
+        let context = HookContext::new()
+            .with_env("A", "1")
+            .with_env("B", "2");
+
+        assert_eq!(
+            substitute_variables("$A and $B", &context),
+            "1 and 2"
+        );
+        assert_eq!(
+            substitute_variables("${A}${B}", &context),
+            "12"
+        );
+    }
 }

@@ -619,6 +619,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_decision_default() {
+        let decision = Decision::default();
+        assert_eq!(decision, Decision::Ask);
+    }
+
+    #[test]
+    fn test_decision_serialization() {
+        let allow = Decision::Allow;
+        let json = serde_json::to_string(&allow).unwrap();
+        assert_eq!(json, r#""allow""#);
+
+        let deny = Decision::Deny;
+        let json = serde_json::to_string(&deny).unwrap();
+        assert_eq!(json, r#""deny""#);
+
+        let ask = Decision::Ask;
+        let json = serde_json::to_string(&ask).unwrap();
+        assert_eq!(json, r#""ask""#);
+
+        let parsed: Decision = serde_json::from_str(r#""allow""#).unwrap();
+        assert_eq!(parsed, Decision::Allow);
+    }
+
+    #[test]
+    fn test_permission_rule_constructors() {
+        let allow = PermissionRule::allow("bash");
+        assert_eq!(allow.tool, "bash");
+        assert_eq!(allow.decision, Decision::Allow);
+        assert!(allow.action.is_none());
+        assert!(allow.path.is_none());
+
+        let deny = PermissionRule::deny("rm");
+        assert_eq!(deny.tool, "rm");
+        assert_eq!(deny.decision, Decision::Deny);
+
+        let ask = PermissionRule::ask("edit");
+        assert_eq!(ask.tool, "edit");
+        assert_eq!(ask.decision, Decision::Ask);
+
+        let with_decision = PermissionRule::with_decision("write", Decision::Allow);
+        assert_eq!(with_decision.tool, "write");
+        assert_eq!(with_decision.decision, Decision::Allow);
+    }
+
+    #[test]
+    fn test_permission_rule_with_path() {
+        let rule = PermissionRule::allow("edit").with_path("/project/*");
+        assert_eq!(rule.path, Some("/project/*".to_string()));
+    }
+
+    #[test]
     fn test_permission_rule_matches() {
         let rule = PermissionRule::allow("bash");
         assert!(rule.matches("bash", None, None));
@@ -631,6 +682,149 @@ mod tests {
         let rule = PermissionRule::allow("write").with_path("src/*");
         assert!(rule.matches("write", None, Some("src/main.rs")));
         assert!(!rule.matches("write", None, Some("tests/test.rs")));
+    }
+
+    #[test]
+    fn test_permission_rule_matches_with_action() {
+        let mut rule = PermissionRule::allow("bash");
+        rule.action = Some("ls*".to_string());
+
+        // Matches when action matches pattern
+        assert!(rule.matches("bash", Some("ls -la"), None));
+        // Doesn't match when action doesn't match pattern
+        assert!(!rule.matches("bash", Some("rm -rf"), None));
+        // Doesn't match when action is None but rule expects action
+        assert!(!rule.matches("bash", None, None));
+    }
+
+    #[test]
+    fn test_permission_rule_matches_with_path_pattern() {
+        let rule = PermissionRule::allow("edit").with_path("/project/src/*");
+
+        // Matches when path matches pattern
+        assert!(rule.matches("edit", None, Some("/project/src/main.rs")));
+        // Doesn't match when path doesn't match pattern
+        assert!(!rule.matches("edit", None, Some("/project/tests/test.rs")));
+        // Doesn't match when path is None but rule expects path
+        assert!(!rule.matches("edit", None, None));
+    }
+
+    #[test]
+    fn test_permission_rule_serialization() {
+        let rule = PermissionRule::allow("bash").with_path("src/*");
+        let json = serde_json::to_string(&rule).unwrap();
+        let parsed: PermissionRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.tool, "bash");
+        assert_eq!(parsed.path, Some("src/*".to_string()));
+        assert_eq!(parsed.decision, Decision::Allow);
+    }
+
+    #[test]
+    fn test_permission_check() {
+        let check = PermissionCheck {
+            id: "req_123".to_string(),
+            tool: "bash".to_string(),
+            action: "ls".to_string(),
+            description: "List files".to_string(),
+            path: Some("/tmp".to_string()),
+            details: serde_json::json!({"command": "ls -la"}),
+        };
+        assert_eq!(check.id, "req_123");
+        assert_eq!(check.tool, "bash");
+        assert_eq!(check.path, Some("/tmp".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_new() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+        assert!(!manager.is_sandbox_running());
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_sandbox_state() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        assert!(!manager.is_sandbox_running());
+        manager.set_sandbox_running(true);
+        assert!(manager.is_sandbox_running());
+        manager.set_sandbox_running(false);
+        assert!(!manager.is_sandbox_running());
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_sandbox_runtime() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Initially none
+        assert!(manager.sandbox_runtime_any().await.is_none());
+
+        // Set a runtime (using a simple Arc<String> for testing)
+        let runtime: std::sync::Arc<dyn std::any::Any + Send + Sync> =
+            std::sync::Arc::new("test_runtime".to_string());
+        manager.set_sandbox_runtime_any(Some(runtime)).await;
+
+        let retrieved = manager.sandbox_runtime_any().await;
+        assert!(retrieved.is_some());
+
+        // Clear it
+        manager.set_sandbox_runtime_any(None).await;
+        assert!(manager.sandbox_runtime_any().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_add_rule() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager.add_rule(PermissionRule::allow("read")).await;
+
+        let rules = manager.rules.read().await;
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].tool, "read");
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_add_session_rule() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager
+            .add_session_rule("session_1", PermissionRule::allow("bash"))
+            .await;
+
+        let session_rules = manager.session_rules.read().await;
+        assert!(session_rules.contains_key("session_1"));
+        assert_eq!(session_rules.get("session_1").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_clear_session_rules() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager
+            .add_session_rule("session_1", PermissionRule::allow("bash"))
+            .await;
+        manager.clear_session_rules("session_1").await;
+
+        let session_rules = manager.session_rules.read().await;
+        assert!(!session_rules.contains_key("session_1"));
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_clear_rules() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager.add_rule(PermissionRule::allow("read")).await;
+        manager.add_rule(PermissionRule::allow("write")).await;
+        manager.clear_rules().await;
+
+        let rules = manager.rules.read().await;
+        assert!(rules.is_empty());
     }
 
     #[tokio::test]
@@ -653,6 +847,110 @@ mod tests {
 
         // This would normally need a responder, but with the allow rule it should pass
         // We can't easily test the full flow without mocking
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_check_rules_only_allow() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager.add_rule(PermissionRule::allow("read")).await;
+
+        let allowed = manager
+            .check_rules_only("session_1", "read", Some("read"), None)
+            .await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_check_rules_only_deny() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager.add_rule(PermissionRule::deny("bash")).await;
+
+        let allowed = manager
+            .check_rules_only("session_1", "bash", Some("exec"), None)
+            .await;
+        assert!(!allowed);
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_check_rules_only_no_match() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // No rules match "unknown_tool"
+        let allowed = manager
+            .check_rules_only("session_1", "unknown_tool", None, None)
+            .await;
+        assert!(!allowed); // Default is deny in non-interactive mode
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_check_rules_only_session_precedence() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Global rule denies
+        manager.add_rule(PermissionRule::deny("bash")).await;
+        // Session rule allows
+        manager
+            .add_session_rule("session_1", PermissionRule::allow("bash"))
+            .await;
+
+        // Session rule should take precedence
+        let allowed = manager
+            .check_rules_only("session_1", "bash", None, None)
+            .await;
+        assert!(allowed);
+
+        // Different session uses global rule
+        let allowed = manager
+            .check_rules_only("session_2", "bash", None, None)
+            .await;
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn test_default_rules() {
+        let rules = PermissionManager::default_rules();
+        assert!(!rules.is_empty());
+
+        // Check some expected default rules
+        assert!(rules.iter().any(|r| r.tool == "read"));
+        assert!(rules.iter().any(|r| r.tool == "glob"));
+        assert!(rules.iter().any(|r| r.tool == "grep"));
+
+        // All default rules should be Allow
+        assert!(rules.iter().all(|r| r.decision == Decision::Allow));
+    }
+
+    #[test]
+    fn test_sandbox_allow_all_rules() {
+        let rules = PermissionManager::sandbox_allow_all_rules();
+        assert!(!rules.is_empty());
+
+        // Check some expected sandbox rules
+        assert!(rules.iter().any(|r| r.tool == "write"));
+        assert!(rules.iter().any(|r| r.tool == "edit"));
+        assert!(rules.iter().any(|r| r.tool == "bash"));
+
+        // All sandbox rules should be Allow
+        assert!(rules.iter().all(|r| r.decision == Decision::Allow));
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_apply_sandbox_rules() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager.apply_sandbox_rules().await;
+
+        let rules = manager.rules.read().await;
+        // Should have sandbox allow rules
+        assert!(rules.iter().any(|r| r.tool == "write"));
+        assert!(rules.iter().any(|r| r.tool == "bash"));
     }
 
     #[test]
@@ -726,6 +1024,24 @@ mod tests {
         assert!(rules.iter().any(|r| r.action == Some("rm*".to_string())));
     }
 
+    #[test]
+    fn test_rules_from_config_external_directory() {
+        use crate::config::{Permission, PermissionConfig};
+
+        let config = PermissionConfig {
+            edit: None,
+            bash: None,
+            webfetch: None,
+            external_directory: Some(Permission::Ask),
+            allow_all_in_sandbox: None,
+        };
+
+        let rules = PermissionManager::rules_from_config(&config);
+        assert_eq!(rules.len(), 3); // read, edit, write with "external" action
+        assert!(rules.iter().all(|r| r.decision == Decision::Ask));
+        assert!(rules.iter().all(|r| r.action == Some("external".to_string())));
+    }
+
     #[tokio::test]
     async fn test_config_rules_take_precedence() {
         let bus = Bus::new();
@@ -742,5 +1058,32 @@ mod tests {
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].decision, Decision::Allow); // Default rule
         assert_eq!(rules[1].decision, Decision::Ask); // Config rule (takes precedence when checked in reverse)
+    }
+
+    #[tokio::test]
+    async fn test_permission_manager_reload_from_config() {
+        use crate::config::{Permission, PermissionConfig};
+
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Add some initial rules
+        manager.add_rule(PermissionRule::deny("everything")).await;
+
+        let config = PermissionConfig {
+            edit: Some(Permission::Allow),
+            bash: None,
+            webfetch: None,
+            external_directory: None,
+            allow_all_in_sandbox: None,
+        };
+
+        manager.reload_from_config(&config).await;
+
+        let rules = manager.rules.read().await;
+        // Should have default rules + config rules, but not the old "everything" deny rule
+        assert!(!rules.iter().any(|r| r.tool == "everything"));
+        assert!(rules.iter().any(|r| r.tool == "read")); // From default rules
+        assert!(rules.iter().any(|r| r.tool == "edit" && r.decision == Decision::Allow));
     }
 }

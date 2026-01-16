@@ -218,4 +218,114 @@ mod tests {
         assert_eq!(parsed.id, "abc123");
         assert_eq!(parsed.vcs, Some(Vcs::Git));
     }
+
+    #[test]
+    fn test_project_serialization_minimal() {
+        let project = Project {
+            id: "test".to_string(),
+            worktree: PathBuf::from("/tmp"),
+            vcs: None,
+            name: None,
+            icon: None,
+            time: ProjectTime {
+                created: 0,
+                updated: 0,
+                initialized: None,
+            },
+        };
+
+        let json = serde_json::to_string(&project).unwrap();
+        assert!(!json.contains("vcs")); // Optional fields should be skipped when None
+        assert!(!json.contains("name"));
+        assert!(!json.contains("icon"));
+    }
+
+    #[test]
+    fn test_project_with_icon() {
+        let project = Project {
+            id: "test".to_string(),
+            worktree: PathBuf::from("/tmp"),
+            vcs: Some(Vcs::Git),
+            name: Some("Test".to_string()),
+            icon: Some(ProjectIcon {
+                url: Some("https://example.com/icon.png".to_string()),
+                color: Some("#FF0000".to_string()),
+            }),
+            time: ProjectTime {
+                created: 100,
+                updated: 200,
+                initialized: Some(150),
+            },
+        };
+
+        let json = serde_json::to_string(&project).unwrap();
+        let parsed: Project = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.icon.as_ref().unwrap().url.as_deref(), Some("https://example.com/icon.png"));
+        assert_eq!(parsed.icon.as_ref().unwrap().color.as_deref(), Some("#FF0000"));
+        assert_eq!(parsed.time.initialized, Some(150));
+    }
+
+    #[test]
+    fn test_project_icon_default() {
+        let icon = ProjectIcon::default();
+        assert!(icon.url.is_none());
+        assert!(icon.color.is_none());
+    }
+
+    #[test]
+    fn test_vcs_serialization() {
+        let vcs = Vcs::Git;
+        let json = serde_json::to_string(&vcs).unwrap();
+        assert_eq!(json, "\"git\"");
+
+        let parsed: Vcs = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, Vcs::Git);
+    }
+
+    #[test]
+    fn test_project_time_serialization() {
+        let time = ProjectTime {
+            created: 1000,
+            updated: 2000,
+            initialized: Some(1500),
+        };
+
+        let json = serde_json::to_string(&time).unwrap();
+        let parsed: ProjectTime = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.created, 1000);
+        assert_eq!(parsed.updated, 2000);
+        assert_eq!(parsed.initialized, Some(1500));
+    }
+
+    #[test]
+    fn test_project_touch() {
+        let mut project = Project {
+            id: "test".to_string(),
+            worktree: PathBuf::from("/tmp"),
+            vcs: None,
+            name: None,
+            icon: None,
+            time: ProjectTime {
+                created: 1000,
+                updated: 1000,
+                initialized: None,
+            },
+        };
+
+        let original_updated = project.time.updated;
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        project.touch();
+        assert!(project.time.updated > original_updated);
+    }
+
+    #[tokio::test]
+    async fn test_from_directory_non_git() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let project = Project::from_directory(dir.path()).await.unwrap();
+        assert_eq!(project.id, "global");
+        assert!(project.vcs.is_none());
+    }
 }

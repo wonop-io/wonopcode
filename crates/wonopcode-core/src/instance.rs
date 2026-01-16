@@ -280,6 +280,11 @@ impl Default for InstanceRegistry {
 mod tests {
     use super::*;
 
+    // Note: Most Instance tests require a full storage infrastructure to be set up.
+    // The test_instance_registry test works because it uses the default Config::data_dir()
+    // which creates storage in a consistent location. For unit tests that need to test
+    // Instance methods in isolation, we'd need to mock the storage layer.
+
     #[tokio::test]
     async fn test_instance_registry() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -296,6 +301,34 @@ mod tests {
         assert_eq!(instance1.directory(), instance2.directory());
 
         // Dispose
+        registry.dispose_all().await;
+    }
+
+    #[test]
+    fn test_instance_registry_new() {
+        let registry = InstanceRegistry::new();
+        // Just verify creation doesn't panic
+        let _ = registry;
+    }
+
+    #[test]
+    fn test_instance_registry_default() {
+        let registry = InstanceRegistry::default();
+        // Just verify default creation doesn't panic
+        let _ = registry;
+    }
+
+    #[tokio::test]
+    async fn test_instance_registry_dispose_nonexistent() {
+        let registry = InstanceRegistry::new();
+        // Disposing a non-existent path should not panic
+        registry.dispose("/nonexistent/path").await;
+    }
+
+    #[tokio::test]
+    async fn test_instance_registry_dispose_all_empty() {
+        let registry = InstanceRegistry::new();
+        // Disposing all when empty should not panic
         registry.dispose_all().await;
     }
 }
