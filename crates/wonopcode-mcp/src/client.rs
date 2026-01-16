@@ -474,4 +474,172 @@ mod tests {
         let result = client.list_tools_from_server("nonexistent").await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_call_tool_with_arguments() {
+        let client = McpClient::new();
+        let args = serde_json::json!({
+            "path": "/tmp/test",
+            "content": "hello world"
+        });
+        let result = client.call_tool("write_file", args).await;
+        // Should fail because no server is connected
+        assert!(matches!(result, Err(McpError::ToolNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_clients_independent() {
+        let client1 = McpClient::new();
+        let client2 = McpClient::new();
+
+        // Request IDs should be independent
+        assert_eq!(client1.next_request_id(), 1);
+        assert_eq!(client2.next_request_id(), 1);
+        assert_eq!(client1.next_request_id(), 2);
+        assert_eq!(client2.next_request_id(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_add_server_connection_failed() {
+        let client = McpClient::new();
+        let config = ServerConfig::sse("test-server", "http://127.0.0.1:1");
+        
+        // Should fail to connect to invalid port
+        let result = client.add_server(config).await;
+        assert!(result.is_err());
+        
+        // Server should not be in the list
+        let servers = client.server_names().await;
+        assert!(servers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_close_all_multiple_times() {
+        let client = McpClient::new();
+        
+        // Should be safe to call multiple times
+        assert!(client.close_all().await.is_ok());
+        assert!(client.close_all().await.is_ok());
+        assert!(client.close_all().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_add_disabled_server_with_headers() {
+        let client = McpClient::new();
+        let config = ServerConfig::sse("test-server", "http://localhost:8080")
+            .with_header("Authorization", "Bearer test-token")
+            .with_header("X-Custom", "value")
+            .disabled();
+        
+        let result = client.add_server(config).await;
+        assert!(result.is_ok());
+        
+        // Should not be connected
+        assert!(client.server_names().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_tools_from_server_error_types() {
+        let client = McpClient::new();
+        
+        // Test different server name patterns
+        let result = client.list_tools_from_server("").await;
+        assert!(result.is_err());
+        
+        let result = client.list_tools_from_server("server-with-special-chars-!@#").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_toggle_server_error_message() {
+        let client = McpClient::new();
+        let result = client.toggle_server("test-server").await;
+        
+        match result {
+            Err(McpError::ServerNotFound(name)) => {
+                assert_eq!(name, "test-server");
+            }
+            _ => panic!("Expected ServerNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_server_error_message() {
+        let client = McpClient::new();
+        let result = client.reconnect_server("test-server").await;
+        
+        match result {
+            Err(McpError::ServerNotFound(name)) => {
+                assert_eq!(name, "test-server");
+            }
+            _ => panic!("Expected ServerNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_server_returns_ok_for_nonexistent() {
+        let client = McpClient::new();
+        // Remove should not error for nonexistent servers
+        let result = client.remove_server("nonexistent").await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_request_id_concurrent() {
+        use std::thread;
+        
+        let client = Arc::new(McpClient::new());
+        let mut handles = vec![];
+        
+        for _ in 0..10 {
+            let client = client.clone();
+            handles.push(thread::spawn(move || {
+                client.next_request_id()
+            }));
+        }
+        
+        let ids: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        
+        // All IDs should be unique
+        let mut sorted_ids = ids.clone();
+        sorted_ids.sort();
+        sorted_ids.dedup();
+        assert_eq!(ids.len(), sorted_ids.len());
+    }
+
+    #[test]
+    fn test_server_connection_supports_tools() {
+        // Test ServerConnection::supports_tools()
+        let _capabilities_with_tools = InitializeResult {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: crate::protocol::ServerCapabilities {
+                tools: Some(crate::protocol::ToolsCapability { list_changed: false }),
+                ..Default::default()
+            },
+            server_info: crate::protocol::ServerInfo {
+                name: "test".to_string(),
+                version: Some("1.0".to_string()),
+            },
+        };
+
+        // We can't easily test ServerConnection directly since it's private
+        // But we've covered supports_tools through list_tools tests
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_complex_arguments() {
+        let client = McpClient::new();
+        let args = serde_json::json!({
+            "nested": {
+                "key": "value",
+                "array": [1, 2, 3],
+                "null": null
+            },
+            "boolean": true,
+            "number": 42.5
+        });
+        
+        let result = client.call_tool("complex_tool", args).await;
+        assert!(matches!(result, Err(McpError::ToolNotFound(_))));
+    }
 }

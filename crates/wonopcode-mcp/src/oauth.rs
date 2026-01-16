@@ -475,6 +475,21 @@ mod tests {
     }
 
     #[test]
+    fn test_build_auth_url_no_scope() {
+        let url = build_auth_url(
+            "https://auth.example.com/authorize",
+            "client123",
+            "http://localhost:19876/callback",
+            None,
+            "state123",
+            "challenge123",
+        );
+
+        assert!(url.contains("response_type=code"));
+        assert!(!url.contains("scope="));
+    }
+
+    #[test]
     fn test_redirect_url() {
         let provider = OAuthProvider::new(
             "test".to_string(),
@@ -485,5 +500,370 @@ mod tests {
         let url = provider.redirect_url();
         assert!(url.contains("127.0.0.1"));
         assert!(url.contains(&OAUTH_CALLBACK_PORT.to_string()));
+    }
+
+    #[test]
+    fn test_oauth_config_default() {
+        let config = OAuthConfig::default();
+        assert!(config.client_id.is_none());
+        assert!(config.client_secret.is_none());
+        assert!(config.scope.is_none());
+    }
+
+    #[test]
+    fn test_oauth_tokens_serialization() {
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: Some("refresh456".to_string()),
+            expires_in: Some(3600),
+            scope: Some("read write".to_string()),
+        };
+
+        let json = serde_json::to_string(&tokens).unwrap();
+        assert!(json.contains("access123"));
+        assert!(json.contains("Bearer"));
+
+        let parsed: OAuthTokens = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.access_token, "access123");
+        assert_eq!(parsed.refresh_token, Some("refresh456".to_string()));
+    }
+
+    #[test]
+    fn test_oauth_tokens_minimal() {
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: None,
+            expires_in: None,
+            scope: None,
+        };
+
+        let json = serde_json::to_string(&tokens).unwrap();
+        assert!(!json.contains("refresh_token"));
+        assert!(!json.contains("expires_in"));
+        assert!(!json.contains("scope"));
+    }
+
+    #[test]
+    fn test_client_info_serialization() {
+        let info = ClientInfo {
+            client_id: "client123".to_string(),
+            client_secret: Some("secret456".to_string()),
+            client_id_issued_at: Some(1234567890),
+            client_secret_expires_at: Some(9876543210),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let parsed: ClientInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.client_id, "client123");
+        assert_eq!(parsed.client_secret, Some("secret456".to_string()));
+    }
+
+    #[test]
+    fn test_oauth_state_default() {
+        let state = OAuthState::default();
+        assert!(state.server_url.is_none());
+        assert!(state.client_info.is_none());
+        assert!(state.tokens.is_none());
+        assert!(state.code_verifier.is_none());
+        assert!(state.oauth_state.is_none());
+    }
+
+    #[test]
+    fn test_stored_tokens_serialization() {
+        let tokens = StoredTokens {
+            access_token: "access123".to_string(),
+            refresh_token: Some("refresh456".to_string()),
+            expires_at: Some(9999999999),
+            scope: Some("read".to_string()),
+        };
+
+        let json = serde_json::to_string(&tokens).unwrap();
+        let parsed: StoredTokens = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.access_token, "access123");
+        assert_eq!(parsed.expires_at, Some(9999999999));
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_new() {
+        let config = OAuthConfig {
+            client_id: Some("client123".to_string()),
+            client_secret: Some("secret456".to_string()),
+            scope: Some("read write".to_string()),
+        };
+
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            config,
+        );
+
+        // Check redirect URL
+        let url = provider.redirect_url();
+        assert!(url.contains("127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_client_info_from_config() {
+        let config = OAuthConfig {
+            client_id: Some("client123".to_string()),
+            client_secret: Some("secret456".to_string()),
+            scope: None,
+        };
+
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            config,
+        );
+
+        let info = provider.client_info().await;
+        assert!(info.is_some());
+        let info = info.unwrap();
+        assert_eq!(info.client_id, "client123");
+        assert_eq!(info.client_secret, Some("secret456".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_client_info_no_config() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // No client ID configured or stored
+        let info = provider.client_info().await;
+        assert!(info.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_save_client_info() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        let info = ClientInfo {
+            client_id: "dynamic-client".to_string(),
+            client_secret: None,
+            client_id_issued_at: Some(1234567890),
+            client_secret_expires_at: None,
+        };
+
+        provider.save_client_info(info.clone()).await;
+
+        // Now client_info should return the saved info
+        let retrieved = provider.client_info().await;
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().client_id, "dynamic-client");
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_tokens() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Initially no tokens
+        let tokens = provider.tokens().await;
+        assert!(tokens.is_none());
+
+        // Save tokens
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: Some("refresh456".to_string()),
+            expires_in: Some(3600),
+            scope: Some("read".to_string()),
+        };
+        provider.save_tokens(tokens).await;
+
+        // Now tokens should be available
+        let retrieved = provider.tokens().await;
+        assert!(retrieved.is_some());
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.access_token, "access123");
+        assert_eq!(retrieved.token_type, "Bearer");
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_code_verifier() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Initially no code verifier
+        let result = provider.code_verifier().await;
+        assert!(result.is_err());
+
+        // Save code verifier
+        provider
+            .save_code_verifier("verifier123".to_string())
+            .await;
+
+        // Now should be available
+        let result = provider.code_verifier().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "verifier123");
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_oauth_state() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Initially no state
+        let result = provider.oauth_state().await;
+        assert!(result.is_err());
+
+        // Save state
+        provider.save_oauth_state("state123".to_string()).await;
+
+        // Now should be available
+        let result = provider.oauth_state().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "state123");
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_clear_temp_state() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save temp state
+        provider
+            .save_code_verifier("verifier123".to_string())
+            .await;
+        provider.save_oauth_state("state123".to_string()).await;
+
+        // Clear temp state
+        provider.clear_temp_state().await;
+
+        // Both should now be gone
+        let verifier = provider.code_verifier().await;
+        assert!(verifier.is_err());
+        let state = provider.oauth_state().await;
+        assert!(state.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_has_valid_tokens() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Initially no tokens
+        assert!(!provider.has_valid_tokens().await);
+
+        // Save tokens with future expiry
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: None,
+            expires_in: Some(3600), // 1 hour
+            scope: None,
+        };
+        provider.save_tokens(tokens).await;
+
+        // Now has valid tokens
+        assert!(provider.has_valid_tokens().await);
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_access_token() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Initially no access token
+        let token = provider.access_token().await;
+        assert!(token.is_none());
+
+        // Save tokens
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: None,
+            expires_in: Some(3600),
+            scope: None,
+        };
+        provider.save_tokens(tokens).await;
+
+        // Now access token available
+        let token = provider.access_token().await;
+        assert!(token.is_some());
+        assert_eq!(token.unwrap(), "access123");
+    }
+
+    #[test]
+    fn test_client_metadata() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        let metadata = provider.client_metadata();
+        assert!(metadata.contains_key("redirect_uris"));
+        assert!(metadata.contains_key("client_name"));
+        assert!(metadata.contains_key("grant_types"));
+        assert!(metadata.contains_key("response_types"));
+        assert!(metadata.contains_key("token_endpoint_auth_method"));
+
+        // Without client_secret, auth method should be "none"
+        let auth_method = metadata
+            .get("token_endpoint_auth_method")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert_eq!(auth_method, "none");
+    }
+
+    #[test]
+    fn test_client_metadata_with_secret() {
+        let config = OAuthConfig {
+            client_id: Some("client123".to_string()),
+            client_secret: Some("secret456".to_string()),
+            scope: None,
+        };
+
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            config,
+        );
+
+        let metadata = provider.client_metadata();
+
+        // With client_secret, auth method should be "client_secret_post"
+        let auth_method = metadata
+            .get("token_endpoint_auth_method")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert_eq!(auth_method, "client_secret_post");
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(OAUTH_CALLBACK_PORT, 19876);
+        assert_eq!(OAUTH_CALLBACK_PATH, "/mcp/oauth/callback");
     }
 }
