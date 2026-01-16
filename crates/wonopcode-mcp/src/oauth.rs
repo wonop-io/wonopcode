@@ -866,4 +866,264 @@ mod tests {
         assert_eq!(OAUTH_CALLBACK_PORT, 19876);
         assert_eq!(OAUTH_CALLBACK_PATH, "/mcp/oauth/callback");
     }
+
+    #[tokio::test]
+    async fn test_oauth_provider_tokens_url_mismatch() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save tokens
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: None,
+            expires_in: Some(3600),
+            scope: None,
+        };
+        provider.save_tokens(tokens).await;
+
+        // Create new provider with different URL
+        let provider2 = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://different.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Tokens should not be available for different URL
+        let retrieved = provider2.tokens().await;
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_client_info_url_mismatch() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save client info
+        let info = ClientInfo {
+            client_id: "client123".to_string(),
+            client_secret: None,
+            client_id_issued_at: None,
+            client_secret_expires_at: None,
+        };
+        provider.save_client_info(info).await;
+
+        // Create new provider with different URL
+        let provider2 = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://different.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Client info should not be available for different URL
+        let retrieved = provider2.client_info().await;
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_expired_client_secret() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save client info with expired secret
+        let info = ClientInfo {
+            client_id: "client123".to_string(),
+            client_secret: Some("secret456".to_string()),
+            client_id_issued_at: Some(1),
+            client_secret_expires_at: Some(1), // Expired (timestamp = 1)
+        };
+        provider.save_client_info(info).await;
+
+        // Client info should not be returned because secret is expired
+        let retrieved = provider.client_info().await;
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_no_expiry_tokens() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save tokens without expiry
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: None,
+            expires_in: None, // No expiry
+            scope: None,
+        };
+        provider.save_tokens(tokens).await;
+
+        // Tokens with no expiry should be valid
+        assert!(provider.has_valid_tokens().await);
+        assert!(provider.access_token().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_nearly_expired_tokens() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Manually create state with tokens about to expire
+        {
+            let mut state = provider.state.write().await;
+            state.server_url = Some("https://example.com".to_string());
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            state.tokens = Some(StoredTokens {
+                access_token: "access123".to_string(),
+                refresh_token: None,
+                expires_at: Some(now + 30), // Expires in 30 seconds (less than 60s buffer)
+                scope: None,
+            });
+        }
+
+        // Should not be considered valid due to 60s buffer
+        assert!(!provider.has_valid_tokens().await);
+    }
+
+    #[tokio::test]
+    async fn test_oauth_provider_tokens_with_expiry_calculation() {
+        let provider = OAuthProvider::new(
+            "test-mcp".to_string(),
+            "https://example.com".to_string(),
+            OAuthConfig::default(),
+        );
+
+        // Save tokens with expiry
+        let tokens = OAuthTokens {
+            access_token: "access123".to_string(),
+            token_type: "Bearer".to_string(),
+            refresh_token: Some("refresh456".to_string()),
+            expires_in: Some(3600),
+            scope: Some("read write".to_string()),
+        };
+        provider.save_tokens(tokens).await;
+
+        // Retrieve and check
+        let retrieved = provider.tokens().await.unwrap();
+        assert_eq!(retrieved.access_token, "access123");
+        assert_eq!(retrieved.token_type, "Bearer");
+        assert_eq!(retrieved.refresh_token, Some("refresh456".to_string()));
+        assert_eq!(retrieved.scope, Some("read write".to_string()));
+        // expires_in should be roughly 3600 (slightly less due to time passing)
+        assert!(retrieved.expires_in.unwrap() <= 3600);
+        assert!(retrieved.expires_in.unwrap() >= 3590);
+    }
+
+    #[test]
+    fn test_oauth_state_serialization() {
+        let state = OAuthState {
+            server_url: Some("https://example.com".to_string()),
+            client_info: Some(ClientInfo {
+                client_id: "client123".to_string(),
+                client_secret: None,
+                client_id_issued_at: None,
+                client_secret_expires_at: None,
+            }),
+            tokens: Some(StoredTokens {
+                access_token: "access".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                scope: None,
+            }),
+            code_verifier: Some("verifier".to_string()),
+            oauth_state: Some("state".to_string()),
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        let parsed: OAuthState = serde_json::from_str(&json).unwrap();
+        
+        assert_eq!(parsed.server_url, Some("https://example.com".to_string()));
+        assert_eq!(parsed.client_info.unwrap().client_id, "client123");
+    }
+
+    #[test]
+    fn test_client_info_minimal() {
+        let info = ClientInfo {
+            client_id: "client123".to_string(),
+            client_secret: None,
+            client_id_issued_at: None,
+            client_secret_expires_at: None,
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        // Optional fields should not appear when None
+        assert!(!json.contains("client_secret"));
+        assert!(!json.contains("client_id_issued_at"));
+        assert!(!json.contains("client_secret_expires_at"));
+    }
+
+    #[test]
+    fn test_stored_tokens_minimal() {
+        let tokens = StoredTokens {
+            access_token: "access123".to_string(),
+            refresh_token: None,
+            expires_at: None,
+            scope: None,
+        };
+
+        let json = serde_json::to_string(&tokens).unwrap();
+        let parsed: StoredTokens = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.access_token, "access123");
+        assert!(parsed.refresh_token.is_none());
+    }
+
+    #[test]
+    fn test_build_auth_url_special_chars() {
+        let url = build_auth_url(
+            "https://auth.example.com/authorize",
+            "client with spaces",
+            "http://localhost:19876/callback?foo=bar",
+            Some("read write admin"),
+            "state=test&nonce=123",
+            "challenge+123",
+        );
+
+        // Should be URL encoded
+        assert!(url.contains("client%20with%20spaces"));
+        assert!(url.contains("read%20write%20admin"));
+    }
+
+    #[test]
+    fn test_generate_code_verifier_uniqueness() {
+        let verifier1 = OAuthProvider::generate_code_verifier();
+        let verifier2 = OAuthProvider::generate_code_verifier();
+        // Each call should generate a unique verifier
+        assert_ne!(verifier1, verifier2);
+    }
+
+    #[test]
+    fn test_generate_state_uniqueness() {
+        let state1 = OAuthProvider::generate_state();
+        let state2 = OAuthProvider::generate_state();
+        // Each call should generate a unique state
+        assert_ne!(state1, state2);
+    }
+
+    #[test]
+    fn test_generate_code_challenge_deterministic() {
+        let verifier = "test_verifier_12345678901234567890";
+        let challenge1 = OAuthProvider::generate_code_challenge(verifier);
+        let challenge2 = OAuthProvider::generate_code_challenge(verifier);
+        // Same verifier should produce same challenge
+        assert_eq!(challenge1, challenge2);
+    }
 }
