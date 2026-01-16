@@ -308,4 +308,111 @@ mod tests {
         // This will fail to canonicalize since paths don't exist, but logic is right
         // assert!(!is_external_path(_root, _target));
     }
+
+    #[test]
+    fn test_is_external_path_with_real_paths() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        // Subdir is inside root
+        assert!(!is_external_path(dir.path(), &subdir));
+
+        // Different temp dir is external
+        let other_dir = tempdir().unwrap();
+        assert!(is_external_path(dir.path(), other_dir.path()));
+    }
+
+    #[test]
+    fn test_bash_permission_is_denied() {
+        let config = BashPermissionConfig::Single(BashPermission::Deny);
+        assert!(config.is_denied("anything"));
+
+        let config2 = BashPermissionConfig::Single(BashPermission::Allow);
+        assert!(!config2.is_denied("anything"));
+    }
+
+    #[test]
+    fn test_bash_permission_requires_ask() {
+        let config = BashPermissionConfig::Single(BashPermission::Ask);
+        assert!(config.requires_ask("anything"));
+
+        let config2 = BashPermissionConfig::Single(BashPermission::Allow);
+        assert!(!config2.requires_ask("anything"));
+    }
+
+    #[test]
+    fn test_bash_permission_is_allowed() {
+        let config = BashPermissionConfig::Single(BashPermission::Allow);
+        assert!(config.is_allowed("anything"));
+
+        let config2 = BashPermissionConfig::Single(BashPermission::Deny);
+        assert!(!config2.is_allowed("anything"));
+    }
+
+    #[test]
+    fn test_extract_path_args_cd_command() {
+        assert_eq!(extract_path_args("cd /home/user"), vec!["/home/user"]);
+        assert_eq!(extract_path_args("cd"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_extract_path_args_mkdir() {
+        assert_eq!(extract_path_args("mkdir -p /tmp/new/dir"), vec!["/tmp/new/dir"]);
+    }
+
+    #[test]
+    fn test_extract_path_args_touch() {
+        assert_eq!(extract_path_args("touch file.txt"), vec!["file.txt"]);
+    }
+
+    #[test]
+    fn test_extract_path_args_tree() {
+        assert_eq!(extract_path_args("tree /some/path"), vec!["/some/path"]);
+    }
+
+    #[test]
+    fn test_extract_path_args_du() {
+        assert_eq!(extract_path_args("du -h /var"), vec!["/var"]);
+    }
+
+    #[test]
+    fn test_extract_path_args_file() {
+        assert_eq!(extract_path_args("file binary.exe"), vec!["binary.exe"]);
+    }
+
+    #[test]
+    fn test_bash_permission_default_is_ask() {
+        let perm = BashPermission::default();
+        assert_eq!(perm, BashPermission::Ask);
+    }
+
+    #[test]
+    fn test_bash_permission_serialization() {
+        let perm = BashPermission::Allow;
+        let json = serde_json::to_string(&perm).unwrap();
+        assert_eq!(json, "\"allow\"");
+
+        let parsed: BashPermission = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, BashPermission::Allow);
+    }
+
+    #[test]
+    fn test_bash_permission_config_serialization() {
+        let config = BashPermissionConfig::Single(BashPermission::Deny);
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: BashPermissionConfig = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, BashPermissionConfig::Single(BashPermission::Deny)));
+    }
+
+    #[test]
+    fn test_patterns_check_no_match_returns_ask() {
+        let mut perms = HashMap::new();
+        perms.insert("specific_command".to_string(), BashPermission::Allow);
+        let config = BashPermissionConfig::Patterns(perms);
+
+        // Something that doesn't match any pattern
+        assert_eq!(config.check("completely_different"), BashPermission::Ask);
+    }
 }

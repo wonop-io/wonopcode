@@ -59,6 +59,94 @@ coverage-lcov:
 coverage-open: coverage-html
     open coverage/html/index.html
 
+# Show coverage statistics summary per crate
+covstats:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    echo "📊 Running tests and collecting coverage..."
+    echo ""
+    
+    # Run coverage once and save the output
+    COVERAGE_OUTPUT=$(cargo llvm-cov --all-features --workspace \
+        --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' 2>&1)
+    
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    WONOPCODE COVERAGE SUMMARY                        ║"
+    echo "╠══════════════════════════════════════════════════════════════════════╣"
+    echo "║ Crate                      │ Lines    │ Covered  │ Coverage │ Status ║"
+    echo "╠════════════════════════════╪══════════╪══════════╪══════════╪════════╣"
+    
+    # Get unique crate names and process each - crate name is before first /
+    # Lines format: name  regions  missed  cover%  functions  missed  cover%  lines  missed  cover%
+    # Columns (1-indexed): 1=name, 2=regions, 3=missed_regions, 4=cover%, 5=functions, 6=missed_funcs, 7=cover%, 8=lines, 9=missed_lines, 10=cover%
+    echo "$COVERAGE_OUTPUT" | grep -E "^wonopcode[a-z-]*/src" | \
+        sed 's|/src/.*||' | sort -u | \
+    while read -r crate; do
+        # Sum up lines for this crate - column 8 is total lines, column 9 is missed
+        CRATE_DATA=$(echo "$COVERAGE_OUTPUT" | grep "^${crate}/src" | \
+            awk '{total+=$8; missed+=$9} END {
+                if(total>0) {
+                    covered = total - missed;
+                    pct = (covered/total)*100;
+                    printf "%d %d %.2f", total, covered, pct;
+                } else {
+                    print "0 0 0";
+                }
+            }')
+        
+        TOTAL_LINES=$(echo "$CRATE_DATA" | awk '{print $1}')
+        COVERED=$(echo "$CRATE_DATA" | awk '{print $2}')
+        PCT=$(echo "$CRATE_DATA" | awk '{print $3}')
+        
+        # Determine status emoji based on coverage
+        if (( $(echo "$PCT >= 90" | bc -l) )); then
+            STATUS="✅"
+        elif (( $(echo "$PCT >= 70" | bc -l) )); then
+            STATUS="🟡"
+        elif (( $(echo "$PCT >= 50" | bc -l) )); then
+            STATUS="🟠"
+        else
+            STATUS="🔴"
+        fi
+        
+        # Format output
+        CRATE_FMT=$(printf "%-26s" "$crate")
+        LINES_FMT=$(printf "%8d" "$TOTAL_LINES")
+        COV_FMT=$(printf "%8d" "$COVERED")
+        PCT_FMT=$(printf "%7.2f%%" "$PCT")
+        
+        echo "║ ${CRATE_FMT} │ ${LINES_FMT} │ ${COV_FMT} │ ${PCT_FMT} │   ${STATUS}   ║"
+    done
+    
+    echo "╠════════════════════════════╪══════════╪══════════╪══════════╪════════╣"
+    
+    # Parse total line - columns are: TOTAL  regions  missed  cover%  functions  missed  cover%  lines  missed  cover%
+    TOTAL_LINE=$(echo "$COVERAGE_OUTPUT" | grep "^TOTAL")
+    TOTAL_LINES=$(echo "$TOTAL_LINE" | awk '{print $8}')
+    MISSED=$(echo "$TOTAL_LINE" | awk '{print $9}')
+    COVERED=$((TOTAL_LINES - MISSED))
+    PCT=$(echo "$TOTAL_LINE" | awk '{print $10}' | tr -d '%')
+    
+    if (( $(echo "$PCT >= 90" | bc -l) )); then
+        STATUS="✅"
+    elif (( $(echo "$PCT >= 70" | bc -l) )); then
+        STATUS="🟡"
+    else
+        STATUS="🔴"
+    fi
+    
+    LINES_FMT=$(printf "%8d" "$TOTAL_LINES")
+    COV_FMT=$(printf "%8d" "$COVERED")
+    PCT_FMT=$(printf "%7.2f%%" "$PCT")
+    
+    echo "║ TOTAL                      │ ${LINES_FMT} │ ${COV_FMT} │ ${PCT_FMT} │   ${STATUS}   ║"
+    echo "╚══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Legend: ✅ ≥90% (target) │ 🟡 ≥70% │ 🟠 ≥50% │ 🔴 <50%"
+    echo ""
+    echo "Target: 90% coverage"
+
 # === Linting & Formatting ===
 
 # Run all checks (format, lint, test)

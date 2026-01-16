@@ -1002,4 +1002,303 @@ mod tests {
             MatchResult::Multiple(2)
         ));
     }
+
+    #[test]
+    fn test_match_result_count() {
+        assert_eq!(MatchResult::None.count(), 0);
+        assert_eq!(MatchResult::Single.count(), 1);
+        assert_eq!(MatchResult::Multiple(5).count(), 5);
+    }
+
+    #[test]
+    fn test_unescape_string() {
+        assert_eq!(unescape_string("hello\\nworld"), "hello\nworld");
+        assert_eq!(unescape_string("a\\tb"), "a\tb");
+        assert_eq!(unescape_string("a\\rb"), "a\rb");
+        assert_eq!(unescape_string("a\\\\b"), "a\\b");
+        assert_eq!(unescape_string("a\\'b"), "a'b");
+        assert_eq!(unescape_string("a\\\"b"), "a\"b");
+        assert_eq!(unescape_string("a\\`b"), "a`b");
+        assert_eq!(unescape_string("a\\$b"), "a$b");
+        assert_eq!(unescape_string("no escapes"), "no escapes");
+        assert_eq!(unescape_string("trailing\\"), "trailing\\");
+    }
+
+    #[test]
+    fn test_escape_string() {
+        assert_eq!(escape_string("hello\nworld"), "hello\\nworld");
+        assert_eq!(escape_string("a\tb"), "a\\tb");
+        assert_eq!(escape_string("a\rb"), "a\\rb");
+        assert_eq!(escape_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_string("a'b"), "a\\'b");
+        assert_eq!(escape_string("a\"b"), "a\\\"b");
+        assert_eq!(escape_string("a`b"), "a\\`b");
+        assert_eq!(escape_string("a$b"), "a\\$b");
+        assert_eq!(escape_string("no escapes"), "no escapes");
+    }
+
+    #[test]
+    fn test_line_similarity() {
+        assert_eq!(line_similarity("hello", "hello"), 1.0);
+        assert_eq!(line_similarity("", "hello"), 0.0);
+        assert_eq!(line_similarity("hello", ""), 0.0);
+        assert!(line_similarity("hello world", "hello") > 0.0);
+    }
+
+    #[test]
+    fn test_longest_common_substring() {
+        assert_eq!(longest_common_substring("hello", "hello"), 5);
+        assert_eq!(longest_common_substring("", "hello"), 0);
+        assert_eq!(longest_common_substring("hello", ""), 0);
+        assert_eq!(longest_common_substring("abc", "xyz"), 0);
+        assert_eq!(longest_common_substring("abcdef", "bcde"), 4);
+    }
+
+    #[test]
+    fn test_calculate_block_similarity_same() {
+        let content = vec!["line1", "line2", "line3"];
+        let target = vec!["line1", "line2", "line3"];
+        assert_eq!(calculate_block_similarity(&content, &target), 1.0);
+    }
+
+    #[test]
+    fn test_calculate_block_similarity_different_lengths() {
+        let content = vec!["line1", "line2"];
+        let target = vec!["line1"];
+        assert_eq!(calculate_block_similarity(&content, &target), 0.0);
+    }
+
+    #[test]
+    fn test_calculate_block_similarity_partial() {
+        let content = vec!["line1", "different", "line3"];
+        let target = vec!["line1", "line2", "line3"];
+        // 2 out of 3 match exactly
+        let sim = calculate_block_similarity(&content, &target);
+        assert!(sim >= 0.6 && sim <= 0.7);
+    }
+
+    #[test]
+    fn test_generate_diff() {
+        let old = "hello\nworld\n";
+        let new = "hello\nuniverse\n";
+        let path = std::path::Path::new("test.txt");
+        let diff = generate_diff(old, new, path);
+        assert!(diff.contains("--- a/test.txt"));
+        assert!(diff.contains("+++ b/test.txt"));
+        assert!(diff.contains("-world"));
+        assert!(diff.contains("+universe"));
+    }
+
+    #[test]
+    fn test_try_indentation_match() {
+        let content = "    fn hello() {\n        println!(\"hi\");\n    }";
+        let target = "fn hello() {\n    println!(\"hi\");\n}";
+        let matched = try_indentation_match(content, target);
+        assert!(matched.is_some());
+    }
+
+    #[test]
+    fn test_try_indentation_match_no_match() {
+        let content = "fn hello() {}";
+        let target = "fn goodbye() {}";
+        let matched = try_indentation_match(content, target);
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn test_try_indentation_match_empty_target() {
+        let content = "fn hello() {}";
+        let target = "";
+        let matched = try_indentation_match(content, target);
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn test_try_block_anchor_match_too_few_lines() {
+        let content = "line1\nline2";
+        let target = "line1\nline2";
+        let matched = try_block_anchor_match(content, target);
+        assert!(matched.is_none()); // needs at least 3 lines
+    }
+
+    #[test]
+    fn test_try_block_anchor_match_empty_anchors() {
+        let content = "\nmiddle\n";
+        let target = "\nmiddle\n";
+        let matched = try_block_anchor_match(content, target);
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn test_try_context_aware_match_single_line() {
+        let content = "single line";
+        let target = "single line";
+        let matched = try_context_aware_match(content, target);
+        assert!(matched.is_none()); // needs at least 2 lines
+    }
+
+    #[test]
+    fn test_find_fuzzy_end_no_match() {
+        let content = "hello";
+        let target = "goodbye";
+        let end = find_fuzzy_end(content, target);
+        assert!(end.is_none());
+    }
+
+    #[test]
+    fn test_find_fuzzy_end_empty_target() {
+        let content = "hello";
+        let target = "";
+        let end = find_fuzzy_end(content, target);
+        assert!(end.is_none());
+    }
+
+    #[test]
+    fn test_try_escape_normalized_match() {
+        let content = "hello\nworld";
+        let target = "hello\\nworld";
+        let matched = try_escape_normalized_match(content, target);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap(), "hello\nworld");
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_line_endings() {
+        let content = "hello\nworld";
+        let target = "hello\r\nworld";
+        let matched = try_fuzzy_match(content, target);
+        assert!(matched.is_some());
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_trimmed() {
+        let content = "hello   \nworld   ";
+        let target = "hello\nworld";
+        let matched = try_fuzzy_match(content, target);
+        assert!(matched.is_some());
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_boundary_trim() {
+        let content = "xyz  hello world  abc";
+        let target = "  hello world  ";
+        let matched = try_fuzzy_match(content, target);
+        // This may match via boundary trim - just ensure it doesn't panic
+        // The behavior depends on the specific fuzzy strategies
+        let _ = matched;
+    }
+
+    #[tokio::test]
+    async fn test_edit_same_string_error() {
+        let (dir, ctx) = setup_test().await;
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "hello world").await.unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.to_str().unwrap(),
+                    "oldString": "hello",
+                    "newString": "hello"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("must be different"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_file_not_found() {
+        let (_dir, ctx) = setup_test().await;
+
+        let tool = EditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": "/nonexistent/file.txt",
+                    "oldString": "hello",
+                    "newString": "goodbye"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found") || err.contains("File not found"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_invalid_args() {
+        let (_dir, ctx) = setup_test().await;
+
+        let tool = EditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "invalid": "args"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid arguments"));
+    }
+
+    #[test]
+    fn test_edit_tool_id() {
+        let tool = EditTool;
+        assert_eq!(tool.id(), "edit");
+    }
+
+    #[test]
+    fn test_edit_tool_description() {
+        let tool = EditTool;
+        let desc = tool.description();
+        assert!(desc.contains("exact string replacements"));
+        assert!(desc.contains("replaceAll"));
+    }
+
+    #[test]
+    fn test_edit_tool_parameters_schema() {
+        let tool = EditTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("filePath")));
+        assert!(required.contains(&json!("oldString")));
+        assert!(required.contains(&json!("newString")));
+    }
+
+    #[tokio::test]
+    async fn test_swap_behavior() {
+        let (dir, ctx) = setup_test().await;
+        let file_path = dir.path().join("test.txt");
+        // File already has the "new" content
+        fs::write(&file_path, "goodbye world").await.unwrap();
+
+        let tool = EditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.to_str().unwrap(),
+                    "oldString": "hello",  // doesn't exist
+                    "newString": "goodbye"  // already exists
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Should swap and revert to "hello"
+        let content = fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "hello world");
+        assert!(result.metadata["swapped"].as_bool().unwrap());
+    }
 }

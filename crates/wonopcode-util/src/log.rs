@@ -112,9 +112,28 @@ mod tests {
     }
 
     #[test]
+    fn test_log_level_parse_all_variants() {
+        assert_eq!(LogLevel::parse("trace"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::parse("TRACE"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::parse("info"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::parse("INFO"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::parse("warn"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::parse("WARN"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::parse("error"), Some(LogLevel::Error));
+        assert_eq!(LogLevel::parse("ERROR"), Some(LogLevel::Error));
+    }
+
+    #[test]
     fn test_log_level_as_str() {
         assert_eq!(LogLevel::Debug.as_str(), "debug");
         assert_eq!(LogLevel::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn test_log_level_as_str_all_variants() {
+        assert_eq!(LogLevel::Trace.as_str(), "trace");
+        assert_eq!(LogLevel::Info.as_str(), "info");
+        assert_eq!(LogLevel::Warn.as_str(), "warn");
     }
 
     #[test]
@@ -122,5 +141,35 @@ mod tests {
         let config = LogConfig::default();
         assert!(!config.print);
         assert_eq!(config.level, LogLevel::Info);
+    }
+
+    #[test]
+    fn test_log_config_fields() {
+        let config = LogConfig {
+            print: true,
+            level: LogLevel::Debug,
+            include_location: true,
+            file: Some(PathBuf::from("/tmp/test.log")),
+        };
+        assert!(config.print);
+        assert_eq!(config.level, LogLevel::Debug);
+        assert!(config.include_location);
+        assert_eq!(config.file, Some(PathBuf::from("/tmp/test.log")));
+    }
+
+    #[test]
+    fn test_default_log_path_returns_some() {
+        // On most systems with a home directory, this should return Some
+        let path = default_log_path();
+        // Path might be None on systems without data_local_dir, that's OK
+        if let Some(p) = path {
+            assert!(p.to_string_lossy().contains("wonopcode"));
+        }
+    }
+
+    #[test]
+    fn test_log_level_default() {
+        let level = LogLevel::default();
+        assert_eq!(level, LogLevel::Info);
     }
 }

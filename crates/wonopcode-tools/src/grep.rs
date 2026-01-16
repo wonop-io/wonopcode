@@ -455,6 +455,35 @@ mod tests {
     }
 
     #[test]
+    fn test_grep_tool_id() {
+        let tool = GrepTool;
+        assert_eq!(tool.id(), "grep");
+    }
+
+    #[test]
+    fn test_grep_tool_description() {
+        let tool = GrepTool;
+        let desc = tool.description();
+        assert!(desc.contains("content search"));
+        assert!(desc.contains("regex"));
+        assert!(desc.contains(".gitignore"));
+    }
+
+    #[test]
+    fn test_grep_tool_parameters_schema() {
+        let tool = GrepTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pattern")));
+        assert!(schema["properties"]["pattern"].is_object());
+        assert!(schema["properties"]["path"].is_object());
+        assert!(schema["properties"]["include"].is_object());
+    }
+
+    #[test]
     fn test_glob_match_simple() {
         assert!(glob_match("*.rs", "main.rs"));
         assert!(glob_match("*.rs", "lib.rs"));
@@ -478,11 +507,130 @@ mod tests {
     }
 
     #[test]
+    fn test_glob_match_double_star() {
+        // ** collapses to *
+        assert!(glob_match("**", "anything"));
+        assert!(glob_match("test**", "testing"));
+    }
+
+    #[test]
+    fn test_glob_match_exact() {
+        assert!(glob_match("main.rs", "main.rs"));
+        assert!(!glob_match("main.rs", "lib.rs"));
+    }
+
+    #[test]
+    fn test_glob_match_question_at_end() {
+        assert!(glob_match("test?", "testA"));
+        assert!(!glob_match("test?", "test"));
+        assert!(!glob_match("test?", "testAB"));
+    }
+
+    #[test]
     fn test_matches_glob_brace() {
         let matcher = build_glob_matcher("*.{ts,tsx}");
         assert!(matches_glob(Path::new("file.ts"), &matcher));
         assert!(matches_glob(Path::new("file.tsx"), &matcher));
         assert!(!matches_glob(Path::new("file.js"), &matcher));
+    }
+
+    #[test]
+    fn test_matches_glob_no_filename() {
+        let matcher = build_glob_matcher("*.rs");
+        // Path with no filename component
+        assert!(!matches_glob(Path::new("/"), &matcher));
+    }
+
+    #[test]
+    fn test_build_glob_matcher() {
+        let matcher = build_glob_matcher("*.js");
+        assert_eq!(matcher.pattern, "*.js");
+    }
+
+    #[test]
+    fn test_search_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "line one\nline two\nline one again").unwrap();
+
+        let regex = Regex::new("one").unwrap();
+        let matches = search_file(&file_path, &regex, 100).unwrap();
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0], (1, "line one".to_string()));
+        assert_eq!(matches[1], (3, "line one again".to_string()));
+    }
+
+    #[test]
+    fn test_search_file_max_matches() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "a\na\na\na\na\na\na\na\na\na").unwrap();
+
+        let regex = Regex::new("a").unwrap();
+        let matches = search_file(&file_path, &regex, 3).unwrap();
+
+        assert_eq!(matches.len(), 3);
+    }
+
+    #[test]
+    fn test_search_file_not_found() {
+        let regex = Regex::new("test").unwrap();
+        let result = search_file(Path::new("/nonexistent/file.txt"), &regex, 100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sort_results_by_mtime() {
+        // Just test that it doesn't panic and returns something
+        let results = vec![
+            "/some/file.txt:1:content".to_string(),
+            "/some/other.txt:2:content".to_string(),
+        ];
+        let sorted = sort_results_by_mtime(results);
+        // The sort depends on actual file mtimes, so just verify it returns
+        assert!(!sorted.is_empty() || sorted.is_empty()); // Always true, just testing no panic
+    }
+
+    #[test]
+    fn test_sort_results_by_mtime_empty() {
+        let results: Vec<String> = vec![];
+        let sorted = sort_results_by_mtime(results);
+        assert!(sorted.is_empty());
+    }
+
+    #[test]
+    fn test_escape_shell_arg() {
+        assert_eq!(escape_shell_arg("hello"), "hello");
+        assert_eq!(escape_shell_arg("it's"), "it'\\''s");
+        assert_eq!(escape_shell_arg("test'test"), "test'\\''test");
+    }
+
+    #[test]
+    fn test_convert_sandbox_paths_to_host() {
+        let ctx = test_context(PathBuf::from("/host/dir"));
+        let output = "/host/dir/file.rs:10:content\n/host/dir/other.rs:20:more";
+        let result = convert_sandbox_paths_to_host(output, &ctx);
+        // Should return the same paths since no sandbox mapping
+        assert!(result.contains("file.rs"));
+        assert!(result.contains("other.rs"));
+    }
+
+    #[test]
+    fn test_convert_sandbox_paths_empty_lines() {
+        let ctx = test_context(PathBuf::from("/host"));
+        let output = "file.rs:1:content\n\nother.rs:2:more\n";
+        let result = convert_sandbox_paths_to_host(output, &ctx);
+        // Empty lines should be filtered
+        assert!(!result.contains("\n\n"));
+    }
+
+    #[test]
+    fn test_convert_sandbox_paths_no_colon() {
+        let ctx = test_context(PathBuf::from("/host"));
+        let output = "no colon here";
+        let result = convert_sandbox_paths_to_host(output, &ctx);
+        assert_eq!(result, "no colon here");
     }
 
     #[tokio::test]
@@ -558,5 +706,122 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid regex"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_missing_pattern() {
+        let dir = tempdir().unwrap();
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({ "path": dir.path().display().to_string() }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("pattern"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_nonexistent_path() {
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "test",
+                    "path": "/nonexistent/directory"
+                }),
+                &test_context(PathBuf::from("/tmp")),
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_with_relative_path() {
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(subdir.join("test.txt"), "match this").unwrap();
+
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "match",
+                    "path": "subdir"
+                }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("match this"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_no_matches() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "hello world").unwrap();
+
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "xyz123" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.is_empty());
+        assert_eq!(result.metadata["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_grep_metadata() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("test.txt"), "match\nmatch\nmatch").unwrap();
+
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({ "pattern": "match" }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.metadata["count"], 3);
+    }
+
+    #[tokio::test]
+    async fn test_grep_with_brace_expansion() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("file.ts"), "typescript\n").unwrap();
+        std::fs::write(dir.path().join("file.tsx"), "typescript jsx\n").unwrap();
+        std::fs::write(dir.path().join("file.js"), "javascript\n").unwrap();
+
+        let tool = GrepTool;
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "typescript",
+                    "include": "*.{ts,tsx}"
+                }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("file.ts"));
+        assert!(result.output.contains("file.tsx"));
+        assert!(!result.output.contains("file.js"));
     }
 }

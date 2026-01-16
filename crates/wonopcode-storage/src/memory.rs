@@ -193,4 +193,102 @@ mod tests {
         let items = storage.list(&["project"]).await.unwrap();
         assert_eq!(items.len(), 2);
     }
+
+    #[tokio::test]
+    async fn test_memory_storage_default() {
+        let storage = MemoryStorage::default();
+        let result: Option<TestData> = storage.read(&["test"]).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_update() {
+        let storage = MemoryStorage::new();
+
+        // Update creates default if not exists
+        let result: TestData = storage
+            .update(&["new", "item"], |data: &mut TestData| {
+                data.name = "created".to_string();
+                data.value = 100;
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.name, "created");
+        assert_eq!(result.value, 100);
+
+        // Update modifies existing
+        let result: TestData = storage
+            .update(&["new", "item"], |data: &mut TestData| {
+                data.value = 200;
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.value, 200);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list_empty_prefix() {
+        let storage = MemoryStorage::new();
+
+        let data = TestData::default();
+        storage.write(&["item1"], &data).await.unwrap();
+        storage.write(&["item2"], &data).await.unwrap();
+
+        // List with empty prefix should return top-level items
+        let items = storage.list(&[]).await.unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list_excludes_nested() {
+        let storage = MemoryStorage::new();
+
+        let data = TestData::default();
+        storage.write(&["project", "item1"], &data).await.unwrap();
+        storage
+            .write(&["project", "nested", "item"], &data)
+            .await
+            .unwrap();
+
+        // List should only include direct children
+        let items = storage.list(&["project"]).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0], vec!["project", "item1"]);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_read_nonexistent() {
+        let storage = MemoryStorage::new();
+        let result: Option<TestData> = storage.read(&["does", "not", "exist"]).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_remove_nonexistent() {
+        let storage = MemoryStorage::new();
+        // Removing nonexistent key should not error
+        storage.remove(&["does", "not", "exist"]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_overwrite() {
+        let storage = MemoryStorage::new();
+
+        let data1 = TestData {
+            name: "first".to_string(),
+            value: 1,
+        };
+        let data2 = TestData {
+            name: "second".to_string(),
+            value: 2,
+        };
+
+        storage.write(&["key"], &data1).await.unwrap();
+        storage.write(&["key"], &data2).await.unwrap();
+
+        let result: Option<TestData> = storage.read(&["key"]).await.unwrap();
+        assert_eq!(result.unwrap().name, "second");
+    }
 }

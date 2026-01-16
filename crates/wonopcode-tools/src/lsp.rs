@@ -357,10 +357,34 @@ fn count_symbols(symbols: &[wonopcode_lsp::client::DocumentSymbolInfo]) -> usize
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
+    use wonopcode_lsp::{Range, Position};
+
+    fn create_test_context(dir: &TempDir) -> ToolContext {
+        ToolContext {
+            session_id: "test-session".to_string(),
+            message_id: "test-message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: dir.path().to_path_buf(),
+            cwd: dir.path().to_path_buf(),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
 
     #[test]
     fn test_lsp_tool_creation() {
         let tool = LspTool::new();
+        assert_eq!(tool.id(), "lsp");
+    }
+
+    #[test]
+    fn test_lsp_tool_default() {
+        let tool = LspTool::default();
         assert_eq!(tool.id(), "lsp");
     }
 
@@ -370,5 +394,332 @@ mod tests {
         let schema = tool.parameters_schema();
         assert!(schema["properties"]["operation"].is_object());
         assert!(schema["properties"]["file"].is_object());
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("operation")));
+        assert!(required.contains(&json!("file")));
+    }
+
+    #[test]
+    fn test_lsp_tool_description() {
+        let tool = LspTool::new();
+        let desc = tool.description();
+        assert!(desc.contains("LSP"));
+        assert!(desc.contains("definition"));
+        assert!(desc.contains("references"));
+        assert!(desc.contains("symbols"));
+        assert!(desc.contains("hover"));
+    }
+
+    #[test]
+    fn test_default_true() {
+        assert!(default_true());
+    }
+
+    #[test]
+    fn test_lsp_args_deserialization() {
+        let args: LspArgs = serde_json::from_value(json!({
+            "operation": "definition",
+            "file": "test.rs"
+        }))
+        .unwrap();
+
+        assert_eq!(args.operation, "definition");
+        assert_eq!(args.file, "test.rs");
+        assert!(args.line.is_none());
+        assert!(args.column.is_none());
+        assert!(args.include_declaration); // default true
+    }
+
+    #[test]
+    fn test_lsp_args_with_position() {
+        let args: LspArgs = serde_json::from_value(json!({
+            "operation": "references",
+            "file": "test.rs",
+            "line": 10,
+            "column": 5,
+            "includeDeclaration": false
+        }))
+        .unwrap();
+
+        assert_eq!(args.operation, "references");
+        assert_eq!(args.file, "test.rs");
+        assert_eq!(args.line, Some(10));
+        assert_eq!(args.column, Some(5));
+        assert!(!args.include_declaration);
+    }
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let result = resolve_path(file.to_str().unwrap(), dir.path(), dir.path()).unwrap();
+        assert_eq!(result, file);
+    }
+
+    #[test]
+    fn test_resolve_path_relative_to_cwd() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let result = resolve_path("test.rs", dir.path(), dir.path()).unwrap();
+        assert_eq!(result, file);
+    }
+
+    #[test]
+    fn test_resolve_path_relative_to_root() {
+        let dir = TempDir::new().unwrap();
+        let subdir = dir.path().join("sub");
+        std::fs::create_dir(&subdir).unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let result = resolve_path("test.rs", &subdir, dir.path()).unwrap();
+        assert_eq!(result, file);
+    }
+
+    #[test]
+    fn test_resolve_path_nonexistent_returns_cwd_join() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_path("nonexistent.rs", dir.path(), dir.path()).unwrap();
+        assert_eq!(result, dir.path().join("nonexistent.rs"));
+    }
+
+    #[test]
+    fn test_resolve_path_nonexistent_absolute() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_path("/nonexistent/path.rs", dir.path(), dir.path()).unwrap();
+        assert_eq!(result, PathBuf::from("/nonexistent/path.rs"));
+    }
+
+    // Note: format_locations is implicitly tested through the LSP tool execution tests.
+    // Direct testing of format_locations would require lsp-types crate access for Uri construction.
+
+    #[test]
+    fn test_format_symbols() {
+        use wonopcode_lsp::client::DocumentSymbolInfo;
+        use wonopcode_lsp::SymbolKind;
+
+        let symbols = vec![
+            DocumentSymbolInfo {
+                name: "main".to_string(),
+                kind: SymbolKind::FUNCTION,
+                range: Range {
+                    start: Position { line: 0, character: 0 },
+                    end: Position { line: 5, character: 1 },
+                },
+                children: vec![],
+            },
+            DocumentSymbolInfo {
+                name: "MyStruct".to_string(),
+                kind: SymbolKind::STRUCT,
+                range: Range {
+                    start: Position { line: 7, character: 0 },
+                    end: Position { line: 10, character: 1 },
+                },
+                children: vec![
+                    DocumentSymbolInfo {
+                        name: "field".to_string(),
+                        kind: SymbolKind::FIELD,
+                        range: Range {
+                            start: Position { line: 8, character: 4 },
+                            end: Position { line: 8, character: 14 },
+                        },
+                        children: vec![],
+                    },
+                ],
+            },
+        ];
+
+        let output = format_symbols(&symbols, 0);
+        // The output contains the symbol kind and name with line numbers
+        assert!(output.contains("main"));
+        assert!(output.contains("line 1"));
+        assert!(output.contains("MyStruct"));
+        assert!(output.contains("field"));
+    }
+
+    #[test]
+    fn test_count_symbols() {
+        use wonopcode_lsp::client::DocumentSymbolInfo;
+        use wonopcode_lsp::SymbolKind;
+
+        let symbols = vec![
+            DocumentSymbolInfo {
+                name: "main".to_string(),
+                kind: SymbolKind::FUNCTION,
+                range: Range {
+                    start: Position { line: 0, character: 0 },
+                    end: Position { line: 5, character: 1 },
+                },
+                children: vec![],
+            },
+            DocumentSymbolInfo {
+                name: "MyStruct".to_string(),
+                kind: SymbolKind::STRUCT,
+                range: Range {
+                    start: Position { line: 7, character: 0 },
+                    end: Position { line: 10, character: 1 },
+                },
+                children: vec![
+                    DocumentSymbolInfo {
+                        name: "field1".to_string(),
+                        kind: SymbolKind::FIELD,
+                        range: Range::default(),
+                        children: vec![],
+                    },
+                    DocumentSymbolInfo {
+                        name: "field2".to_string(),
+                        kind: SymbolKind::FIELD,
+                        range: Range::default(),
+                        children: vec![],
+                    },
+                ],
+            },
+        ];
+
+        assert_eq!(count_symbols(&symbols), 4); // main, MyStruct, field1, field2
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_client_none_initially() {
+        let tool = LspTool::new();
+        let client = tool.client().await;
+        assert!(client.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_invalid_args() {
+        let dir = TempDir::new().unwrap();
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool.execute(json!({"invalid": "args"}), &ctx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_unknown_operation() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool
+            .execute(
+                json!({
+                    "operation": "unknown",
+                    "file": file.to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unknown operation"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_definition_missing_line() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool
+            .execute(
+                json!({
+                    "operation": "definition",
+                    "file": file.to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("line is required"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_definition_missing_column() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool
+            .execute(
+                json!({
+                    "operation": "definition",
+                    "file": file.to_str().unwrap(),
+                    "line": 0
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("column is required"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_references_missing_line() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool
+            .execute(
+                json!({
+                    "operation": "references",
+                    "file": file.to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("line is required"));
+    }
+
+    #[tokio::test]
+    async fn test_lsp_tool_hover_missing_line() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let tool = LspTool::new();
+        let ctx = create_test_context(&dir);
+
+        let result = tool
+            .execute(
+                json!({
+                    "operation": "hover",
+                    "file": file.to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("line is required"));
     }
 }

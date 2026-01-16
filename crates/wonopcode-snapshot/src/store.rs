@@ -434,6 +434,16 @@ mod tests {
         (dir, store)
     }
 
+    #[test]
+    fn snapshot_config_default_has_expected_values() {
+        let config = SnapshotConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.max_age_days, 30);
+        assert_eq!(config.max_per_session, 100);
+        assert_eq!(config.max_total_size_mb, 500);
+        assert!(config.auto_cleanup);
+    }
+
     #[tokio::test]
     async fn test_take_and_restore_snapshot() {
         let (dir, store) = setup_test().await;
@@ -547,5 +557,287 @@ mod tests {
         // Verify deleted
         let result = store.get(&snapshot.id).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_by_message_returns_snapshots_for_that_message() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "msg_1", "First")
+            .await
+            .unwrap();
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "msg_1", "Second same msg")
+            .await
+            .unwrap();
+        store
+            .take(&[PathBuf::from("test.txt")], "s2", "msg_2", "Different msg")
+            .await
+            .unwrap();
+
+        let msg1_snapshots = store.list_by_message("msg_1").await.unwrap();
+        assert_eq!(msg1_snapshots.len(), 2);
+        assert!(msg1_snapshots.iter().all(|s| s.message_id == "msg_1"));
+
+        let msg2_snapshots = store.list_by_message("msg_2").await.unwrap();
+        assert_eq!(msg2_snapshots.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn latest_for_file_returns_most_recent_snapshot() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("test.txt");
+        let other_file = dir.path().join("other.txt");
+        fs::write(&test_file, "content").await.unwrap();
+        fs::write(&other_file, "other").await.unwrap();
+
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "m1", "First")
+            .await
+            .unwrap();
+        let second = store
+            .take(&[PathBuf::from("test.txt")], "s1", "m2", "Second")
+            .await
+            .unwrap();
+
+        // Only other.txt
+        store
+            .take(&[PathBuf::from("other.txt")], "s1", "m3", "Other only")
+            .await
+            .unwrap();
+
+        let latest = store
+            .latest_for_file(Path::new("test.txt"))
+            .await
+            .unwrap();
+        assert!(latest.is_some());
+        assert_eq!(latest.unwrap().id, second.id);
+    }
+
+    #[tokio::test]
+    async fn latest_for_file_returns_none_when_no_match() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "m1", "Test")
+            .await
+            .unwrap();
+
+        let latest = store
+            .latest_for_file(Path::new("nonexistent.txt"))
+            .await
+            .unwrap();
+        assert!(latest.is_none());
+    }
+
+    #[tokio::test]
+    async fn take_fails_when_snapshots_disabled() {
+        let dir = TempDir::new().unwrap();
+        let snapshot_dir = dir.path().join(".wonopcode/snapshots");
+        let mut config = SnapshotConfig::default();
+        config.enabled = false;
+
+        let store = SnapshotStore::new(snapshot_dir, dir.path().to_path_buf(), config)
+            .await
+            .unwrap();
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        let result = store
+            .take(&[PathBuf::from("test.txt")], "s1", "m1", "Test")
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("disabled"));
+    }
+
+    #[tokio::test]
+    async fn take_fails_when_no_files_exist() {
+        let (_, store) = setup_test().await;
+
+        let result = store
+            .take(&[PathBuf::from("nonexistent.txt")], "s1", "m1", "Test")
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No files"));
+    }
+
+    #[tokio::test]
+    async fn take_skips_nonexistent_files_but_succeeds_with_existing() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        let snapshot = store
+            .take(
+                &[PathBuf::from("test.txt"), PathBuf::from("nonexistent.txt")],
+                "s1",
+                "m1",
+                "Test",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0], PathBuf::from("test.txt"));
+    }
+
+    #[tokio::test]
+    async fn get_returns_not_found_for_missing_snapshot() {
+        let (_, store) = setup_test().await;
+
+        let fake_id = SnapshotId::from_string("nonexistent".to_string());
+        let result = store.get(&fake_id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_returns_not_found_for_missing_snapshot() {
+        let (_, store) = setup_test().await;
+
+        let fake_id = SnapshotId::from_string("nonexistent".to_string());
+        let result = store.delete(&fake_id).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn diff_fails_when_file_not_in_snapshot() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        let snapshot = store
+            .take(&[PathBuf::from("test.txt")], "s1", "m1", "Test")
+            .await
+            .unwrap();
+
+        let result = store.diff(&snapshot.id, Path::new("other.txt")).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not in snapshot"));
+    }
+
+    #[tokio::test]
+    async fn normalize_path_strips_project_root_from_absolute_paths() {
+        let (dir, store) = setup_test().await;
+
+        let test_file = dir.path().join("subdir/test.txt");
+        fs::create_dir_all(dir.path().join("subdir")).await.unwrap();
+        fs::write(&test_file, "content").await.unwrap();
+
+        // Use absolute path
+        let snapshot = store
+            .take(&[test_file.clone()], "s1", "m1", "Test")
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0], PathBuf::from("subdir/test.txt"));
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_excess_per_session_snapshots() {
+        let dir = TempDir::new().unwrap();
+        let snapshot_dir = dir.path().join(".wonopcode/snapshots");
+        let mut config = SnapshotConfig::default();
+        config.max_per_session = 2;
+        config.auto_cleanup = false; // Manual cleanup
+
+        let store = SnapshotStore::new(snapshot_dir, dir.path().to_path_buf(), config)
+            .await
+            .unwrap();
+
+        let test_file = dir.path().join("test.txt");
+        fs::write(&test_file, "content").await.unwrap();
+
+        // Create 3 snapshots for same session
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "m1", "First")
+            .await
+            .unwrap();
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "m2", "Second")
+            .await
+            .unwrap();
+        store
+            .take(&[PathBuf::from("test.txt")], "s1", "m3", "Third")
+            .await
+            .unwrap();
+
+        let before = store.list().await.unwrap();
+        assert_eq!(before.len(), 3);
+
+        let deleted = store.cleanup().await.unwrap();
+        assert!(deleted >= 1);
+
+        let after = store.list().await.unwrap();
+        assert!(after.len() <= 2);
+    }
+
+    #[test]
+    fn generate_diff_produces_unified_diff_format() {
+        let old = "line 1\nline 2\nline 3\n";
+        let new = "line 1\nmodified\nline 3\n";
+
+        let diff = generate_diff(old, new, Path::new("test.txt"));
+
+        assert!(diff.contains("--- a/test.txt"));
+        assert!(diff.contains("+++ b/test.txt"));
+        assert!(diff.contains("-line 2"));
+        assert!(diff.contains("+modified"));
+    }
+
+    #[test]
+    fn generate_diff_handles_empty_files() {
+        let diff = generate_diff("", "new content\n", Path::new("new.txt"));
+        assert!(diff.contains("+new content"));
+
+        let diff2 = generate_diff("old content\n", "", Path::new("deleted.txt"));
+        assert!(diff2.contains("-old content"));
+    }
+
+    #[test]
+    fn generate_diff_handles_no_changes() {
+        let content = "same\n";
+        let diff = generate_diff(content, content, Path::new("same.txt"));
+        // Should just have headers, no +/- lines
+        assert!(diff.contains("--- a/same.txt"));
+        assert!(!diff.contains("-same"));
+        assert!(!diff.contains("+same"));
+    }
+
+    #[tokio::test]
+    async fn restore_creates_parent_directories() {
+        let (dir, store) = setup_test().await;
+
+        // Create nested file
+        let nested = dir.path().join("a/b/c/test.txt");
+        fs::create_dir_all(nested.parent().unwrap()).await.unwrap();
+        fs::write(&nested, "content").await.unwrap();
+
+        let snapshot = store
+            .take(&[PathBuf::from("a/b/c/test.txt")], "s1", "m1", "Test")
+            .await
+            .unwrap();
+
+        // Delete the directories
+        fs::remove_dir_all(dir.path().join("a")).await.unwrap();
+        assert!(!nested.exists());
+
+        // Restore should recreate directories
+        store.restore(&snapshot.id).await.unwrap();
+        assert!(nested.exists());
+
+        let content = fs::read_to_string(&nested).await.unwrap();
+        assert_eq!(content, "content");
     }
 }

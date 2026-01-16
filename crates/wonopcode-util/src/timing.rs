@@ -171,11 +171,44 @@ mod tests {
     }
 
     #[test]
+    fn test_timing_guard_mcp_tool() {
+        let guard = TimingGuard::mcp_tool("test_tool");
+        sleep(Duration::from_millis(5));
+        assert!(guard.elapsed_ms() >= 5);
+    }
+
+    #[test]
     fn test_timing_guard_thresholds() {
         let guard = TimingGuard::new("test", "thresholds")
             .with_info_threshold(50)
             .with_warn_threshold(1000);
         sleep(Duration::from_millis(10));
+        drop(guard);
+    }
+
+    #[test]
+    fn test_timing_guard_elapsed_returns_duration() {
+        let guard = TimingGuard::new("test", "elapsed");
+        sleep(Duration::from_millis(10));
+        let duration = guard.elapsed();
+        assert!(duration.as_millis() >= 10);
+    }
+
+    #[test]
+    fn test_timing_guard_drop_formats_ms_under_one_second() {
+        // Creates a guard that completes quickly (under 1s)
+        // Tests the ms formatting path in drop
+        let guard = TimingGuard::new("test", "quick")
+            .with_info_threshold(0)
+            .with_warn_threshold(10000);
+        sleep(Duration::from_millis(10));
+        drop(guard); // Will log with "XXms" format
+    }
+
+    #[test]
+    fn test_timing_guard_with_string_name() {
+        let name = String::from("dynamic_name");
+        let guard = TimingGuard::tool(name);
         drop(guard);
     }
 }

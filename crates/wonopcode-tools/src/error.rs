@@ -62,3 +62,60 @@ impl ToolError {
         Self::FileNotFound(path.into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn tool_error_validation_formats() {
+        let err = ToolError::validation("invalid input");
+        assert_eq!(err.to_string(), "Validation error: invalid input");
+    }
+
+    #[test]
+    fn tool_error_permission_denied_formats() {
+        let err = ToolError::permission_denied("access denied");
+        assert_eq!(err.to_string(), "Permission denied: access denied");
+    }
+
+    #[test]
+    fn tool_error_execution_failed_formats() {
+        let err = ToolError::execution_failed("command failed");
+        assert_eq!(err.to_string(), "Execution failed: command failed");
+    }
+
+    #[test]
+    fn tool_error_file_not_found_formats() {
+        let err = ToolError::file_not_found("/path/to/file");
+        assert_eq!(err.to_string(), "File not found: /path/to/file");
+    }
+
+    #[test]
+    fn tool_error_timeout_formats() {
+        let err = ToolError::Timeout(Duration::from_secs(30));
+        assert!(err.to_string().contains("30"));
+    }
+
+    #[test]
+    fn tool_error_cancelled_formats() {
+        let err = ToolError::Cancelled;
+        assert_eq!(err.to_string(), "Cancelled");
+    }
+
+    #[test]
+    fn tool_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err: ToolError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn tool_error_from_json_error() {
+        let json_result: Result<i32, serde_json::Error> = serde_json::from_str("invalid");
+        let json_err = json_result.unwrap_err();
+        let err: ToolError = json_err.into();
+        assert!(err.to_string().contains("JSON error"));
+    }
+}

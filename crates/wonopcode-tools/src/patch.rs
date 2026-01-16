@@ -679,6 +679,48 @@ fn count_changes(old_content: &str, new_content: &str) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
+
+    fn create_test_context(dir: &TempDir) -> ToolContext {
+        ToolContext {
+            session_id: "test-session".to_string(),
+            message_id: "test-message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: dir.path().to_path_buf(),
+            cwd: dir.path().to_path_buf(),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_patch_tool_id() {
+        let tool = PatchTool;
+        assert_eq!(tool.id(), "patch");
+    }
+
+    #[test]
+    fn test_patch_tool_description() {
+        let tool = PatchTool;
+        let desc = tool.description();
+        assert!(desc.contains("patch"));
+        assert!(desc.contains("Add File"));
+        assert!(desc.contains("Delete File"));
+        assert!(desc.contains("Update File"));
+    }
+
+    #[test]
+    fn test_patch_tool_parameters_schema() {
+        let tool = PatchTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("patch_text")));
+    }
 
     #[test]
     fn test_parse_add_file() {
@@ -740,6 +782,69 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_update_with_move() {
+        let patch = r#"*** Begin Patch
+*** Update File: old/path.rs
+*** Move to: new/path.rs
+@@ line
+-old
++new
+*** End Patch"#;
+
+        let hunks = parse_patch(patch).unwrap();
+        assert_eq!(hunks.len(), 1);
+
+        match &hunks[0] {
+            Hunk::Update {
+                path,
+                move_to,
+                chunks,
+            } => {
+                assert_eq!(path.to_str().unwrap(), "old/path.rs");
+                assert!(move_to.is_some());
+                assert_eq!(move_to.as_ref().unwrap().to_str().unwrap(), "new/path.rs");
+                assert_eq!(chunks.len(), 1);
+            }
+            _ => panic!("Expected Update hunk"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_hunks() {
+        let patch = r#"*** Begin Patch
+*** Add File: new.txt
++content
+*** Delete File: old.txt
+*** Update File: existing.txt
+@@ line
+-old
++new
+*** End Patch"#;
+
+        let hunks = parse_patch(patch).unwrap();
+        assert_eq!(hunks.len(), 3);
+        assert!(matches!(&hunks[0], Hunk::Add { .. }));
+        assert!(matches!(&hunks[1], Hunk::Delete { .. }));
+        assert!(matches!(&hunks[2], Hunk::Update { .. }));
+    }
+
+    #[test]
+    fn test_parse_empty_patch() {
+        let patch = r#"*** Begin Patch
+*** End Patch"#;
+
+        let hunks = parse_patch(patch).unwrap();
+        assert!(hunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_without_markers() {
+        let patch = "just some text";
+        let hunks = parse_patch(patch).unwrap();
+        assert!(hunks.is_empty());
+    }
+
+    #[test]
     fn test_apply_chunk() {
         let content = "line 1\nline 2\nline 3\n";
         let chunk = UpdateChunk {
@@ -751,5 +856,239 @@ mod tests {
 
         let result = apply_chunk(content, &chunk).unwrap();
         assert!(result.contains("modified line 2"));
+    }
+
+    #[test]
+    fn test_apply_chunk_no_context() {
+        let content = "line 1\nold line\nline 3\n";
+        let chunk = UpdateChunk {
+            context: None,
+            old_lines: vec!["old line".to_string()],
+            new_lines: vec!["new line".to_string()],
+            is_end_of_file: false,
+        };
+
+        let result = apply_chunk(content, &chunk).unwrap();
+        assert!(result.contains("new line"));
+    }
+
+    #[test]
+    fn test_apply_chunk_end_of_file() {
+        let content = "line 1\nline 2\nlast line\n";
+        let chunk = UpdateChunk {
+            context: None,
+            old_lines: vec!["last line".to_string()],
+            new_lines: vec!["new last line".to_string()],
+            is_end_of_file: true,
+        };
+
+        let result = apply_chunk(content, &chunk).unwrap();
+        assert!(result.contains("new last line"));
+    }
+
+    #[test]
+    fn test_apply_chunk_deletion_only() {
+        let content = "line 1\nto delete\nline 3\n";
+        let chunk = UpdateChunk {
+            context: Some("to delete".to_string()),
+            old_lines: vec!["to delete".to_string()],
+            new_lines: vec![],
+            is_end_of_file: false,
+        };
+
+        let result = apply_chunk(content, &chunk).unwrap();
+        assert!(!result.contains("to delete"));
+    }
+
+    #[test]
+    fn test_apply_chunk_addition_only() {
+        let content = "line 1\nline 2\nline 3\n";
+        let chunk = UpdateChunk {
+            context: Some("line 2".to_string()),
+            old_lines: vec![],
+            new_lines: vec!["inserted".to_string()],
+            is_end_of_file: false,
+        };
+
+        let result = apply_chunk(content, &chunk).unwrap();
+        assert!(result.contains("inserted"));
+    }
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let base = Path::new("/base");
+        let path = Path::new("/absolute/path");
+        let result = resolve_path(base, path);
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn test_resolve_path_relative() {
+        let base = Path::new("/base");
+        let path = Path::new("relative/path");
+        let result = resolve_path(base, path);
+        assert_eq!(result, PathBuf::from("/base/relative/path"));
+    }
+
+    #[tokio::test]
+    async fn test_patch_add_file() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = r#"*** Begin Patch
+*** Add File: newfile.txt
++hello world
+*** End Patch"#;
+
+        let result = tool
+            .execute(json!({"patch_text": patch}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("Added"));
+        let content = std::fs::read_to_string(dir.path().join("newfile.txt")).unwrap();
+        assert_eq!(content.trim(), "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_patch_delete_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("to_delete.txt");
+        std::fs::write(&file, "content").unwrap();
+
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = r#"*** Begin Patch
+*** Delete File: to_delete.txt
+*** End Patch"#;
+
+        let result = tool
+            .execute(json!({"patch_text": patch}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("Deleted") || result.output.contains("delete"));
+        assert!(!file.exists());
+    }
+
+    #[tokio::test]
+    async fn test_patch_update_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "line 1\nold content\nline 3\n").unwrap();
+
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = r#"*** Begin Patch
+*** Update File: test.txt
+@@ old content
+-old content
++new content
+*** End Patch"#;
+
+        let result = tool
+            .execute(json!({"patch_text": patch}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("Updated") || result.output.contains("Modified"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.contains("new content"));
+        assert!(!content.contains("old content"));
+    }
+
+    #[tokio::test]
+    async fn test_patch_invalid_args() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let result = tool.execute(json!({"invalid": "args"}), &ctx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn test_patch_empty() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = "*** Begin Patch\n*** End Patch";
+
+        let result = tool.execute(json!({"patch_text": patch}), &ctx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("No valid hunks"));
+    }
+
+    #[tokio::test]
+    async fn test_patch_delete_nonexistent() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = r#"*** Begin Patch
+*** Delete File: nonexistent.txt
+*** End Patch"#;
+
+        let result = tool
+            .execute(json!({"patch_text": patch}), &ctx)
+            .await
+            .unwrap();
+
+        // Should skip gracefully
+        assert!(result.output.contains("Skipped") || result.output.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_patch_creates_directories() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_test_context(&dir);
+        let tool = PatchTool;
+
+        let patch = r#"*** Begin Patch
+*** Add File: nested/deep/file.txt
++content
+*** End Patch"#;
+
+        let result = tool
+            .execute(json!({"patch_text": patch}), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("Added"));
+        assert!(dir.path().join("nested/deep/file.txt").exists());
+    }
+
+    #[test]
+    fn test_parse_update_multiple_chunks() {
+        let patch = r#"*** Begin Patch
+*** Update File: src/main.rs
+@@ first context
+-old1
++new1
+@@ second context
+-old2
++new2
+*** End Patch"#;
+
+        let hunks = parse_patch(patch).unwrap();
+        assert_eq!(hunks.len(), 1);
+
+        match &hunks[0] {
+            Hunk::Update { chunks, .. } => {
+                assert_eq!(chunks.len(), 2);
+                assert_eq!(chunks[0].context, Some("first context".to_string()));
+                assert_eq!(chunks[1].context, Some("second context".to_string()));
+            }
+            _ => panic!("Expected Update hunk"),
+        }
     }
 }

@@ -48,3 +48,52 @@ impl SnapshotError {
         Self::OperationFailed(message.into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_error_not_found_formats() {
+        let err = SnapshotError::not_found("snap_12345");
+        assert_eq!(err.to_string(), "Snapshot not found: snap_12345");
+    }
+
+    #[test]
+    fn snapshot_error_operation_failed_formats() {
+        let err = SnapshotError::operation_failed("disk full");
+        assert_eq!(err.to_string(), "Snapshot operation failed: disk full");
+    }
+
+    #[test]
+    fn snapshot_error_file_not_found_formats() {
+        let err = SnapshotError::FileNotFound("/tmp/test.txt".to_string());
+        assert_eq!(err.to_string(), "File not found: /tmp/test.txt");
+    }
+
+    #[test]
+    fn snapshot_error_invalid_id_formats() {
+        let err = SnapshotError::InvalidId("bad-id".to_string());
+        assert_eq!(err.to_string(), "Invalid snapshot ID: bad-id");
+    }
+
+    #[test]
+    fn snapshot_error_corrupted_formats() {
+        let err = SnapshotError::Corrupted("invalid json".to_string());
+        assert_eq!(err.to_string(), "Snapshot storage corrupted: invalid json");
+    }
+
+    #[test]
+    fn snapshot_error_io_wraps_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err = SnapshotError::from(io_err);
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn snapshot_error_serialization_wraps_serde_error() {
+        let json_err = serde_json::from_str::<String>("invalid").unwrap_err();
+        let err = SnapshotError::from(json_err);
+        assert!(err.to_string().contains("Serialization error"));
+    }
+}

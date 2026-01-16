@@ -206,6 +206,7 @@ pub fn assert_approx_eq(actual: f64, expected: f64, epsilon: f64) {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -228,8 +229,24 @@ mod tests {
     }
 
     #[test]
+    fn test_assert_file_equals() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.txt");
+        fs::write(&path, "exact content").unwrap();
+
+        assert_file_equals(&path, "exact content");
+    }
+
+    #[test]
     fn test_assert_strings_equal() {
         assert_strings_equal("hello", "hello");
+    }
+
+    #[test]
+    fn test_assert_strings_equal_multiline() {
+        let s1 = "line1\nline2\nline3";
+        let s2 = "line1\nline2\nline3";
+        assert_strings_equal(s1, s2);
     }
 
     #[test]
@@ -240,6 +257,27 @@ mod tests {
     }
 
     #[test]
+    fn test_assert_ok_macro_with_msg() {
+        let result: Result<i32, &str> = Ok(42);
+        let value = assert_ok!(result, "should succeed");
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn test_assert_err_macro() {
+        let result: Result<i32, &str> = Err("error message");
+        let err = assert_err!(result);
+        assert_eq!(err, "error message");
+    }
+
+    #[test]
+    fn test_assert_err_macro_with_msg() {
+        let result: Result<i32, &str> = Err("error");
+        let err = assert_err!(result, "should fail");
+        assert_eq!(err, "error");
+    }
+
+    #[test]
     fn test_assert_some_macro() {
         let option: Option<i32> = Some(42);
         let value = assert_some!(option);
@@ -247,7 +285,67 @@ mod tests {
     }
 
     #[test]
+    fn test_assert_some_macro_with_msg() {
+        let option: Option<i32> = Some(42);
+        let value = assert_some!(option, "should be some");
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn test_assert_none_macro() {
+        let option: Option<i32> = None;
+        assert_none!(option);
+    }
+
+    #[test]
+    fn test_assert_none_macro_with_msg() {
+        let option: Option<i32> = None;
+        assert_none!(option, "should be none");
+    }
+
+    #[test]
+    fn test_assert_contains_macro() {
+        let vec = vec![1, 2, 3, 4, 5];
+        assert_contains!(vec, 3);
+        assert_contains!(vec, 1);
+        assert_contains!(vec, 5);
+    }
+
+    #[test]
+    fn test_assert_str_contains_macro() {
+        let s = "hello world";
+        assert_str_contains!(s, "hello");
+        assert_str_contains!(s, "world");
+        assert_str_contains!(s, "lo wo");
+    }
+
+    #[test]
+    fn test_assert_duration_within() {
+        let duration = Duration::from_millis(100);
+        assert_duration_within(
+            duration,
+            Duration::from_millis(50),
+            Duration::from_millis(150),
+        );
+    }
+
+    #[test]
+    fn test_assert_duration_within_exact_bounds() {
+        let duration = Duration::from_millis(100);
+        assert_duration_within(
+            duration,
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+        );
+    }
+
+    #[test]
     fn test_assert_approx_eq() {
         assert_approx_eq(std::f64::consts::PI, std::f64::consts::PI + 0.00001, 0.001);
+    }
+
+    #[test]
+    fn test_assert_approx_eq_exact() {
+        assert_approx_eq(1.5, 1.5, 0.0001);
     }
 }

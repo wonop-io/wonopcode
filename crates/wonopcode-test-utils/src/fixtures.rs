@@ -269,6 +269,12 @@ mod tests {
     }
 
     #[test]
+    fn test_project_default() {
+        let project = TestProject::default().build();
+        assert!(project.path().exists());
+    }
+
+    #[test]
     fn test_project_with_files() {
         let project = TestProject::new()
             .with_file("test.txt", "Hello")
@@ -278,6 +284,17 @@ mod tests {
         assert!(project.file_exists("test.txt"));
         assert!(project.file_exists("src/main.rs"));
         assert_eq!(project.read_file("test.txt"), "Hello");
+    }
+
+    #[test]
+    fn test_project_with_dir() {
+        let project = TestProject::new()
+            .with_dir("src/modules")
+            .with_dir("tests")
+            .build();
+
+        assert!(project.path().join("src/modules").exists());
+        assert!(project.path().join("tests").exists());
     }
 
     #[test]
@@ -292,6 +309,26 @@ mod tests {
     }
 
     #[test]
+    fn test_with_config() {
+        let config = r#"{"theme": "dark"}"#;
+        let project = TestProject::new().with_config(config).build();
+
+        assert!(project.file_exists("wonopcode.json"));
+        assert_eq!(project.read_file("wonopcode.json"), config);
+    }
+
+    #[test]
+    fn test_with_gitignore() {
+        let project = TestProject::new()
+            .with_gitignore("target/\n*.log\n")
+            .build();
+
+        assert!(project.file_exists(".gitignore"));
+        let content = project.read_file(".gitignore");
+        assert!(content.contains("target/"));
+    }
+
+    #[test]
     fn test_write_and_delete() {
         let project = TestProject::new().build();
 
@@ -300,5 +337,64 @@ mod tests {
 
         project.delete_file("new.txt");
         assert!(!project.file_exists("new.txt"));
+    }
+
+    #[test]
+    fn test_write_file_creates_parent_dirs() {
+        let project = TestProject::new().build();
+
+        project.write_file("deep/nested/file.txt", "content");
+        assert!(project.file_exists("deep/nested/file.txt"));
+    }
+
+    #[test]
+    fn test_list_files() {
+        let project = TestProject::new()
+            .with_file("dir/file1.txt", "1")
+            .with_file("dir/file2.txt", "2")
+            .with_file("other/file3.txt", "3")
+            .build();
+
+        let files = project.list_files("dir");
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_list_files_empty_dir() {
+        let project = TestProject::new().with_dir("empty").build();
+
+        let files = project.list_files("empty");
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_list_files_nonexistent_dir() {
+        let project = TestProject::new().build();
+
+        let files = project.list_files("nonexistent");
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_content_cargo_toml() {
+        let toml = content::cargo_toml("my-crate");
+        assert!(toml.contains("my-crate"));
+        assert!(toml.contains("edition = \"2021\""));
+    }
+
+    #[test]
+    fn test_content_wonopcode_config() {
+        let config = content::wonopcode_config("dark", "claude-3");
+        assert!(config.contains("dark"));
+        assert!(config.contains("claude-3"));
+    }
+
+    #[test]
+    fn test_content_constants() {
+        assert!(content::RUST_MAIN.contains("fn main()"));
+        assert!(content::RUST_BUGGY.contains("divide"));
+        assert!(content::PYTHON_HELLO.contains("def main()"));
+        assert!(content::JS_HELLO.contains("function main()"));
+        assert!(content::TS_HELLO.contains("function main(): void"));
     }
 }

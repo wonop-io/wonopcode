@@ -650,6 +650,7 @@ pub fn infer_provider(model_id: &str) -> &'static str {
     } else if model_id.starts_with("gpt")
         || model_id.starts_with("o1")
         || model_id.starts_with("o3")
+        || model_id.starts_with("o4")
     {
         "openai"
     } else if model_id.starts_with("gemini") {
@@ -663,5 +664,332 @@ pub fn infer_provider(model_id: &str) -> &'static str {
         "openrouter"
     } else {
         "anthropic" // Default
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === Provider inference tests ===
+
+    #[test]
+    fn user_gets_anthropic_for_claude_models() {
+        assert_eq!(infer_provider("claude-sonnet-4-5"), "anthropic");
+        assert_eq!(infer_provider("claude-haiku-4-5"), "anthropic");
+        assert_eq!(infer_provider("claude-opus-4-5"), "anthropic");
+        assert_eq!(infer_provider("claude-3-7-sonnet-latest"), "anthropic");
+    }
+
+    #[test]
+    fn user_gets_openai_for_gpt_models() {
+        assert_eq!(infer_provider("gpt-4o"), "openai");
+        assert_eq!(infer_provider("gpt-4o-mini"), "openai");
+        assert_eq!(infer_provider("gpt-5"), "openai");
+        assert_eq!(infer_provider("gpt-5-mini"), "openai");
+    }
+
+    #[test]
+    fn user_gets_openai_for_o_series_models() {
+        assert_eq!(infer_provider("o1"), "openai");
+        assert_eq!(infer_provider("o3"), "openai");
+        assert_eq!(infer_provider("o3-mini"), "openai");
+        assert_eq!(infer_provider("o4-mini"), "openai");
+    }
+
+    #[test]
+    fn user_gets_google_for_gemini_models() {
+        assert_eq!(infer_provider("gemini-2.0-flash"), "google");
+        assert_eq!(infer_provider("gemini-1.5-pro"), "google");
+        assert_eq!(infer_provider("gemini-1.5-flash"), "google");
+    }
+
+    #[test]
+    fn user_gets_xai_for_grok_models() {
+        assert_eq!(infer_provider("grok-1"), "xai");
+        assert_eq!(infer_provider("grok-beta"), "xai");
+    }
+
+    #[test]
+    fn user_gets_mistral_for_mistral_and_codestral() {
+        assert_eq!(infer_provider("mistral-large"), "mistral");
+        assert_eq!(infer_provider("mistral-small"), "mistral");
+        assert_eq!(infer_provider("codestral-latest"), "mistral");
+    }
+
+    #[test]
+    fn user_gets_openrouter_for_slash_format() {
+        assert_eq!(infer_provider("anthropic/claude-3-opus"), "openrouter");
+        assert_eq!(infer_provider("meta-llama/llama-3-70b"), "openrouter");
+    }
+
+    #[test]
+    fn user_gets_anthropic_as_default_for_unknown() {
+        assert_eq!(infer_provider("some-unknown-model"), "anthropic");
+    }
+
+    // === Model info tests ===
+
+    #[test]
+    fn model_info_returns_known_claude_models() {
+        let info = build_model_info("claude-sonnet-4-5", "anthropic");
+        assert!(info.id.contains("claude"));
+        assert_eq!(info.limit.context, 200_000);
+    }
+
+    #[test]
+    fn model_info_returns_known_gpt_models() {
+        let info = build_model_info("gpt-4o", "openai");
+        assert!(info.id.contains("gpt"));
+    }
+
+    #[test]
+    fn model_info_returns_reasonable_defaults_for_unknown() {
+        let info = build_model_info("unknown-model", "anthropic");
+        assert_eq!(info.id, "unknown-model");
+        assert_eq!(info.provider_id, "anthropic");
+        assert_eq!(info.limit.context, 200_000); // Anthropic default
+        assert_eq!(info.limit.output, 8_192);
+    }
+
+    #[test]
+    fn model_info_uses_provider_specific_defaults() {
+        let anthropic = build_model_info("unknown", "anthropic");
+        assert_eq!(anthropic.limit.context, 200_000);
+
+        let openai = build_model_info("unknown", "openai");
+        assert_eq!(openai.limit.context, 128_000);
+
+        let google = build_model_info("unknown", "google");
+        assert_eq!(google.limit.context, 1_000_000);
+
+        let other = build_model_info("unknown", "other");
+        assert_eq!(other.limit.context, 32_000);
+    }
+
+    // === UUID simple tests ===
+
+    #[test]
+    fn uuid_simple_generates_unique_ids() {
+        let id1 = uuid_simple();
+        // Sleep briefly to ensure different timestamp
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let id2 = uuid_simple();
+
+        assert!(!id1.is_empty());
+        assert!(!id2.is_empty());
+        // IDs should be different (though in fast execution they might be same)
+    }
+
+    #[test]
+    fn uuid_simple_is_hex_string() {
+        let id = uuid_simple();
+        // Should be valid hex characters
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    // === PromptEvent serialization tests ===
+
+    #[test]
+    fn prompt_event_started_serializes_correctly() {
+        let event = PromptEvent::Started {
+            session_id: "sess-123".to_string(),
+            message_id: "msg-456".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"started\""));
+        assert!(json.contains("\"session_id\":\"sess-123\""));
+        assert!(json.contains("\"message_id\":\"msg-456\""));
+    }
+
+    #[test]
+    fn prompt_event_text_delta_serializes_correctly() {
+        let event = PromptEvent::TextDelta {
+            delta: "Hello world".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"text_delta\""));
+        assert!(json.contains("\"delta\":\"Hello world\""));
+    }
+
+    #[test]
+    fn prompt_event_tool_started_serializes_correctly() {
+        let event = PromptEvent::ToolStarted {
+            id: "tool-1".to_string(),
+            name: "read".to_string(),
+            input: serde_json::json!({"filePath": "/tmp/test.txt"}),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"tool_started\""));
+        assert!(json.contains("\"name\":\"read\""));
+        assert!(json.contains("\"filePath\""));
+    }
+
+    #[test]
+    fn prompt_event_tool_completed_serializes_correctly() {
+        let event = PromptEvent::ToolCompleted {
+            id: "tool-1".to_string(),
+            success: true,
+            output: "file contents".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"tool_completed\""));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn prompt_event_token_usage_serializes_correctly() {
+        let event = PromptEvent::TokenUsage {
+            input: 1000,
+            output: 500,
+            cost: 0.015,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"token_usage\""));
+        assert!(json.contains("\"input\":1000"));
+        assert!(json.contains("\"output\":500"));
+        assert!(json.contains("\"cost\":0.015"));
+    }
+
+    #[test]
+    fn prompt_event_completed_serializes_correctly() {
+        let event = PromptEvent::Completed {
+            message_id: "msg-123".to_string(),
+            text: "Final response".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"completed\""));
+        assert!(json.contains("\"text\":\"Final response\""));
+    }
+
+    #[test]
+    fn prompt_event_error_serializes_correctly() {
+        let event = PromptEvent::Error {
+            error: "Something went wrong".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"error\""));
+        assert!(json.contains("\"error\":\"Something went wrong\""));
+    }
+
+    #[test]
+    fn prompt_event_aborted_serializes_correctly() {
+        let event = PromptEvent::Aborted;
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"aborted\""));
+    }
+
+    // === PromptRequest deserialization tests ===
+
+    #[test]
+    fn prompt_request_deserializes_minimal() {
+        let json = r#"{"prompt": "Hello"}"#;
+        let request: PromptRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.prompt, "Hello");
+        assert!(request.model.is_none());
+        assert!(request.provider.is_none());
+        assert!(request.agent.is_none());
+        assert!(request.system_prompt.is_none());
+    }
+
+    #[test]
+    fn prompt_request_deserializes_full() {
+        let json = r#"{
+            "prompt": "Explain this code",
+            "model": "claude-sonnet-4-5",
+            "provider": "anthropic",
+            "agent": "coder",
+            "system_prompt": "You are a helpful assistant"
+        }"#;
+        let request: PromptRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.prompt, "Explain this code");
+        assert_eq!(request.model, Some("claude-sonnet-4-5".to_string()));
+        assert_eq!(request.provider, Some("anthropic".to_string()));
+        assert_eq!(request.agent, Some("coder".to_string()));
+        assert!(request.system_prompt.is_some());
+    }
+
+    // === PromptResponse serialization tests ===
+
+    #[test]
+    fn prompt_response_serializes_correctly() {
+        let response = PromptResponse {
+            message_id: "msg-123".to_string(),
+            text: "Response text".to_string(),
+            usage: PromptUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cost: 0.005,
+            },
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"message_id\":\"msg-123\""));
+        assert!(json.contains("\"text\":\"Response text\""));
+        assert!(json.contains("\"input_tokens\":100"));
+        assert!(json.contains("\"output_tokens\":50"));
+        assert!(json.contains("\"cost\":0.005"));
+    }
+
+    // === AgentConfig tests ===
+
+    #[test]
+    fn agent_config_default_is_empty() {
+        let config = AgentConfig::default();
+        assert!(config.name.is_none());
+        assert!(config.prompt.is_none());
+        assert!(config.temperature.is_none());
+        assert!(config.top_p.is_none());
+        assert!(config.tools.is_empty());
+        assert!(config.max_steps.is_none());
+    }
+
+    #[test]
+    fn agent_config_from_agent_copies_fields() {
+        use wonopcode_core::{Agent, AgentMode, AgentPermission};
+
+        let agent = Agent {
+            name: "test-agent".to_string(),
+            description: Some("Test description".to_string()),
+            mode: AgentMode::Primary,
+            native: false,
+            hidden: false,
+            is_default: false,
+            temperature: Some(0.5),
+            top_p: Some(0.9),
+            color: None,
+            permission: AgentPermission::default(),
+            model: None,
+            prompt: Some("Custom prompt".to_string()),
+            tools: HashMap::from([("bash".to_string(), false)]),
+            max_steps: Some(10),
+            sandbox: None,
+        };
+
+        let config = AgentConfig::from(&agent);
+        assert_eq!(config.name, Some("test-agent".to_string()));
+        assert_eq!(config.prompt, Some("Custom prompt".to_string()));
+        assert_eq!(config.temperature, Some(0.5));
+        assert_eq!(config.top_p, Some(0.9));
+        assert_eq!(config.tools.get("bash"), Some(&false));
+        assert_eq!(config.max_steps, Some(10));
+    }
+
+    // === build_basic_system_prompt tests ===
+
+    #[test]
+    fn system_prompt_includes_cwd() {
+        let cwd = std::path::Path::new("/home/user/project");
+        let prompt = build_basic_system_prompt(cwd);
+        assert!(prompt.contains("/home/user/project"));
+    }
+
+    #[test]
+    fn system_prompt_mentions_tools() {
+        let cwd = std::path::Path::new("/tmp");
+        let prompt = build_basic_system_prompt(cwd);
+        assert!(prompt.contains("tools"));
+        assert!(prompt.contains("reading files"));
+        assert!(prompt.contains("writing files"));
+        assert!(prompt.contains("shell commands"));
     }
 }

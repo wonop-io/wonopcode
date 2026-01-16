@@ -301,6 +301,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_read_tool_id() {
+        let tool = ReadTool;
+        assert_eq!(tool.id(), "read");
+    }
+
+    #[test]
+    fn test_read_tool_description() {
+        let tool = ReadTool;
+        let desc = tool.description();
+        assert!(desc.contains("Reads a file"));
+        assert!(desc.contains("absolute path"));
+        assert!(desc.contains("2000"));
+    }
+
+    #[test]
+    fn test_read_tool_parameters_schema() {
+        let tool = ReadTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("filePath")));
+        assert!(schema["properties"]["filePath"].is_object());
+        assert!(schema["properties"]["offset"].is_object());
+        assert!(schema["properties"]["limit"].is_object());
+    }
+
     #[tokio::test]
     async fn test_read_file() {
         let dir = tempdir().unwrap();
@@ -342,6 +371,54 @@ mod tests {
         assert!(!result.output.contains("line 1"));
         assert!(result.output.contains("line 2"));
         assert!(result.output.contains("line 3"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_with_limit() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "line 1\nline 2\nline 3\nline 4\nline 5").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.display().to_string(),
+                    "limit": 2
+                }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("line 1"));
+        assert!(result.output.contains("line 2"));
+        assert!(!result.output.contains("line 3"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_with_offset_and_limit() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "line 1\nline 2\nline 3\nline 4\nline 5").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.display().to_string(),
+                    "offset": 1,
+                    "limit": 2
+                }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.output.contains("line 1"));
+        assert!(result.output.contains("line 2"));
+        assert!(result.output.contains("line 3"));
+        assert!(!result.output.contains("line 4"));
     }
 
     #[tokio::test]
@@ -394,6 +471,56 @@ mod tests {
         assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
     }
 
+    #[tokio::test]
+    async fn test_read_missing_file_path() {
+        let tool = ReadTool;
+        let result = tool
+            .execute(json!({ "not_file_path": "something" }), &test_context())
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("filePath"));
+    }
+
+    #[tokio::test]
+    async fn test_read_empty_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("empty.txt");
+        std::fs::write(&file_path, "").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({ "filePath": file_path.display().to_string() }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.metadata["lines"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_file_metadata() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "line 1\nline 2").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({ "filePath": file_path.display().to_string() }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.metadata["lines"], 2);
+        assert_eq!(result.metadata["offset"], 0);
+        assert_eq!(result.metadata["sandboxed"], false);
+    }
+
     #[test]
     fn test_is_sensitive_file() {
         assert!(is_sensitive_file(std::path::Path::new("/project/.env")));
@@ -409,5 +536,152 @@ mod tests {
         assert!(!is_sensitive_file(std::path::Path::new(
             "/project/src/main.rs"
         )));
+    }
+
+    #[test]
+    fn test_is_sensitive_file_env_variants() {
+        assert!(is_sensitive_file(std::path::Path::new("/project/.env.local")));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/.env.development"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/.env.production"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/.env.staging"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new("/project/.env.test")));
+    }
+
+    #[test]
+    fn test_is_sensitive_file_secrets() {
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/secrets.yaml"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/secrets.yml"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/credentials.json"
+        )));
+    }
+
+    #[test]
+    fn test_is_sensitive_file_rc_files() {
+        assert!(is_sensitive_file(std::path::Path::new("/home/user/.npmrc")));
+        assert!(is_sensitive_file(std::path::Path::new("/home/user/.pypirc")));
+        assert!(is_sensitive_file(std::path::Path::new("/home/user/.netrc")));
+    }
+
+    #[test]
+    fn test_is_sensitive_file_ssh() {
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/home/user/.ssh/id_rsa"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/home/user/.ssh/id_ed25519"
+        )));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/home/user/.ssh/id_dsa"
+        )));
+    }
+
+    #[tokio::test]
+    async fn test_suggest_similar_file() {
+        let dir = tempdir().unwrap();
+        // Create a file called "readme.md"
+        std::fs::write(dir.path().join("readme.md"), "# README").unwrap();
+
+        // Try to find a similar file for "readm.md" (typo)
+        let nonexistent = dir.path().join("readm.md");
+        let suggestion = suggest_similar_file(&nonexistent).await;
+
+        assert!(suggestion.is_some());
+        assert!(suggestion.unwrap().contains("readme.md"));
+    }
+
+    #[tokio::test]
+    async fn test_suggest_similar_file_no_match() {
+        let dir = tempdir().unwrap();
+        // Create a file with a very different name
+        std::fs::write(dir.path().join("abc.txt"), "content").unwrap();
+
+        // Try to find similar file for something completely different
+        let nonexistent = dir.path().join("xyz123.rs");
+        let suggestion = suggest_similar_file(&nonexistent).await;
+
+        // May or may not find a match depending on the similarity threshold
+        // Just verify it doesn't panic
+        let _ = suggestion;
+    }
+
+    #[tokio::test]
+    async fn test_suggest_similar_file_nonexistent_parent() {
+        let nonexistent = PathBuf::from("/nonexistent/directory/file.txt");
+        let suggestion = suggest_similar_file(&nonexistent).await;
+
+        assert!(suggestion.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_read_long_lines_truncation() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("longlines.txt");
+        // Create a line with more than 2000 characters
+        let long_line = "x".repeat(3000);
+        std::fs::write(&file_path, &long_line).unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({ "filePath": file_path.display().to_string() }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        // The line should be truncated
+        assert!(result.output.contains("[truncated]"));
+        // But should still have 2000 x's
+        assert!(result.output.contains(&"x".repeat(2000)));
+    }
+
+    #[tokio::test]
+    async fn test_read_title_output() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({ "filePath": file_path.display().to_string() }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.title.contains("Read"));
+    }
+
+    #[tokio::test]
+    async fn test_read_line_numbers_in_output() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("numbered.txt");
+        std::fs::write(&file_path, "first\nsecond\nthird").unwrap();
+
+        let tool = ReadTool;
+        let result = tool
+            .execute(
+                json!({ "filePath": file_path.display().to_string() }),
+                &test_context(),
+            )
+            .await
+            .unwrap();
+
+        // Line numbers should be 1-indexed
+        assert!(result.output.contains("1|"));
+        assert!(result.output.contains("2|"));
+        assert!(result.output.contains("3|"));
     }
 }

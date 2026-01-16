@@ -138,3 +138,200 @@ impl Action {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // UX-Critical: Action Serialization Tests
+    // If these fail, client-server communication breaks
+    // =========================================================================
+
+    #[test]
+    fn action_send_prompt_serializes_correctly() {
+        // UX: User sends a message to the AI
+        let action = Action::SendPrompt {
+            prompt: "Hello, world!".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("send_prompt"));
+        assert!(json.contains("Hello, world!"));
+
+        // Roundtrip
+        let parsed: Action = serde_json::from_str(&json).unwrap();
+        if let Action::SendPrompt { prompt } = parsed {
+            assert_eq!(prompt, "Hello, world!");
+        } else {
+            panic!("Wrong action type");
+        }
+    }
+
+    #[test]
+    fn action_change_model_serializes_correctly() {
+        // UX: User changes the AI model
+        let action = Action::ChangeModel {
+            model: "anthropic/claude-3-5-sonnet".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("change_model"));
+        assert!(json.contains("anthropic/claude-3-5-sonnet"));
+    }
+
+    #[test]
+    fn action_switch_session_serializes_correctly() {
+        // UX: User switches to a different session
+        let action = Action::SwitchSession {
+            session_id: "ses_123abc".to_string(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("switch_session"));
+        assert!(json.contains("ses_123abc"));
+    }
+
+    #[test]
+    fn action_permission_response_serializes_correctly() {
+        // UX: User responds to a permission request
+        let action = Action::PermissionResponse {
+            request_id: "req_456".to_string(),
+            allow: true,
+            remember: true,
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("permission_response"));
+        assert!(json.contains("req_456"));
+        assert!(json.contains("true"));
+    }
+
+    #[test]
+    fn action_save_settings_with_json_value() {
+        // UX: User saves settings
+        let config = serde_json::json!({
+            "theme": "dark",
+            "model": "anthropic/claude-3-5-sonnet"
+        });
+        let action = Action::SaveSettings {
+            scope: SaveScope::Project,
+            config,
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("save_settings"));
+        assert!(json.contains("project"));
+        assert!(json.contains("dark"));
+    }
+
+    #[test]
+    fn all_simple_actions_serialize() {
+        // UX: All actions can be sent over the wire
+        let actions = vec![
+            Action::Cancel,
+            Action::NewSession,
+            Action::Undo,
+            Action::Redo,
+            Action::Unrevert,
+            Action::Compact,
+            Action::SandboxStart,
+            Action::SandboxStop,
+            Action::SandboxRestart,
+            Action::ShareSession,
+            Action::UnshareSession,
+            Action::Quit,
+        ];
+
+        for action in actions {
+            let json = serde_json::to_string(&action).unwrap();
+            let _parsed: Action = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    #[test]
+    fn action_endpoints_are_unique() {
+        // UX: Each action has a unique endpoint
+        use std::collections::HashSet;
+
+        let actions = vec![
+            Action::SendPrompt {
+                prompt: "".to_string(),
+            },
+            Action::Cancel,
+            Action::ChangeModel {
+                model: "".to_string(),
+            },
+            Action::ChangeAgent {
+                agent: "".to_string(),
+            },
+            Action::NewSession,
+            Action::SwitchSession {
+                session_id: "".to_string(),
+            },
+            Action::RenameSession {
+                title: "".to_string(),
+            },
+            Action::ForkSession { message_id: None },
+            Action::Undo,
+            Action::Redo,
+            Action::Revert {
+                message_id: "".to_string(),
+            },
+            Action::Unrevert,
+            Action::Compact,
+            Action::SandboxStart,
+            Action::SandboxStop,
+            Action::SandboxRestart,
+            Action::McpToggle {
+                name: "".to_string(),
+            },
+            Action::McpReconnect {
+                name: "".to_string(),
+            },
+            Action::ShareSession,
+            Action::UnshareSession,
+            Action::GotoMessage {
+                message_id: "".to_string(),
+            },
+            Action::SaveSettings {
+                scope: SaveScope::Project,
+                config: serde_json::Value::Null,
+            },
+            Action::PermissionResponse {
+                request_id: "".to_string(),
+                allow: false,
+                remember: false,
+            },
+            Action::UpdateTestProviderSettings {
+                emulate_thinking: false,
+                emulate_tool_calls: false,
+                emulate_tool_observed: false,
+                emulate_streaming: false,
+            },
+            Action::Quit,
+        ];
+
+        let endpoints: HashSet<_> = actions.iter().map(|a| a.endpoint()).collect();
+        assert_eq!(
+            endpoints.len(),
+            actions.len(),
+            "Some actions share the same endpoint"
+        );
+    }
+
+    #[test]
+    fn save_scope_serialization() {
+        // UX: Save scope determines where settings are stored
+        let project = SaveScope::Project;
+        let global = SaveScope::Global;
+
+        let project_json = serde_json::to_string(&project).unwrap();
+        let global_json = serde_json::to_string(&global).unwrap();
+
+        assert_eq!(project_json, "\"project\"");
+        assert_eq!(global_json, "\"global\"");
+
+        // Roundtrip
+        let parsed_project: SaveScope = serde_json::from_str(&project_json).unwrap();
+        let parsed_global: SaveScope = serde_json::from_str(&global_json).unwrap();
+
+        assert_eq!(parsed_project, SaveScope::Project);
+        assert_eq!(parsed_global, SaveScope::Global);
+    }
+}

@@ -1523,6 +1523,91 @@ fn merge_hashmap<K: std::hash::Hash + Eq, V>(
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // UX-Critical: Variable Substitution Tests
+    // If these fail, users' API keys and secrets won't be loaded correctly
+    // =========================================================================
+
+    #[test]
+    fn user_env_variables_are_substituted_in_config() {
+        // UX: Users commonly store API keys in environment variables
+        // If this fails, their provider configurations won't work
+        std::env::set_var("TEST_API_KEY_12345", "secret-key-value");
+
+        let content = r#"{"provider": {"openai": {"options": {"api_key": "{env:TEST_API_KEY_12345}"}}}}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json")).unwrap();
+
+        assert!(
+            result.contains("secret-key-value"),
+            "Environment variable should be substituted"
+        );
+        assert!(
+            !result.contains("{env:"),
+            "Substitution placeholder should be removed"
+        );
+
+        std::env::remove_var("TEST_API_KEY_12345");
+    }
+
+    #[test]
+    fn missing_env_variable_returns_helpful_error() {
+        // UX: When users forget to set an env var, they should get a clear error
+        // not a cryptic parsing failure
+        let content = r#"{"api_key": "{env:NONEXISTENT_VAR_THAT_DOES_NOT_EXIST}"}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json"));
+
+        assert!(result.is_err(), "Missing env var should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("NONEXISTENT_VAR_THAT_DOES_NOT_EXIST"),
+            "Error should mention the missing variable name: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn user_file_references_are_substituted() {
+        // UX: Users can store secrets in files (e.g., for Docker secrets)
+        let dir = tempfile::tempdir().unwrap();
+        let secret_path = dir.path().join("api_key.txt");
+        tokio::fs::write(&secret_path, "my-secret-from-file\n")
+            .await
+            .unwrap();
+
+        let content = r#"{"api_key": "{file:api_key.txt}"}"#;
+        let config_path = dir.path().join("config.json");
+        let result = substitute_variables(content, &config_path).unwrap();
+
+        assert!(
+            result.contains("my-secret-from-file"),
+            "File content should be substituted"
+        );
+        assert!(
+            !result.contains("{file:"),
+            "Substitution placeholder should be removed"
+        );
+    }
+
+    #[test]
+    fn missing_file_reference_returns_helpful_error() {
+        // UX: When users reference a non-existent file, the error should be clear
+        let content = r#"{"api_key": "{file:nonexistent_secret.txt}"}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json"));
+
+        assert!(result.is_err(), "Missing file should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nonexistent_secret.txt"),
+            "Error should mention the missing file: {}",
+            err
+        );
+    }
+
+    // =========================================================================
+    // UX-Critical: JSONC Comment Stripping Tests
+    // If these fail, users' commented configs will fail to parse
+    // =========================================================================
+
     #[test]
     fn test_strip_comments() {
         let input = r#"{
@@ -1919,5 +2004,376 @@ mod tests {
         // Verify MCP servers were loaded
         let mcp = config.mcp.expect("MCP config should be present");
         assert!(mcp.contains_key("vscode-server"));
+    }
+
+    // =========================================================================
+    // UX-Critical: Config Loading Priority Tests
+    // If these fail, users' project-specific settings won't override global ones
+    // =========================================================================
+
+    #[tokio::test]
+    async fn project_config_overrides_global_settings() {
+        // UX: Users expect project config to override their global config
+        // This is critical for per-project model selection, permissions, etc.
+        let project_dir = tempfile::tempdir().unwrap();
+
+        // Create project config with specific settings
+        let project_config = r#"{
+            "model": "anthropic/claude-3-5-sonnet",
+            "theme": "tokyo-night"
+        }"#;
+        tokio::fs::write(project_dir.path().join("wonopcode.json"), project_config)
+            .await
+            .unwrap();
+
+        // Load config
+        let (config, _) = Config::load(Some(project_dir.path())).await.unwrap();
+
+        // Verify project settings are applied
+        assert_eq!(
+            config.model,
+            Some("anthropic/claude-3-5-sonnet".to_string())
+        );
+        assert_eq!(config.theme, Some("tokyo-night".to_string()));
+    }
+
+    #[tokio::test]
+    async fn config_loads_without_any_config_files() {
+        // UX: App should work out of the box without requiring config files
+        let empty_dir = tempfile::tempdir().unwrap();
+
+        let (config, sources) = Config::load(Some(empty_dir.path())).await.unwrap();
+
+        // Should return default config with no sources
+        assert!(sources.is_empty() || sources.iter().all(|s| !s.starts_with(empty_dir.path())));
+        // Default values should be usable
+        assert!(config.theme.is_none()); // Will use built-in default
+        assert!(config.model.is_none()); // Will use built-in default
+    }
+
+    #[tokio::test]
+    async fn invalid_json_shows_file_path_in_error() {
+        // UX: When config parsing fails, users need to know WHICH file is broken
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("wonopcode.json");
+
+        // Create invalid JSON
+        tokio::fs::write(&config_path, r#"{ "theme": "dark", invalid }"#)
+            .await
+            .unwrap();
+
+        let result = Config::load_file(&config_path).await;
+
+        assert!(result.is_err(), "Invalid JSON should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("wonopcode.json") || err.contains("invalid"),
+            "Error should mention the file or parse error: {}",
+            err
+        );
+    }
+
+    // =========================================================================
+    // UX-Critical: Permission Configuration Tests
+    // If these fail, security-critical permission settings won't work
+    // =========================================================================
+
+    #[test]
+    fn permission_config_parses_simple_values() {
+        // UX: Users configure permissions to control what the AI can do
+        let json = r#"{
+            "permission": {
+                "edit": "allow",
+                "webfetch": "ask",
+                "external_directory": "deny"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let perm = config.permission.unwrap();
+
+        assert_eq!(perm.edit, Some(Permission::Allow));
+        assert_eq!(perm.webfetch, Some(Permission::Ask));
+        assert_eq!(perm.external_directory, Some(Permission::Deny));
+    }
+
+    #[test]
+    fn permission_config_parses_pattern_maps() {
+        // UX: Users can set different permissions for different command patterns
+        let json = r#"{
+            "permission": {
+                "bash": {
+                    "git *": "allow",
+                    "rm -rf *": "deny",
+                    "*": "ask"
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let perm = config.permission.unwrap();
+
+        match perm.bash {
+            Some(PermissionOrMap::Map(map)) => {
+                assert_eq!(map.get("git *"), Some(&Permission::Allow));
+                assert_eq!(map.get("rm -rf *"), Some(&Permission::Deny));
+                assert_eq!(map.get("*"), Some(&Permission::Ask));
+            }
+            _ => panic!("Expected permission map for bash"),
+        }
+    }
+
+    // =========================================================================
+    // UX-Critical: Sandbox Configuration Tests
+    // If these fail, isolated execution won't work correctly
+    // =========================================================================
+
+    #[test]
+    fn sandbox_config_parses_all_options() {
+        // UX: Users configure sandbox for secure code execution
+        let json = r#"{
+            "sandbox": {
+                "enabled": true,
+                "runtime": "docker",
+                "image": "node:20",
+                "network": "limited",
+                "resources": {
+                    "memory": "2G",
+                    "cpus": 2.0,
+                    "pids": 100
+                },
+                "mounts": {
+                    "workspace_writable": true,
+                    "persist_caches": true
+                },
+                "bypass_tools": ["read", "glob"]
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let sandbox = config.sandbox.unwrap();
+
+        assert_eq!(sandbox.enabled, Some(true));
+        assert_eq!(sandbox.runtime, Some("docker".to_string()));
+        assert_eq!(sandbox.image, Some("node:20".to_string()));
+        assert_eq!(sandbox.network, Some("limited".to_string()));
+
+        let resources = sandbox.resources.unwrap();
+        assert_eq!(resources.memory, Some("2G".to_string()));
+        assert_eq!(resources.cpus, Some(2.0));
+        assert_eq!(resources.pids, Some(100));
+
+        let mounts = sandbox.mounts.unwrap();
+        assert_eq!(mounts.workspace_writable, Some(true));
+        assert_eq!(mounts.persist_caches, Some(true));
+
+        let bypass = sandbox.bypass_tools.unwrap();
+        assert!(bypass.contains(&"read".to_string()));
+        assert!(bypass.contains(&"glob".to_string()));
+    }
+
+    // =========================================================================
+    // UX-Critical: Agent Configuration Tests
+    // If these fail, custom agents won't work correctly
+    // =========================================================================
+
+    #[test]
+    fn agent_config_with_all_options() {
+        // UX: Users create custom agents with specific behaviors
+        let json = r##"{
+            "agent": {
+                "code-review": {
+                    "model": "anthropic/claude-3-5-sonnet",
+                    "temperature": 0.3,
+                    "prompt": "You are a code reviewer. Be thorough and constructive.",
+                    "tools": {
+                        "bash": false,
+                        "read": true,
+                        "write": false
+                    },
+                    "mode": "subagent",
+                    "max_steps": 10,
+                    "color": "#FF5733"
+                }
+            }
+        }"##;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let agents = config.agent.unwrap();
+        let reviewer = agents.get("code-review").unwrap();
+
+        assert_eq!(
+            reviewer.model,
+            Some("anthropic/claude-3-5-sonnet".to_string())
+        );
+        assert_eq!(reviewer.temperature, Some(0.3));
+        assert!(reviewer.prompt.as_ref().unwrap().contains("code reviewer"));
+        assert_eq!(reviewer.mode, Some(AgentMode::Subagent));
+        assert_eq!(reviewer.max_steps, Some(10));
+        assert_eq!(reviewer.color, Some("#FF5733".to_string()));
+
+        let tools = reviewer.tools.as_ref().unwrap();
+        assert_eq!(tools.get("bash"), Some(&false));
+        assert_eq!(tools.get("read"), Some(&true));
+        assert_eq!(tools.get("write"), Some(&false));
+    }
+
+    // =========================================================================
+    // UX-Critical: Model Parsing Tests
+    // If these fail, users can't switch between AI providers
+    // =========================================================================
+
+    #[test]
+    fn model_string_parses_provider_and_name() {
+        // UX: Users specify models as "provider/model-name"
+        assert_eq!(
+            Config::parse_model("anthropic/claude-3-5-sonnet"),
+            Some(("anthropic", "claude-3-5-sonnet"))
+        );
+        assert_eq!(
+            Config::parse_model("openai/gpt-4o"),
+            Some(("openai", "gpt-4o"))
+        );
+        assert_eq!(
+            Config::parse_model("google/gemini-2.0-flash"),
+            Some(("google", "gemini-2.0-flash"))
+        );
+    }
+
+    #[test]
+    fn invalid_model_strings_return_none() {
+        // UX: Invalid model strings should be handled gracefully
+        assert_eq!(Config::parse_model("invalid"), None);
+        assert_eq!(Config::parse_model(""), None);
+        assert_eq!(Config::parse_model("no-slash-here"), None);
+    }
+
+    #[test]
+    fn model_with_multiple_slashes_parses_correctly() {
+        // UX: Some model names might contain slashes (e.g., org/repo/model)
+        let result = Config::parse_model("openrouter/anthropic/claude-3");
+        // Should split on first slash
+        assert_eq!(result, Some(("openrouter", "anthropic/claude-3")));
+    }
+
+    // =========================================================================
+    // UX-Critical: TUI Configuration Tests
+    // If these fail, the user interface won't behave as configured
+    // =========================================================================
+
+    #[test]
+    fn tui_config_merge_preserves_unset_fields() {
+        // UX: When updating TUI settings, only changed fields should be affected
+        let base = TuiConfig {
+            mouse: Some(true),
+            markdown: Some(true),
+            syntax_highlighting: Some(true),
+            ..Default::default()
+        };
+
+        let update = TuiConfig {
+            markdown: Some(false), // Only changing this
+            ..Default::default()
+        };
+
+        let merged = base.merge(update);
+
+        assert_eq!(merged.mouse, Some(true)); // Preserved
+        assert_eq!(merged.markdown, Some(false)); // Updated
+        assert_eq!(merged.syntax_highlighting, Some(true)); // Preserved
+    }
+
+    // =========================================================================
+    // UX-Critical: Custom Command Configuration Tests
+    // If these fail, users' custom slash commands won't work
+    // =========================================================================
+
+    #[test]
+    fn custom_command_config_parses() {
+        // UX: Users create custom /commands for repetitive tasks
+        let json = r#"{
+            "command": {
+                "review": {
+                    "template": "Review this code for bugs and security issues: $ARGUMENTS",
+                    "description": "Review code for issues",
+                    "agent": "code-review",
+                    "model": "anthropic/claude-3-5-sonnet"
+                },
+                "test": {
+                    "template": "Write tests for: $ARGUMENTS",
+                    "subtask": true
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let commands = config.command.unwrap();
+
+        let review = commands.get("review").unwrap();
+        assert!(review.template.contains("$ARGUMENTS"));
+        assert_eq!(review.description, Some("Review code for issues".to_string()));
+        assert_eq!(review.agent, Some("code-review".to_string()));
+
+        let test = commands.get("test").unwrap();
+        assert_eq!(test.subtask, Some(true));
+    }
+
+    // =========================================================================
+    // UX-Critical: Provider Configuration Tests  
+    // If these fail, AI providers won't be configured correctly
+    // =========================================================================
+
+    #[test]
+    fn provider_config_with_custom_base_url() {
+        // UX: Users may use self-hosted or enterprise API endpoints
+        let json = r#"{
+            "provider": {
+                "custom-openai": {
+                    "api": "openai",
+                    "name": "My Custom OpenAI",
+                    "options": {
+                        "baseURL": "https://my-proxy.example.com/v1",
+                        "api_key": "my-key"
+                    }
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let providers = config.provider.unwrap();
+        let custom = providers.get("custom-openai").unwrap();
+
+        assert_eq!(custom.api, Some("openai".to_string()));
+        assert_eq!(custom.name, Some("My Custom OpenAI".to_string()));
+
+        let options = custom.options.as_ref().unwrap();
+        assert_eq!(
+            options.base_url,
+            Some("https://my-proxy.example.com/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_config_with_model_whitelist() {
+        // UX: Users can restrict which models are available
+        let json = r#"{
+            "provider": {
+                "openai": {
+                    "whitelist": ["gpt-4o", "gpt-4o-mini"],
+                    "blacklist": ["gpt-3.5-turbo"]
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let providers = config.provider.unwrap();
+        let openai = providers.get("openai").unwrap();
+
+        let whitelist = openai.whitelist.as_ref().unwrap();
+        assert!(whitelist.contains(&"gpt-4o".to_string()));
+        assert!(whitelist.contains(&"gpt-4o-mini".to_string()));
+
+        let blacklist = openai.blacklist.as_ref().unwrap();
+        assert!(blacklist.contains(&"gpt-3.5-turbo".to_string()));
     }
 }

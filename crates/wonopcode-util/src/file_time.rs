@@ -353,4 +353,138 @@ mod tests {
             Err(FileTimeError::NotRead { .. })
         ));
     }
+
+    #[test]
+    fn test_file_time_error_display_not_read() {
+        let err = FileTimeError::NotRead {
+            path: PathBuf::from("/tmp/test.txt"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/tmp/test.txt"));
+        assert!(msg.contains("must read the file"));
+    }
+
+    #[test]
+    fn test_file_time_error_display_modified() {
+        let now = SystemTime::now();
+        let err = FileTimeError::ModifiedSinceRead {
+            path: PathBuf::from("/tmp/test.txt"),
+            last_read: now,
+            last_modified: now,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/tmp/test.txt"));
+        assert!(msg.contains("modified since"));
+    }
+
+    #[test]
+    fn test_file_time_error_display_io() {
+        let err = FileTimeError::IoError {
+            path: PathBuf::from("/tmp/test.txt"),
+            error: "permission denied".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/tmp/test.txt"));
+        assert!(msg.contains("permission denied"));
+    }
+
+    #[test]
+    fn test_tracker_get_read_time() {
+        let mut tracker = FileTimeTracker::new();
+        let path = PathBuf::from("/tmp/test.txt");
+
+        assert!(tracker.get_read_time(&path).is_none());
+
+        tracker.record_read(&path);
+        assert!(tracker.get_read_time(&path).is_some());
+    }
+
+    #[test]
+    fn test_tracker_clear() {
+        let mut tracker = FileTimeTracker::new();
+        let path = PathBuf::from("/tmp/test.txt");
+
+        tracker.record_read(&path);
+        assert!(tracker.get_read_time(&path).is_some());
+
+        tracker.clear();
+        assert!(tracker.get_read_time(&path).is_none());
+    }
+
+    #[test]
+    fn test_tracker_forget() {
+        let mut tracker = FileTimeTracker::new();
+        let path1 = PathBuf::from("/tmp/test1.txt");
+        let path2 = PathBuf::from("/tmp/test2.txt");
+
+        tracker.record_read(&path1);
+        tracker.record_read(&path2);
+
+        tracker.forget(&path1);
+        assert!(tracker.get_read_time(&path1).is_none());
+        assert!(tracker.get_read_time(&path2).is_some());
+    }
+
+    #[test]
+    fn test_tracker_default() {
+        let tracker = FileTimeTracker::default();
+        assert!(tracker.get_read_time("/any/path").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_state_clear_session() {
+        let state = FileTimeState::new();
+
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "content").unwrap();
+        let path = file.path().to_path_buf();
+
+        state.record_read("session", &path).await;
+        assert!(state.assert_not_modified("session", &path).await.is_ok());
+
+        state.clear_session("session").await;
+        assert!(matches!(
+            state.assert_not_modified("session", &path).await,
+            Err(FileTimeError::NotRead { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_state_assert_if_exists_nonexistent() {
+        let state = FileTimeState::new();
+        let path = PathBuf::from("/nonexistent/path/file.txt");
+
+        // Should pass for non-existent file even without reading
+        assert!(state.assert_if_exists("session", &path).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_state_default() {
+        let state = FileTimeState::default();
+        let path = PathBuf::from("/nonexistent/file.txt");
+        assert!(state.assert_if_exists("session", &path).await.is_ok());
+    }
+
+    #[test]
+    fn test_shared_file_time_state() {
+        let state1 = shared_file_time_state();
+        let state2 = shared_file_time_state();
+        // They should be different instances
+        assert!(!Arc::ptr_eq(&state1, &state2));
+    }
+
+    #[test]
+    fn test_format_time() {
+        let time = SystemTime::UNIX_EPOCH;
+        let formatted = format_time(time);
+        assert!(formatted.contains("0s since epoch"));
+    }
+
+    #[test]
+    fn test_file_time_error_is_error() {
+        let err: Box<dyn std::error::Error> = Box::new(FileTimeError::NotRead {
+            path: PathBuf::from("/tmp/test.txt"),
+        });
+        assert!(!err.to_string().is_empty());
+    }
 }

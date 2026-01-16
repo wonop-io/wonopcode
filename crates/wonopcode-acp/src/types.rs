@@ -699,4 +699,364 @@ mod tests {
         assert!(json.contains("agent_message_chunk"));
         assert!(json.contains("Hello, world!"));
     }
+
+    // === JsonRpcId tests ===
+
+    #[test]
+    fn jsonrpc_id_number_serializes_correctly() {
+        let id = JsonRpcId::Number(42);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "42");
+    }
+
+    #[test]
+    fn jsonrpc_id_string_serializes_correctly() {
+        let id = JsonRpcId::String("req-123".to_string());
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"req-123\"");
+    }
+
+    #[test]
+    fn jsonrpc_id_deserializes_number() {
+        let id: JsonRpcId = serde_json::from_str("42").unwrap();
+        assert_eq!(id, JsonRpcId::Number(42));
+    }
+
+    #[test]
+    fn jsonrpc_id_deserializes_string() {
+        let id: JsonRpcId = serde_json::from_str("\"req-123\"").unwrap();
+        assert_eq!(id, JsonRpcId::String("req-123".to_string()));
+    }
+
+    // === JsonRpcRequest tests ===
+
+    #[test]
+    fn jsonrpc_request_minimal_serializes() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::Number(1)),
+            method: "initialize".to_string(),
+            params: None,
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"jsonrpc\":\"2.0\""));
+        assert!(json.contains("\"method\":\"initialize\""));
+        assert!(!json.contains("\"params\""));
+    }
+
+    #[test]
+    fn jsonrpc_request_with_params_serializes() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::Number(1)),
+            method: "prompt".to_string(),
+            params: Some(serde_json::json!({"text": "Hello"})),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"params\""));
+        assert!(json.contains("\"text\""));
+    }
+
+    // === JsonRpcError tests ===
+
+    #[test]
+    fn jsonrpc_error_invalid_params() {
+        let err = JsonRpcError::invalid_params("missing required field");
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("missing required field"));
+    }
+
+    #[test]
+    fn jsonrpc_error_internal_error() {
+        let err = JsonRpcError::internal_error("database connection failed");
+        assert_eq!(err.code, -32603);
+        assert!(err.message.contains("database connection failed"));
+    }
+
+    #[test]
+    fn jsonrpc_error_auth_required() {
+        let err = JsonRpcError::auth_required();
+        assert_eq!(err.code, -32001);
+        assert!(err.message.contains("Authentication"));
+    }
+
+    // === ToolKind tests ===
+
+    #[test]
+    fn tool_kind_from_webfetch() {
+        assert_eq!(ToolKind::from_tool_name("webfetch"), ToolKind::Fetch);
+    }
+
+    #[test]
+    fn tool_kind_from_edit_tools() {
+        assert_eq!(ToolKind::from_tool_name("patch"), ToolKind::Edit);
+        assert_eq!(ToolKind::from_tool_name("write"), ToolKind::Edit);
+        assert_eq!(ToolKind::from_tool_name("multiedit"), ToolKind::Edit);
+    }
+
+    #[test]
+    fn tool_kind_from_search_tools() {
+        assert_eq!(ToolKind::from_tool_name("glob"), ToolKind::Search);
+    }
+
+    #[test]
+    fn tool_kind_from_read_tools() {
+        assert_eq!(ToolKind::from_tool_name("list"), ToolKind::Read);
+    }
+
+    #[test]
+    fn tool_kind_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&ToolKind::Execute).unwrap(), "\"execute\"");
+        assert_eq!(serde_json::to_string(&ToolKind::Other).unwrap(), "\"other\"");
+    }
+
+    // === ToolStatus tests ===
+
+    #[test]
+    fn tool_status_serializes_correctly() {
+        assert_eq!(serde_json::to_string(&ToolStatus::Pending).unwrap(), "\"pending\"");
+        assert_eq!(serde_json::to_string(&ToolStatus::InProgress).unwrap(), "\"in_progress\"");
+        assert_eq!(serde_json::to_string(&ToolStatus::Completed).unwrap(), "\"completed\"");
+        assert_eq!(serde_json::to_string(&ToolStatus::Failed).unwrap(), "\"failed\"");
+    }
+
+    // === Location tests ===
+
+    #[test]
+    fn location_from_read_tool() {
+        let input = serde_json::json!({"filePath": "/home/user/test.txt"});
+        let locations = Location::from_tool_input("read", &input);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, "/home/user/test.txt");
+    }
+
+    #[test]
+    fn location_from_edit_tool() {
+        let input = serde_json::json!({"filePath": "/tmp/file.rs", "oldString": "a", "newString": "b"});
+        let locations = Location::from_tool_input("edit", &input);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, "/tmp/file.rs");
+    }
+
+    #[test]
+    fn location_from_glob_tool() {
+        let input = serde_json::json!({"path": "/home/user/project", "pattern": "*.rs"});
+        let locations = Location::from_tool_input("glob", &input);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, "/home/user/project");
+    }
+
+    #[test]
+    fn location_from_unknown_tool_is_empty() {
+        let input = serde_json::json!({"something": "else"});
+        let locations = Location::from_tool_input("custom_tool", &input);
+        assert!(locations.is_empty());
+    }
+
+    #[test]
+    fn location_from_missing_path_is_empty() {
+        let input = serde_json::json!({"other": "field"});
+        let locations = Location::from_tool_input("read", &input);
+        assert!(locations.is_empty());
+    }
+
+    // === ModelRef tests ===
+
+    #[test]
+    fn model_ref_parse_invalid_returns_none() {
+        assert!(ModelRef::parse("just-model-name").is_none());
+    }
+
+    #[test]
+    fn model_ref_as_string() {
+        let model = ModelRef {
+            provider_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+        };
+        assert_eq!(model.as_string(), "openai/gpt-4");
+    }
+
+    // === TextContent tests ===
+
+    #[test]
+    fn text_content_new_creates_text_type() {
+        let content = TextContent::new("Hello");
+        assert_eq!(content.content_type, "text");
+        assert_eq!(content.text, "Hello");
+    }
+
+    // === PromptPart tests ===
+
+    #[test]
+    fn prompt_part_text_serializes_correctly() {
+        let part = PromptPart::Text { text: "Hello, AI!".to_string() };
+        let json = serde_json::to_string(&part).unwrap();
+        assert!(json.contains("\"type\":\"text\""));
+        assert!(json.contains("\"text\":\"Hello, AI!\""));
+    }
+
+    #[test]
+    fn prompt_part_image_serializes_correctly() {
+        let part = PromptPart::Image {
+            data: Some("base64data".to_string()),
+            uri: None,
+            mime_type: "image/png".to_string(),
+        };
+        let json = serde_json::to_string(&part).unwrap();
+        assert!(json.contains("\"type\":\"image\""));
+        assert!(json.contains("\"mimeType\":\"image/png\""));
+    }
+
+    #[test]
+    fn prompt_part_resource_link_serializes_correctly() {
+        let part = PromptPart::ResourceLink { uri: "file:///tmp/test.txt".to_string() };
+        let json = serde_json::to_string(&part).unwrap();
+        assert!(json.contains("\"type\":\"resource_link\""));
+        assert!(json.contains("file:///tmp/test.txt"));
+    }
+
+    // === StopReason tests ===
+
+    #[test]
+    fn stop_reason_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&StopReason::EndTurn).unwrap(), "\"end_turn\"");
+        assert_eq!(serde_json::to_string(&StopReason::MaxTokens).unwrap(), "\"max_tokens\"");
+        assert_eq!(serde_json::to_string(&StopReason::Error).unwrap(), "\"error\"");
+        assert_eq!(serde_json::to_string(&StopReason::Cancelled).unwrap(), "\"cancelled\"");
+    }
+
+    // === PlanStatus tests ===
+
+    #[test]
+    fn plan_status_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&PlanStatus::Pending).unwrap(), "\"pending\"");
+        assert_eq!(serde_json::to_string(&PlanStatus::InProgress).unwrap(), "\"in_progress\"");
+        assert_eq!(serde_json::to_string(&PlanStatus::Completed).unwrap(), "\"completed\"");
+    }
+
+    // === PermissionKind tests ===
+
+    #[test]
+    fn permission_kind_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&PermissionKind::AllowOnce).unwrap(), "\"allow_once\"");
+        assert_eq!(serde_json::to_string(&PermissionKind::AllowAlways).unwrap(), "\"allow_always\"");
+        assert_eq!(serde_json::to_string(&PermissionKind::RejectOnce).unwrap(), "\"reject_once\"");
+    }
+
+    // === SessionUpdate variants ===
+
+    #[test]
+    fn session_update_user_message_chunk_serializes() {
+        let update = SessionUpdate::UserMessageChunk {
+            content: TextContent::new("User said this"),
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("user_message_chunk"));
+        assert!(json.contains("User said this"));
+    }
+
+    #[test]
+    fn session_update_agent_thought_chunk_serializes() {
+        let update = SessionUpdate::AgentThoughtChunk {
+            content: TextContent::new("Thinking..."),
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("agent_thought_chunk"));
+    }
+
+    #[test]
+    fn session_update_tool_call_serializes() {
+        let update = SessionUpdate::ToolCall {
+            tool_call_id: "tc-1".to_string(),
+            title: "Reading file".to_string(),
+            kind: ToolKind::Read,
+            status: ToolStatus::InProgress,
+            locations: vec![Location { path: "/tmp/test.txt".to_string() }],
+            raw_input: serde_json::json!({"filePath": "/tmp/test.txt"}),
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("tool_call"));
+        assert!(json.contains("Reading file"));
+        assert!(json.contains("tc-1"));
+    }
+
+    #[test]
+    fn session_update_plan_serializes() {
+        let update = SessionUpdate::Plan {
+            entries: vec![
+                PlanEntry {
+                    content: "Task 1".to_string(),
+                    status: PlanStatus::Completed,
+                    priority: "high".to_string(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("\"plan\""));
+        assert!(json.contains("Task 1"));
+    }
+
+    // === ToolCallContent tests ===
+
+    #[test]
+    fn tool_call_content_text_serializes() {
+        let content = ToolCallContent::Content {
+            content: TextContent::new("Tool output"),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains("\"type\":\"content\""));
+        assert!(json.contains("Tool output"));
+    }
+
+    #[test]
+    fn tool_call_content_diff_serializes() {
+        let content = ToolCallContent::Diff {
+            path: "/tmp/file.rs".to_string(),
+            old_text: "old".to_string(),
+            new_text: "new".to_string(),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains("\"type\":\"diff\""));
+        assert!(json.contains("\"oldText\":\"old\""));
+        assert!(json.contains("\"newText\":\"new\""));
+    }
+
+    // === McpServer tests ===
+
+    #[test]
+    fn mcp_server_local_deserializes() {
+        let json = r#"{
+            "name": "test-server",
+            "command": "node",
+            "args": ["server.js"],
+            "env": []
+        }"#;
+        let server: McpServer = serde_json::from_str(json).unwrap();
+        match server {
+            McpServer::Local(local) => {
+                assert_eq!(local.name, "test-server");
+                assert_eq!(local.command, "node");
+            }
+            _ => panic!("Expected local server"),
+        }
+    }
+
+    #[test]
+    fn mcp_server_remote_deserializes() {
+        let json = r#"{
+            "name": "remote-server",
+            "url": "https://api.example.com",
+            "headers": [],
+            "type": "sse"
+        }"#;
+        let server: McpServer = serde_json::from_str(json).unwrap();
+        match server {
+            McpServer::Remote(remote) => {
+                assert_eq!(remote.name, "remote-server");
+                assert_eq!(remote.url, "https://api.example.com");
+                assert_eq!(remote.server_type, "sse");
+            }
+            _ => panic!("Expected remote server"),
+        }
+    }
 }

@@ -585,4 +585,316 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].message, "Initial commit");
     }
+
+    // === UX-critical tests for git operations ===
+
+    #[test]
+    fn user_sees_modified_file_status_after_editing() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create and commit initial file
+        fs::write(temp_dir.path().join("file.txt"), "initial content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // Modify the file
+        fs::write(temp_dir.path().join("file.txt"), "modified content").unwrap();
+
+        // User should see modified status
+        let status = ops.status().unwrap();
+        assert_eq!(status.files.len(), 1);
+        assert_eq!(status.files[0].status, GitFileState::Modified);
+        assert!(!status.files[0].staged);
+    }
+
+    #[test]
+    fn user_can_discard_changes_with_checkout() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create and commit initial file
+        let file_path = temp_dir.path().join("file.txt");
+        fs::write(&file_path, "initial content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // Modify the file
+        fs::write(&file_path, "unwanted changes").unwrap();
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "unwanted changes");
+
+        // User discards changes
+        ops.checkout(&["file.txt".to_string()]).unwrap();
+
+        // File should be restored to committed state
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "initial content");
+    }
+
+    #[test]
+    fn user_sees_error_when_checkout_called_without_paths() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // User tries to checkout without specifying files
+        let result = ops.checkout(&[]);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Must specify files"));
+    }
+
+    #[test]
+    fn user_sees_commit_history() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create first commit
+        fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
+        ops.stage(&["file1.txt".to_string()]).unwrap();
+        ops.commit("First commit").unwrap();
+
+        // Create second commit
+        fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
+        ops.stage(&["file2.txt".to_string()]).unwrap();
+        ops.commit("Second commit").unwrap();
+
+        // Create third commit
+        fs::write(temp_dir.path().join("file3.txt"), "content3").unwrap();
+        ops.stage(&["file3.txt".to_string()]).unwrap();
+        ops.commit("Third commit").unwrap();
+
+        // User views history - all commits should be present
+        let history = ops.history(10).unwrap();
+        assert_eq!(history.len(), 3);
+        
+        // All commits should be in the history
+        let messages: Vec<&str> = history.iter().map(|c| c.message.as_str()).collect();
+        assert!(messages.contains(&"First commit"));
+        assert!(messages.contains(&"Second commit"));
+        assert!(messages.contains(&"Third commit"));
+    }
+
+    #[test]
+    fn user_history_limit_is_respected() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create 5 commits
+        for i in 1..=5 {
+            fs::write(temp_dir.path().join(format!("file{i}.txt")), "content").unwrap();
+            ops.stage(&[format!("file{i}.txt")]).unwrap();
+            ops.commit(&format!("Commit {i}")).unwrap();
+        }
+
+        // User requests only 2 commits - should get exactly 2
+        let history = ops.history(2).unwrap();
+        assert_eq!(history.len(), 2);
+        
+        // Request all 5
+        let history_all = ops.history(10).unwrap();
+        assert_eq!(history_all.len(), 5);
+    }
+
+    #[test]
+    fn user_cannot_commit_without_staged_changes() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create an initial commit
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // User tries to commit with no staged changes
+        let result = ops.commit("Empty commit");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Nothing to commit"));
+    }
+
+    #[test]
+    fn user_can_stage_all_files_at_once() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create multiple files
+        fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
+        fs::write(temp_dir.path().join("file3.txt"), "content3").unwrap();
+
+        // User stages all files
+        ops.stage(&[]).unwrap();
+
+        // All files should be staged
+        let status = ops.status().unwrap();
+        let staged_count = status.files.iter().filter(|f| f.staged).count();
+        assert_eq!(staged_count, 3);
+    }
+
+    #[test]
+    fn user_can_unstage_all_files_at_once() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create and stage multiple files
+        fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content2").unwrap();
+        ops.stage(&[]).unwrap();
+
+        // Verify staged
+        let status = ops.status().unwrap();
+        assert!(status.files.iter().all(|f| f.staged));
+
+        // User unstages all
+        ops.unstage(&[]).unwrap();
+
+        // All files should be unstaged
+        let status = ops.status().unwrap();
+        assert!(status.files.iter().all(|f| !f.staged));
+    }
+
+    #[test]
+    fn user_sees_deleted_file_status() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create and commit a file
+        let file_path = temp_dir.path().join("file.txt");
+        fs::write(&file_path, "content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // Delete the file
+        fs::remove_file(&file_path).unwrap();
+
+        // User should see deleted status
+        let status = ops.status().unwrap();
+        assert_eq!(status.files.len(), 1);
+        assert_eq!(status.files[0].status, GitFileState::Deleted);
+    }
+
+    #[test]
+    fn user_can_stage_deleted_file() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create and commit a file
+        let file_path = temp_dir.path().join("file.txt");
+        fs::write(&file_path, "content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // Delete the file
+        fs::remove_file(&file_path).unwrap();
+
+        // User stages the deletion
+        ops.stage(&["file.txt".to_string()]).unwrap();
+
+        // Deletion should be staged
+        let status = ops.status().unwrap();
+        assert_eq!(status.files.len(), 1);
+        assert!(status.files[0].staged);
+        assert_eq!(status.files[0].status, GitFileState::Deleted);
+    }
+
+    #[test]
+    fn git_file_state_display_shows_correct_symbols() {
+        assert_eq!(format!("{}", GitFileState::Modified), "M");
+        assert_eq!(format!("{}", GitFileState::Added), "A");
+        assert_eq!(format!("{}", GitFileState::Deleted), "D");
+        assert_eq!(format!("{}", GitFileState::Renamed), "R");
+        assert_eq!(format!("{}", GitFileState::Untracked), "?");
+        assert_eq!(format!("{}", GitFileState::Conflicted), "C");
+    }
+
+    #[test]
+    fn git_file_state_serializes_to_snake_case() {
+        let json = serde_json::to_string(&GitFileState::Modified).unwrap();
+        assert_eq!(json, r#""modified""#);
+
+        let json = serde_json::to_string(&GitFileState::Untracked).unwrap();
+        assert_eq!(json, r#""untracked""#);
+    }
+
+    #[test]
+    fn git_status_serializes_for_api_response() {
+        let status = GitStatus {
+            branch: "main".to_string(),
+            upstream: Some("origin/main".to_string()),
+            ahead: 1,
+            behind: 0,
+            files: vec![GitFileStatus {
+                path: "test.txt".to_string(),
+                status: GitFileState::Modified,
+                staged: true,
+            }],
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"branch\":\"main\""));
+        assert!(json.contains("\"upstream\":\"origin/main\""));
+        assert!(json.contains("\"ahead\":1"));
+        assert!(json.contains("\"files\""));
+    }
+
+    #[test]
+    fn git_commit_info_serializes_for_history_display() {
+        let commit = GitCommitInfo {
+            id: "abc1234".to_string(),
+            full_id: "abc1234567890abcdef".to_string(),
+            message: "Test commit".to_string(),
+            author: "Test User".to_string(),
+            email: "test@example.com".to_string(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&commit).unwrap();
+        assert!(json.contains("\"id\":\"abc1234\""));
+        assert!(json.contains("\"message\":\"Test commit\""));
+        assert!(json.contains("\"author\":\"Test User\""));
+    }
+
+    #[test]
+    fn git_error_displays_descriptive_message() {
+        let err = GitError::Path("invalid path".to_string());
+        assert_eq!(err.to_string(), "Path error: invalid path");
+
+        let err = GitError::NotSupported("merge required".to_string());
+        assert_eq!(err.to_string(), "Operation not supported: merge required");
+    }
+
+    #[test]
+    fn commit_info_has_short_and_full_hash() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create a commit
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        let commit = ops.commit("Test").unwrap();
+
+        // Short hash is 7 characters
+        assert_eq!(commit.id.len(), 7);
+        // Full hash is 40 characters (SHA-1)
+        assert_eq!(commit.full_id.len(), 40);
+        // Short hash is prefix of full hash
+        assert!(commit.full_id.starts_with(&commit.id));
+    }
+
+    #[test]
+    fn user_sees_branch_name_in_status() {
+        let (temp_dir, _repo) = setup_test_repo();
+        let ops = GitOperations::new(temp_dir.path());
+
+        // Create initial commit (needed for branch to exist)
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+        ops.stage(&["file.txt".to_string()]).unwrap();
+        ops.commit("Initial").unwrap();
+
+        // Check status shows branch
+        let status = ops.status().unwrap();
+        // Default branch could be "master" or "main" depending on git config
+        assert!(!status.branch.is_empty());
+    }
 }

@@ -297,4 +297,99 @@ mod tests {
         // Slash in component
         assert!(storage.write(&["path/traversal"], &data).await.is_err());
     }
+
+    #[tokio::test]
+    async fn test_json_storage_project_storage() {
+        let dir = tempdir().unwrap();
+        let storage = project_storage(dir.path());
+
+        let data = TestData {
+            name: "test".to_string(),
+            value: 42,
+        };
+
+        storage.write(&["test", "item"], &data).await.unwrap();
+        
+        // Verify file was created in correct location
+        let expected_path = dir.path().join(".wonopcode").join("data").join("test").join("item.json");
+        assert!(expected_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_remove_nonexistent() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        // Remove nonexistent should not error
+        storage.remove(&["does", "not", "exist"]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_list_empty_dir() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        // List nonexistent directory should return empty
+        let items = storage.list(&["nonexistent"]).await.unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_update_creates_new() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        // Update on nonexistent key creates with default
+        let result: TestData = storage
+            .update(&["new", "item"], |data: &mut TestData| {
+                data.name = "created".to_string();
+                data.value = 100;
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.name, "created");
+        assert_eq!(result.value, 100);
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_invalid_key_dot() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        let data = TestData::default();
+
+        // Single dot is invalid
+        assert!(storage.write(&["."], &data).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_invalid_key_backslash() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        let data = TestData::default();
+
+        // Backslash is invalid
+        assert!(storage.write(&["path\\traversal"], &data).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_invalid_key_empty_component() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        let data = TestData::default();
+
+        // Empty component is invalid
+        assert!(storage.write(&["valid", "", "path"], &data).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_json_storage_exists_nonexistent() {
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path());
+
+        assert!(!storage.exists(&["does", "not", "exist"]).await.unwrap());
+    }
 }

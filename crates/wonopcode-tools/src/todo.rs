@@ -649,6 +649,29 @@ mod tests {
     }
 
     #[test]
+    fn test_todo_status_as_str() {
+        assert_eq!(TodoStatus::Pending.as_str(), "pending");
+        assert_eq!(TodoStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(TodoStatus::Completed.as_str(), "completed");
+        assert_eq!(TodoStatus::Cancelled.as_str(), "cancelled");
+    }
+
+    #[test]
+    fn test_todo_status_icon() {
+        assert_eq!(TodoStatus::Pending.icon(), "[ ]");
+        assert_eq!(TodoStatus::InProgress.icon(), "[>]");
+        assert_eq!(TodoStatus::Completed.icon(), "[x]");
+        assert_eq!(TodoStatus::Cancelled.icon(), "[-]");
+    }
+
+    #[test]
+    fn test_todo_priority_as_str() {
+        assert_eq!(TodoPriority::High.as_str(), "high");
+        assert_eq!(TodoPriority::Medium.as_str(), "medium");
+        assert_eq!(TodoPriority::Low.as_str(), "low");
+    }
+
+    #[test]
     fn test_in_memory_store() {
         let store = InMemoryTodoStore::new();
         let root = PathBuf::from("/test/project");
@@ -685,6 +708,12 @@ mod tests {
     }
 
     #[test]
+    fn test_in_memory_store_default() {
+        let store = InMemoryTodoStore::default();
+        assert!(store.get(&PathBuf::from("/test")).is_empty());
+    }
+
+    #[test]
     fn test_file_store() {
         let dir = tempdir().unwrap();
         let store = FileTodoStore::new();
@@ -715,6 +744,122 @@ mod tests {
         assert!(!file_path.exists());
     }
 
+    #[test]
+    fn test_file_store_default() {
+        let store = FileTodoStore::default();
+        assert!(store.get(&PathBuf::from("/nonexistent")).is_empty());
+    }
+
+    #[test]
+    fn test_shared_file_todo_store() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("todos.json");
+        let store = SharedFileTodoStore::new(file_path.clone());
+
+        assert_eq!(store.path(), file_path);
+
+        // Initially empty
+        assert!(store.get(dir.path()).is_empty());
+
+        // Set todos
+        let todos = vec![TodoItem {
+            id: "1".to_string(),
+            content: "Shared task".to_string(),
+            status: TodoStatus::Pending,
+            priority: TodoPriority::High,
+        }];
+        store.set(dir.path(), todos).unwrap();
+
+        // Get them back
+        let retrieved = store.get(dir.path());
+        assert_eq!(retrieved.len(), 1);
+
+        // Clear
+        store.clear(dir.path());
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_shared_file_todo_store_cleanup() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("todos.json");
+        std::fs::write(&file_path, "[]").unwrap();
+
+        let store = SharedFileTodoStore::new(file_path.clone());
+        assert!(file_path.exists());
+
+        store.cleanup();
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_todowrite_tool_id() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoWriteTool::new(store);
+        assert_eq!(tool.id(), "todowrite");
+    }
+
+    #[test]
+    fn test_todowrite_tool_description() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoWriteTool::new(store);
+        let desc = tool.description();
+        assert!(desc.contains("task list"));
+        assert!(desc.contains("pending"));
+        assert!(desc.contains("in_progress"));
+        assert!(desc.contains("completed"));
+        assert!(desc.contains("cancelled"));
+    }
+
+    #[test]
+    fn test_todowrite_tool_parameters_schema() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoWriteTool::new(store);
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("todos")));
+        assert!(schema["properties"]["todos"].is_object());
+    }
+
+    #[test]
+    fn test_todowrite_tool_in_memory() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoWriteTool::in_memory(store);
+        assert_eq!(tool.id(), "todowrite");
+    }
+
+    #[test]
+    fn test_todoread_tool_id() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoReadTool::new(store);
+        assert_eq!(tool.id(), "todoread");
+    }
+
+    #[test]
+    fn test_todoread_tool_description() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoReadTool::new(store);
+        assert!(tool.description().contains("todo list"));
+    }
+
+    #[test]
+    fn test_todoread_tool_parameters_schema() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoReadTool::new(store);
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn test_todoread_tool_in_memory() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let tool = TodoReadTool::in_memory(store);
+        assert_eq!(tool.id(), "todoread");
+    }
+
     #[tokio::test]
     async fn test_todowrite_with_in_memory_store() {
         let store = Arc::new(InMemoryTodoStore::new());
@@ -743,6 +888,69 @@ mod tests {
         // Verify stored in memory
         let stored = store.get(&ctx.root_dir);
         assert_eq!(stored.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_todowrite_all_statuses_and_priorities() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let ctx = test_context(PathBuf::from("/test/project"));
+
+        let tool = TodoWriteTool::new(store.clone());
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [
+                        {"id": "1", "content": "Pending", "status": "pending", "priority": "high"},
+                        {"id": "2", "content": "In Progress", "status": "in_progress", "priority": "medium"},
+                        {"id": "3", "content": "Completed", "status": "completed", "priority": "low"},
+                        {"id": "4", "content": "Cancelled", "status": "cancelled", "priority": "high"}
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.metadata["total"], 4);
+        assert_eq!(result.metadata["pending"], 1);
+        assert_eq!(result.metadata["in_progress"], 1);
+        assert_eq!(result.metadata["completed"], 1);
+        assert_eq!(result.metadata["cancelled"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_todowrite_unknown_status_defaults() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let ctx = test_context(PathBuf::from("/test/project"));
+
+        let tool = TodoWriteTool::new(store.clone());
+        let result = tool
+            .execute(
+                json!({
+                    "todos": [
+                        {"id": "1", "content": "Unknown status", "status": "unknown", "priority": "unknown"}
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Unknown status defaults to pending, unknown priority defaults to medium
+        assert_eq!(result.metadata["pending"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_todowrite_invalid_args() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let ctx = test_context(PathBuf::from("/test/project"));
+
+        let tool = TodoWriteTool::new(store);
+        let result = tool.execute(json!({"not_todos": []}), &ctx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid arguments"));
     }
 
     #[tokio::test]
@@ -786,6 +994,37 @@ mod tests {
         assert!(result.output.contains("No todo items"));
     }
 
+    #[tokio::test]
+    async fn test_todoread_metadata() {
+        let store = Arc::new(InMemoryTodoStore::new());
+        let ctx = test_context(PathBuf::from("/test/project"));
+
+        // Write todos with various statuses
+        let write_tool = TodoWriteTool::new(store.clone());
+        write_tool
+            .execute(
+                json!({
+                    "todos": [
+                        {"id": "1", "content": "Pending 1", "status": "pending", "priority": "high"},
+                        {"id": "2", "content": "Pending 2", "status": "pending", "priority": "medium"},
+                        {"id": "3", "content": "In progress", "status": "in_progress", "priority": "high"},
+                        {"id": "4", "content": "Done", "status": "completed", "priority": "low"}
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let read_tool = TodoReadTool::new(store);
+        let result = read_tool.execute(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(result.metadata["total"], 4);
+        assert_eq!(result.metadata["pending"], 2);
+        assert_eq!(result.metadata["in_progress"], 1);
+        assert_eq!(result.metadata["completed"], 1);
+    }
+
     #[test]
     fn test_format_todo_list() {
         let items = vec![
@@ -808,5 +1047,110 @@ mod tests {
         assert!(output.contains("PENDING"));
         assert!(output.contains("[>]")); // In progress icon
         assert!(output.contains("[ ]")); // Pending icon
+    }
+
+    #[test]
+    fn test_format_todo_list_empty() {
+        let items: Vec<TodoItem> = vec![];
+        let output = format_todo_list(&items);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_format_todo_list_all_statuses() {
+        let items = vec![
+            TodoItem {
+                id: "1".to_string(),
+                content: "Completed".to_string(),
+                status: TodoStatus::Completed,
+                priority: TodoPriority::High,
+            },
+            TodoItem {
+                id: "2".to_string(),
+                content: "Cancelled".to_string(),
+                status: TodoStatus::Cancelled,
+                priority: TodoPriority::Low,
+            },
+        ];
+
+        let output = format_todo_list(&items);
+        assert!(output.contains("COMPLETED"));
+        assert!(output.contains("CANCELLED"));
+        assert!(output.contains("[x]")); // Completed icon
+        assert!(output.contains("[-]")); // Cancelled icon
+    }
+
+    #[test]
+    fn test_get_todos_helper() {
+        let store = InMemoryTodoStore::new();
+        let root = PathBuf::from("/test");
+
+        store
+            .set(
+                &root,
+                vec![TodoItem {
+                    id: "1".to_string(),
+                    content: "Test".to_string(),
+                    status: TodoStatus::Pending,
+                    priority: TodoPriority::High,
+                }],
+            )
+            .unwrap();
+
+        let todos = get_todos(&store, &root);
+        assert_eq!(todos.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_todos_helper() {
+        let store = InMemoryTodoStore::new();
+        let root = PathBuf::from("/test");
+
+        store
+            .set(
+                &root,
+                vec![TodoItem {
+                    id: "1".to_string(),
+                    content: "Test".to_string(),
+                    status: TodoStatus::Pending,
+                    priority: TodoPriority::High,
+                }],
+            )
+            .unwrap();
+
+        clear_todos(&store, &root);
+        assert!(store.get(&root).is_empty());
+    }
+
+    #[test]
+    fn test_todo_item_serialization() {
+        let item = TodoItem {
+            id: "test-id".to_string(),
+            content: "Test content".to_string(),
+            status: TodoStatus::InProgress,
+            priority: TodoPriority::High,
+        };
+
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("test-id"));
+        assert!(json.contains("Test content"));
+        assert!(json.contains("in_progress"));
+        assert!(json.contains("high"));
+
+        let parsed: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, "test-id");
+        assert_eq!(parsed.status, TodoStatus::InProgress);
+        assert_eq!(parsed.priority, TodoPriority::High);
+    }
+
+    #[test]
+    fn test_todo_store_error_display() {
+        let io_error = TodoStoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert!(io_error.to_string().contains("I/O error"));
+
+        // Can't easily test serde error, but it's covered by the Display impl
     }
 }
