@@ -815,4 +815,363 @@ mod tests {
         assert!(AgentMode::All.is_primary());
         assert!(AgentMode::All.is_subagent());
     }
+
+    #[test]
+    fn test_agent_mode_parse() {
+        assert_eq!(AgentMode::parse("subagent"), AgentMode::Subagent);
+        assert_eq!(AgentMode::parse("primary"), AgentMode::Primary);
+        assert_eq!(AgentMode::parse("all"), AgentMode::All);
+        assert_eq!(AgentMode::parse("SUBAGENT"), AgentMode::Subagent);
+        assert_eq!(AgentMode::parse("PRIMARY"), AgentMode::Primary);
+        assert_eq!(AgentMode::parse("ALL"), AgentMode::All);
+        assert_eq!(AgentMode::parse("unknown"), AgentMode::Primary); // default
+    }
+
+    #[test]
+    fn test_agent_mode_default() {
+        let mode: AgentMode = Default::default();
+        assert_eq!(mode, AgentMode::Primary);
+    }
+
+    #[test]
+    fn test_agent_permission_default() {
+        let perm = AgentPermission::default();
+        assert_eq!(perm.edit, Permission::Allow);
+        assert_eq!(perm.bash.get("*"), Some(&Permission::Allow));
+        assert_eq!(perm.skill.get("*"), Some(&Permission::Allow));
+        assert_eq!(perm.webfetch, Permission::Allow);
+        assert_eq!(perm.doom_loop, Some(Permission::Ask));
+        assert_eq!(perm.external_directory, Some(Permission::Ask));
+    }
+
+    #[test]
+    fn test_agent_registry_all() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let agents: Vec<_> = registry.all().collect();
+        assert!(!agents.is_empty());
+        assert!(agents.iter().any(|a| a.name == "build"));
+    }
+
+    #[test]
+    fn test_agent_registry_get_default() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let default = registry.get_default();
+        assert!(default.is_some());
+        assert_eq!(default.unwrap().name, "build");
+    }
+
+    #[test]
+    fn test_subagents() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let subagents = registry.subagents();
+        assert!(subagents.iter().any(|a| a.name == "explore"));
+        assert!(subagents.iter().any(|a| a.name == "general"));
+    }
+
+    #[test]
+    fn test_is_tool_enabled_unknown_agent() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        // Unknown agent defaults to enabled
+        assert!(registry.is_tool_enabled("nonexistent", "bash"));
+    }
+
+    #[test]
+    fn test_is_tool_enabled_wildcard() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        // compaction has "*" -> false
+        assert!(!registry.is_tool_enabled("compaction", "bash"));
+        assert!(!registry.is_tool_enabled("compaction", "edit"));
+    }
+
+    #[test]
+    fn test_hidden_agents() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let compaction = registry.get("compaction").unwrap();
+        assert!(compaction.hidden);
+        assert!(compaction.native);
+
+        let title = registry.get("title").unwrap();
+        assert!(title.hidden);
+
+        let summary = registry.get("summary").unwrap();
+        assert!(summary.hidden);
+
+        let general = registry.get("general").unwrap();
+        assert!(general.hidden);
+    }
+
+    #[test]
+    fn test_explore_agent_readonly() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let explore = registry.get("explore").unwrap();
+        assert!(explore.sandbox.is_some());
+        assert_eq!(explore.sandbox.as_ref().unwrap().workspace_writable, Some(false));
+    }
+
+    #[test]
+    fn test_agent_clone() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let build = registry.get("build").unwrap();
+        let cloned = build.clone();
+        assert_eq!(cloned.name, build.name);
+        assert_eq!(cloned.is_default, build.is_default);
+    }
+
+    #[test]
+    fn test_agent_debug() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+
+        let build = registry.get("build").unwrap();
+        let debug_str = format!("{:?}", build);
+        assert!(debug_str.contains("build"));
+    }
+
+    #[test]
+    fn test_agent_permission_clone() {
+        let perm = AgentPermission::default();
+        let cloned = perm.clone();
+        assert_eq!(cloned.edit, perm.edit);
+        assert_eq!(cloned.webfetch, perm.webfetch);
+    }
+
+    #[test]
+    fn test_registry_clone() {
+        let config = Config::default();
+        let registry = AgentRegistry::new(&config);
+        let cloned = registry.clone();
+
+        assert_eq!(cloned.default_agent(), registry.default_agent());
+        assert!(cloned.get("build").is_some());
+    }
+
+    #[test]
+    fn test_agent_with_custom_config() {
+        use std::collections::HashMap;
+        use crate::config::{AgentConfig, AgentPermissionConfig, AgentMode as ConfigAgentMode};
+
+        let mut config = Config::default();
+        let mut agents = HashMap::new();
+
+        // Configure a custom agent
+        agents.insert("custom".to_string(), AgentConfig {
+            model: Some("custom-model".to_string()),
+            temperature: Some(0.5),
+            top_p: Some(0.9),
+            prompt: Some("Custom prompt".to_string()),
+            description: Some("Custom description".to_string()),
+            mode: Some(ConfigAgentMode::All),
+            color: Some("#FF0000".to_string()),
+            max_steps: Some(10),
+            tools: Some({
+                let mut t = HashMap::new();
+                t.insert("bash".to_string(), false);
+                t
+            }),
+            permission: Some(AgentPermissionConfig {
+                edit: Some(Permission::Deny),
+                bash: None,
+                skill: None,
+                webfetch: Some(Permission::Deny),
+                doom_loop: Some(Permission::Deny),
+                external_directory: Some(Permission::Deny),
+            }),
+            sandbox: None,
+            disable: None,
+        });
+
+        config.agent = Some(agents);
+        let registry = AgentRegistry::new(&config);
+
+        let custom = registry.get("custom").unwrap();
+        assert_eq!(custom.model, Some("custom-model".to_string()));
+        assert_eq!(custom.temperature, Some(0.5));
+        assert_eq!(custom.top_p, Some(0.9));
+        assert_eq!(custom.description, Some("Custom description".to_string()));
+        assert_eq!(custom.color, Some("#FF0000".to_string()));
+        assert_eq!(custom.max_steps, Some(10));
+        assert_eq!(custom.permission.edit, Permission::Deny);
+        assert_eq!(custom.permission.webfetch, Permission::Deny);
+    }
+
+    #[test]
+    fn test_disable_agent() {
+        use std::collections::HashMap;
+        use crate::config::AgentConfig;
+
+        let mut config = Config::default();
+        let mut agents = HashMap::new();
+
+        agents.insert("build".to_string(), AgentConfig {
+            disable: Some(true),
+            ..Default::default()
+        });
+
+        config.agent = Some(agents);
+        let registry = AgentRegistry::new(&config);
+
+        // build should be removed
+        assert!(registry.get("build").is_none());
+    }
+
+    #[test]
+    fn test_custom_default_agent() {
+        let mut config = Config::default();
+        config.default_agent = Some("plan".to_string());
+
+        let registry = AgentRegistry::new(&config);
+        assert_eq!(registry.default_agent(), "plan");
+
+        let plan = registry.get("plan").unwrap();
+        assert!(plan.is_default);
+    }
+
+    #[test]
+    fn test_invalid_default_agent_fallback() {
+        let mut config = Config::default();
+        config.default_agent = Some("nonexistent".to_string());
+
+        let registry = AgentRegistry::new(&config);
+        // Should fallback to build
+        assert_eq!(registry.default_agent(), "build");
+    }
+
+    #[tokio::test]
+    async fn test_load_custom_agents_nonexistent_dir() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let nonexistent = dir.path().join("nonexistent");
+
+        let config = Config::default();
+        let mut registry = AgentRegistry::new(&config);
+
+        // Should not fail for nonexistent directory
+        let result = registry.load_custom_agents(&nonexistent).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_load_custom_agents() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        // Create a custom agent file
+        let agent_file = dir.path().join("my-agent.md");
+        std::fs::write(&agent_file, "# Custom Agent\n\nThis is a custom agent prompt.").unwrap();
+
+        let config = Config::default();
+        let mut registry = AgentRegistry::new(&config);
+        registry.load_custom_agents(dir.path()).await.unwrap();
+
+        let custom = registry.get("my-agent");
+        assert!(custom.is_some());
+        let custom = custom.unwrap();
+        assert!(!custom.native);
+        assert_eq!(custom.mode, AgentMode::All);
+        assert!(custom.prompt.as_ref().unwrap().contains("Custom Agent"));
+    }
+
+    #[tokio::test]
+    async fn test_load_custom_agents_ignores_non_md() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        // Create non-md file
+        std::fs::write(dir.path().join("not-an-agent.txt"), "ignored").unwrap();
+
+        let config = Config::default();
+        let mut registry = AgentRegistry::new(&config);
+        let initial_count = registry.all().count();
+
+        registry.load_custom_agents(dir.path()).await.unwrap();
+
+        // Should not add new agent
+        assert_eq!(registry.all().count(), initial_count);
+    }
+
+    #[test]
+    fn test_permission_or_map_to_hashmap_single() {
+        let pom = PermissionOrMap::Single(Permission::Deny);
+        let map = AgentRegistry::permission_or_map_to_hashmap(&pom);
+        assert_eq!(map.get("*"), Some(&Permission::Deny));
+    }
+
+    #[test]
+    fn test_permission_or_map_to_hashmap_map() {
+        let mut m = HashMap::new();
+        m.insert("ls*".to_string(), Permission::Allow);
+        m.insert("rm*".to_string(), Permission::Deny);
+        let pom = PermissionOrMap::Map(m);
+
+        let map = AgentRegistry::permission_or_map_to_hashmap(&pom);
+        assert_eq!(map.get("ls*"), Some(&Permission::Allow));
+        assert_eq!(map.get("rm*"), Some(&Permission::Deny));
+    }
+
+    #[test]
+    fn test_build_default_permission_with_config() {
+        use crate::config::PermissionConfig;
+
+        let mut config = Config::default();
+        config.permission = Some(PermissionConfig {
+            edit: Some(Permission::Deny),
+            bash: Some(PermissionOrMap::Single(Permission::Ask)),
+            webfetch: Some(Permission::Deny),
+            external_directory: Some(Permission::Deny),
+            allow_all_in_sandbox: None,
+        });
+
+        let perm = AgentRegistry::build_default_permission(&config);
+        assert_eq!(perm.edit, Permission::Deny);
+        assert_eq!(perm.bash.get("*"), Some(&Permission::Ask));
+        assert_eq!(perm.webfetch, Permission::Deny);
+        assert_eq!(perm.external_directory, Some(Permission::Deny));
+    }
+
+    #[test]
+    fn test_sandbox_config_merge() {
+        use std::collections::HashMap;
+        use crate::config::{AgentConfig, AgentSandboxConfig as ConfigSandbox};
+
+        let mut config = Config::default();
+        let mut agents = HashMap::new();
+
+        // Configure explore with sandbox override
+        agents.insert("explore".to_string(), AgentConfig {
+            sandbox: Some(ConfigSandbox {
+                enabled: Some(false),
+                workspace_writable: None,  // Keep existing
+                network: Some("none".to_string()),
+                bypass_tools: None,
+                resources: None,
+            }),
+            ..Default::default()
+        });
+
+        config.agent = Some(agents);
+        let registry = AgentRegistry::new(&config);
+
+        let explore = registry.get("explore").unwrap();
+        assert!(explore.sandbox.is_some());
+        let sandbox = explore.sandbox.as_ref().unwrap();
+        assert_eq!(sandbox.enabled, Some(false));
+        assert_eq!(sandbox.workspace_writable, Some(false)); // preserved from original
+        assert_eq!(sandbox.network, Some("none".to_string()));
+    }
 }

@@ -629,4 +629,524 @@ mod tests {
         let state = SandboxState::default();
         assert_eq!(state, SandboxState::Disabled);
     }
+
+    #[test]
+    fn test_bus_default() {
+        let bus = Bus::default();
+        assert_eq!(bus.current_sequence(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_current_sequence() {
+        let bus = Bus::new();
+        assert_eq!(bus.current_sequence(), 0);
+
+        bus.publish(SessionCreated {
+            session_id: "ses_1".to_string(),
+            project_id: "proj_1".to_string(),
+            title: "Test".to_string(),
+        })
+        .await;
+
+        assert_eq!(bus.current_sequence(), 1);
+
+        bus.publish(SessionUpdated {
+            session_id: "ses_1".to_string(),
+        })
+        .await;
+
+        assert_eq!(bus.current_sequence(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_replay_from() {
+        let bus = Bus::new();
+
+        // Publish some events
+        for i in 0..5 {
+            bus.publish(SessionCreated {
+                session_id: format!("ses_{}", i),
+                project_id: "proj_1".to_string(),
+                title: format!("Session {}", i),
+            })
+            .await;
+        }
+
+        // Replay from sequence 2 (should get events 3, 4, 5)
+        let events = bus.replay_from(2, 10).await;
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].seq, 3);
+        assert_eq!(events[1].seq, 4);
+        assert_eq!(events[2].seq, 5);
+
+        // Replay with limit
+        let events = bus.replay_from(0, 2).await;
+        assert_eq!(events.len(), 2);
+
+        // Replay from 0 (get all)
+        let events = bus.replay_from(0, 100).await;
+        assert_eq!(events.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_oldest_sequence() {
+        let bus = Bus::new();
+
+        // Initially empty
+        assert!(bus.oldest_sequence().await.is_none());
+
+        // After publishing
+        bus.publish(SessionCreated {
+            session_id: "ses_1".to_string(),
+            project_id: "proj_1".to_string(),
+            title: "Test".to_string(),
+        })
+        .await;
+
+        assert_eq!(bus.oldest_sequence().await, Some(1));
+
+        // After more events
+        bus.publish(SessionUpdated {
+            session_id: "ses_1".to_string(),
+        })
+        .await;
+
+        assert_eq!(bus.oldest_sequence().await, Some(1));
+    }
+
+    #[test]
+    fn test_sequenced_event_serialization() {
+        let event = SequencedEvent {
+            seq: 42,
+            timestamp: 1234567890,
+            event_type: "session.created".to_string(),
+            payload: serde_json::json!({"session_id": "ses_123"}),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"seq\":42"));
+        assert!(json.contains("\"type\":\"session.created\""));
+
+        let deserialized: SequencedEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.seq, 42);
+        assert_eq!(deserialized.event_type, "session.created");
+    }
+
+    #[test]
+    fn test_bus_event_serialization() {
+        let event = BusEvent {
+            event_type: "session.updated".to_string(),
+            payload: serde_json::json!({"session_id": "ses_456"}),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"session.updated\""));
+
+        let deserialized: BusEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.event_type, "session.updated");
+    }
+
+    #[test]
+    fn test_sequenced_event_to_bus_event() {
+        let sequenced = SequencedEvent {
+            seq: 10,
+            timestamp: 1000,
+            event_type: "test.event".to_string(),
+            payload: serde_json::json!({"key": "value"}),
+        };
+
+        let bus_event: BusEvent = sequenced.into();
+        assert_eq!(bus_event.event_type, "test.event");
+        assert_eq!(bus_event.payload["key"], "value");
+    }
+
+    #[test]
+    fn test_session_updated_event() {
+        let event = SessionUpdated {
+            session_id: "ses_123".to_string(),
+        };
+        assert_eq!(SessionUpdated::event_type(), "session.updated");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: SessionUpdated = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+    }
+
+    #[test]
+    fn test_session_deleted_event() {
+        let event = SessionDeleted {
+            session_id: "ses_123".to_string(),
+        };
+        assert_eq!(SessionDeleted::event_type(), "session.deleted");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: SessionDeleted = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+    }
+
+    #[test]
+    fn test_message_updated_event() {
+        let event = MessageUpdated {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+        };
+        assert_eq!(MessageUpdated::event_type(), "message.updated");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: MessageUpdated = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+        assert_eq!(deserialized.message_id, "msg_456");
+    }
+
+    #[test]
+    fn test_message_removed_event() {
+        let event = MessageRemoved {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+        };
+        assert_eq!(MessageRemoved::event_type(), "message.removed");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: MessageRemoved = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+        assert_eq!(deserialized.message_id, "msg_456");
+    }
+
+    #[test]
+    fn test_part_updated_event() {
+        let event = PartUpdated {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: "part_789".to_string(),
+            delta: Some("new text".to_string()),
+        };
+        assert_eq!(PartUpdated::event_type(), "message.part.updated");
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"delta\":\"new text\""));
+
+        // Without delta
+        let event_no_delta = PartUpdated {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: "part_789".to_string(),
+            delta: None,
+        };
+        let json = serde_json::to_string(&event_no_delta).unwrap();
+        assert!(!json.contains("delta"));
+    }
+
+    #[test]
+    fn test_part_removed_event() {
+        let event = PartRemoved {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+            part_id: "part_789".to_string(),
+        };
+        assert_eq!(PartRemoved::event_type(), "message.part.removed");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: PartRemoved = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.part_id, "part_789");
+    }
+
+    #[test]
+    fn test_session_status_event() {
+        let event = SessionStatus {
+            session_id: "ses_123".to_string(),
+            status: Status::Running,
+        };
+        assert_eq!(SessionStatus::event_type(), "session.status");
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"status\":\"running\""));
+    }
+
+    #[test]
+    fn test_status_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Status::Idle).unwrap(),
+            "\"idle\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Status::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Status::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Status::Compacting).unwrap(),
+            "\"compacting\""
+        );
+
+        let status: Status = serde_json::from_str("\"idle\"").unwrap();
+        assert_eq!(status, Status::Idle);
+    }
+
+    #[test]
+    fn test_session_idle_event() {
+        let event = SessionIdle {
+            session_id: "ses_123".to_string(),
+        };
+        assert_eq!(SessionIdle::event_type(), "session.idle");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: SessionIdle = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+    }
+
+    #[test]
+    fn test_session_compacted_event() {
+        let event = SessionCompacted {
+            session_id: "ses_123".to_string(),
+            message_id: "msg_456".to_string(),
+        };
+        assert_eq!(SessionCompacted::event_type(), "session.compacted");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: SessionCompacted = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "ses_123");
+        assert_eq!(deserialized.message_id, "msg_456");
+    }
+
+    #[test]
+    fn test_todo_updated_event() {
+        let event = TodoUpdated {
+            session_id: "ses_123".to_string(),
+            items: vec![
+                TodoItem {
+                    id: "todo_1".to_string(),
+                    content: "Write tests".to_string(),
+                    status: TodoStatus::InProgress,
+                    priority: TodoPriority::High,
+                },
+                TodoItem {
+                    id: "todo_2".to_string(),
+                    content: "Review code".to_string(),
+                    status: TodoStatus::Pending,
+                    priority: TodoPriority::Medium,
+                },
+            ],
+        };
+        assert_eq!(TodoUpdated::event_type(), "todo.updated");
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"status\":\"in_progress\""));
+        assert!(json.contains("\"priority\":\"high\""));
+    }
+
+    #[test]
+    fn test_todo_status_serialization() {
+        assert_eq!(
+            serde_json::to_string(&TodoStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TodoStatus::InProgress).unwrap(),
+            "\"in_progress\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TodoStatus::Completed).unwrap(),
+            "\"completed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TodoStatus::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
+    }
+
+    #[test]
+    fn test_todo_priority_serialization() {
+        assert_eq!(
+            serde_json::to_string(&TodoPriority::High).unwrap(),
+            "\"high\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TodoPriority::Medium).unwrap(),
+            "\"medium\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TodoPriority::Low).unwrap(),
+            "\"low\""
+        );
+    }
+
+    #[test]
+    fn test_permission_request_event() {
+        let event = PermissionRequest {
+            id: "perm_123".to_string(),
+            session_id: "ses_456".to_string(),
+            tool: "bash".to_string(),
+            action: "execute".to_string(),
+            description: "Run a shell command".to_string(),
+            path: Some("/tmp".to_string()),
+            details: serde_json::json!({"command": "ls -la"}),
+        };
+        assert_eq!(PermissionRequest::event_type(), "permission.request");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: PermissionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "perm_123");
+        assert_eq!(deserialized.tool, "bash");
+        assert_eq!(deserialized.path, Some("/tmp".to_string()));
+    }
+
+    #[test]
+    fn test_permission_response_event() {
+        let event = PermissionResponse {
+            id: "perm_123".to_string(),
+            allowed: true,
+            remember: true,
+        };
+        assert_eq!(PermissionResponse::event_type(), "permission.response");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: PermissionResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "perm_123");
+        assert!(deserialized.allowed);
+        assert!(deserialized.remember);
+    }
+
+    #[test]
+    fn test_file_edited_event() {
+        let event = FileEdited {
+            file: "/path/to/file.rs".to_string(),
+            session_id: "ses_123".to_string(),
+        };
+        assert_eq!(FileEdited::event_type(), "file.edited");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: FileEdited = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.file, "/path/to/file.rs");
+    }
+
+    #[test]
+    fn test_project_updated_event() {
+        let event = ProjectUpdated {
+            project_id: "proj_123".to_string(),
+        };
+        assert_eq!(ProjectUpdated::event_type(), "project.updated");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: ProjectUpdated = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.project_id, "proj_123");
+    }
+
+    #[test]
+    fn test_instance_disposed_event() {
+        let event = InstanceDisposed {
+            directory: "/home/user/project".to_string(),
+        };
+        assert_eq!(InstanceDisposed::event_type(), "instance.disposed");
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: InstanceDisposed = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.directory, "/home/user/project");
+    }
+
+    #[test]
+    fn test_sandbox_state_serialization() {
+        assert_eq!(
+            serde_json::to_string(&SandboxState::Disabled).unwrap(),
+            "\"disabled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SandboxState::Stopped).unwrap(),
+            "\"stopped\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SandboxState::Starting).unwrap(),
+            "\"starting\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SandboxState::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SandboxState::Error).unwrap(),
+            "\"error\""
+        );
+
+        let state: SandboxState = serde_json::from_str("\"running\"").unwrap();
+        assert_eq!(state, SandboxState::Running);
+    }
+
+    #[test]
+    fn test_sandbox_status_changed_serialization() {
+        let event = SandboxStatusChanged {
+            state: SandboxState::Error,
+            runtime_type: None,
+            error: Some("Connection failed".to_string()),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"error\":\"Connection failed\""));
+        assert!(!json.contains("runtime_type")); // skipped when None
+    }
+
+    #[test]
+    fn test_sandbox_tool_execution_serialization() {
+        let event = SandboxToolExecution {
+            session_id: "ses_123".to_string(),
+            tool: "write".to_string(),
+            sandboxed: false,
+            description: None,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("description")); // skipped when None
+        assert!(json.contains("\"sandboxed\":false"));
+    }
+
+    #[tokio::test]
+    async fn test_publish_without_subscribers() {
+        let bus = Bus::new();
+
+        // Should not panic even without subscribers
+        bus.publish(SessionCreated {
+            session_id: "ses_123".to_string(),
+            project_id: "proj_456".to_string(),
+            title: "Test".to_string(),
+        })
+        .await;
+
+        // Sequence should still increase
+        assert_eq!(bus.current_sequence(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_clone_bus() {
+        let bus1 = Bus::new();
+        let bus2 = bus1.clone();
+
+        let mut rx = bus2.subscribe::<SessionCreated>().await;
+
+        bus1.publish(SessionCreated {
+            session_id: "ses_123".to_string(),
+            project_id: "proj_456".to_string(),
+            title: "Test".to_string(),
+        })
+        .await;
+
+        let event = rx.recv().await.unwrap();
+        assert_eq!(event.session_id, "ses_123");
+    }
+
+    #[test]
+    fn test_todo_item_serialization() {
+        let item = TodoItem {
+            id: "todo_1".to_string(),
+            content: "Complete task".to_string(),
+            status: TodoStatus::Completed,
+            priority: TodoPriority::Low,
+        };
+
+        let json = serde_json::to_string(&item).unwrap();
+        let deserialized: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "todo_1");
+        assert_eq!(deserialized.status, TodoStatus::Completed);
+        assert_eq!(deserialized.priority, TodoPriority::Low);
+    }
 }

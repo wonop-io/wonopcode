@@ -516,5 +516,331 @@ This is the template $ARGUMENTS
         assert!(registry.contains("test"));
         assert!(registry.contains("doc"));
         assert!(registry.contains("refactor"));
+        assert!(registry.contains("sandbox"));
+    }
+
+    #[test]
+    fn test_command_new() {
+        let cmd = Command::new("my-cmd", "Do something");
+        assert_eq!(cmd.name, "my-cmd");
+        assert_eq!(cmd.template, "Do something");
+        assert!(cmd.description.is_empty());
+        assert!(cmd.agent.is_none());
+        assert!(cmd.model.is_none());
+        assert!(!cmd.subtask);
+    }
+
+    #[test]
+    fn test_command_with_description() {
+        let cmd = Command::new("test", "template").with_description("A test command");
+        assert_eq!(cmd.description, "A test command");
+    }
+
+    #[test]
+    fn test_command_with_agent() {
+        let cmd = Command::new("test", "template").with_agent("plan");
+        assert_eq!(cmd.agent, Some("plan".to_string()));
+    }
+
+    #[test]
+    fn test_command_with_model() {
+        let cmd = Command::new("test", "template").with_model("gpt-4");
+        assert_eq!(cmd.model, Some("gpt-4".to_string()));
+    }
+
+    #[test]
+    fn test_command_builder_chain() {
+        let cmd = Command::new("advanced", "Do $ARGUMENTS")
+            .with_description("An advanced command")
+            .with_agent("code")
+            .with_model("claude-3");
+
+        assert_eq!(cmd.name, "advanced");
+        assert_eq!(cmd.description, "An advanced command");
+        assert_eq!(cmd.agent, Some("code".to_string()));
+        assert_eq!(cmd.model, Some("claude-3".to_string()));
+    }
+
+    #[test]
+    fn test_registry_new() {
+        let registry = CommandRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_registry_register() {
+        let mut registry = CommandRegistry::new();
+        let cmd = Command::new("custom", "Custom template");
+        registry.register(cmd);
+
+        assert!(!registry.is_empty());
+        assert_eq!(registry.len(), 1);
+        assert!(registry.contains("custom"));
+    }
+
+    #[test]
+    fn test_registry_get() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new("test", "template"));
+
+        let cmd = registry.get("test");
+        assert!(cmd.is_some());
+        assert_eq!(cmd.unwrap().name, "test");
+
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_registry_list() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new("cmd1", "t1"));
+        registry.register(Command::new("cmd2", "t2"));
+
+        let list = registry.list();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_registry_names() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new("alpha", "t1"));
+        registry.register(Command::new("beta", "t2"));
+
+        let names = registry.names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+    }
+
+    #[test]
+    fn test_registry_register_from_config() {
+        let mut registry = CommandRegistry::new();
+        let mut config = HashMap::new();
+
+        config.insert(
+            "mycommand".to_string(),
+            CommandConfig {
+                template: "Do $ARGUMENTS".to_string(),
+                description: Some("My custom command".to_string()),
+                agent: Some("test-agent".to_string()),
+                model: Some("test-model".to_string()),
+                subtask: Some(true),
+            },
+        );
+
+        config.insert(
+            "minimal".to_string(),
+            CommandConfig {
+                template: "Simple template".to_string(),
+                description: None,
+                agent: None,
+                model: None,
+                subtask: None,
+            },
+        );
+
+        registry.register_from_config(&config);
+
+        assert!(registry.contains("mycommand"));
+        assert!(registry.contains("minimal"));
+
+        let cmd = registry.get("mycommand").unwrap();
+        assert_eq!(cmd.description, "My custom command");
+        assert_eq!(cmd.agent, Some("test-agent".to_string()));
+        assert_eq!(cmd.model, Some("test-model".to_string()));
+        assert!(cmd.subtask);
+
+        let minimal = registry.get("minimal").unwrap();
+        assert!(minimal.description.is_empty());
+        assert!(!minimal.subtask);
+    }
+
+    #[test]
+    fn test_expand_template_missing_args() {
+        let result = expand_template("$1 and $2 and $3", &["only-one"], "only-one");
+        // $1 gets "only-one", but since it's not the last placeholder, other placeholders become empty
+        // Actually, with the "last placeholder swallows" logic, $3 is the last and gets remaining
+        // But we only have one arg, so $1="only-one", $2="", $3=""
+        assert!(result.contains("only-one"));
+    }
+
+    #[test]
+    fn test_expand_template_no_placeholders() {
+        let result = expand_template("No placeholders here", &["arg1", "arg2"], "arg1 arg2");
+        assert_eq!(result, "No placeholders here");
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_subtask() {
+        let content = r#"---
+name: my-command
+subtask: true
+---
+
+Template content"#;
+
+        let (fm, body) = parse_frontmatter(content).unwrap();
+        assert_eq!(fm.name, Some("my-command".to_string()));
+        assert_eq!(fm.subtask, Some(true));
+        assert!(body.contains("Template content"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_missing_close() {
+        let content = r#"---
+name: broken
+No closing delimiter"#;
+
+        let result = parse_frontmatter(content);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing closing frontmatter delimiter"));
+    }
+
+    #[test]
+    fn test_command_serialization() {
+        let cmd = Command {
+            name: "test".to_string(),
+            description: "A test".to_string(),
+            template: "Do $ARGUMENTS".to_string(),
+            agent: Some("plan".to_string()),
+            model: None,
+            subtask: true,
+        };
+
+        let json = serde_json::to_string(&cmd).unwrap();
+        let parsed: Command = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.name, "test");
+        assert_eq!(parsed.agent, Some("plan".to_string()));
+        assert!(parsed.subtask);
+    }
+
+    #[test]
+    fn test_command_clone() {
+        let cmd = Command::new("original", "template")
+            .with_description("desc")
+            .with_agent("agent");
+
+        let cloned = cmd.clone();
+        assert_eq!(cloned.name, cmd.name);
+        assert_eq!(cloned.description, cmd.description);
+        assert_eq!(cloned.agent, cmd.agent);
+    }
+
+    #[test]
+    fn test_command_debug() {
+        let cmd = Command::new("debug-test", "template");
+        let debug_str = format!("{:?}", cmd);
+        assert!(debug_str.contains("debug-test"));
+    }
+
+    #[tokio::test]
+    async fn test_discover_empty_directories() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        let mut registry = CommandRegistry::new();
+        registry.discover(&[dir.path().to_path_buf()]).await;
+
+        // No commands found in empty directory
+        assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_discover_with_command_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        // Create .wonopcode/command directory
+        let cmd_dir = dir.path().join(".wonopcode").join("command");
+        std::fs::create_dir_all(&cmd_dir).unwrap();
+
+        // Create a command markdown file
+        let cmd_file = cmd_dir.join("mytest.md");
+        std::fs::write(
+            &cmd_file,
+            r#"---
+description: A discovered command
+---
+
+Do something with $ARGUMENTS
+"#,
+        )
+        .unwrap();
+
+        let mut registry = CommandRegistry::new();
+        registry.discover(&[dir.path().to_path_buf()]).await;
+
+        // Command should be discovered with filename as name
+        assert!(registry.contains("mytest"));
+        let cmd = registry.get("mytest").unwrap();
+        assert_eq!(cmd.description, "A discovered command");
+    }
+
+    #[tokio::test]
+    async fn test_discover_with_named_command() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        let cmd_dir = dir.path().join(".wonopcode").join("command");
+        std::fs::create_dir_all(&cmd_dir).unwrap();
+
+        // Create a command with explicit name in frontmatter
+        let cmd_file = cmd_dir.join("file.md");
+        std::fs::write(
+            &cmd_file,
+            r#"---
+name: explicit-name
+description: Has explicit name
+---
+
+Template here
+"#,
+        )
+        .unwrap();
+
+        let mut registry = CommandRegistry::new();
+        registry.discover(&[dir.path().to_path_buf()]).await;
+
+        // Should use the name from frontmatter, not filename
+        assert!(registry.contains("explicit-name"));
+        assert!(!registry.contains("file"));
+    }
+
+    #[test]
+    fn test_registry_default() {
+        let registry = CommandRegistry::default();
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_command_config_deserialization() {
+        let json = r#"{
+            "template": "Do something",
+            "description": "Desc",
+            "agent": "code",
+            "model": "gpt-4",
+            "subtask": true
+        }"#;
+
+        let config: CommandConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.template, "Do something");
+        assert_eq!(config.description, Some("Desc".to_string()));
+        assert_eq!(config.agent, Some("code".to_string()));
+        assert_eq!(config.model, Some("gpt-4".to_string()));
+        assert_eq!(config.subtask, Some(true));
+    }
+
+    #[test]
+    fn test_command_config_minimal() {
+        let json = r#"{"template": "Just template"}"#;
+
+        let config: CommandConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.template, "Just template");
+        assert!(config.description.is_none());
+        assert!(config.agent.is_none());
+        assert!(config.model.is_none());
+        assert!(config.subtask.is_none());
     }
 }

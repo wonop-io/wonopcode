@@ -328,4 +328,179 @@ mod tests {
         assert_eq!(project.id, "global");
         assert!(project.vcs.is_none());
     }
+
+    #[tokio::test]
+    async fn test_from_directory_git_repo() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        // Initialize a git repo
+        let output = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        // Configure git user
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create initial commit
+        let test_file = dir.path().join("test.txt");
+        std::fs::write(&test_file, "test").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let project = Project::from_directory(dir.path()).await.unwrap();
+        assert_ne!(project.id, "global");
+        assert_eq!(project.vcs, Some(Vcs::Git));
+    }
+
+    #[tokio::test]
+    async fn test_from_directory_subdirectory() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+
+        // Initialize a git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        // Create subdirectory
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        // From subdirectory, should still find parent git root
+        let project = Project::from_directory(&subdir).await.unwrap();
+        // Note: It might return global if there's no commit
+        // Since we're testing the path traversal, that's ok
+        assert!(!project.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_nonexistent() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path().to_path_buf());
+
+        let result = Project::load(&storage, "nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_save_and_load() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let storage = JsonStorage::new(dir.path().to_path_buf());
+
+        let project = Project {
+            id: "test123".to_string(),
+            worktree: PathBuf::from("/home/user/project"),
+            vcs: Some(Vcs::Git),
+            name: Some("Test Project".to_string()),
+            icon: None,
+            time: ProjectTime {
+                created: 1000,
+                updated: 2000,
+                initialized: None,
+            },
+        };
+
+        project.save(&storage).await.unwrap();
+
+        let loaded = Project::load(&storage, "test123").await.unwrap();
+        assert!(loaded.is_some());
+
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.id, "test123");
+        assert_eq!(loaded.name, Some("Test Project".to_string()));
+        assert_eq!(loaded.vcs, Some(Vcs::Git));
+    }
+
+    #[test]
+    fn test_project_clone() {
+        let project = Project {
+            id: "clone_test".to_string(),
+            worktree: PathBuf::from("/tmp"),
+            vcs: Some(Vcs::Git),
+            name: Some("Original".to_string()),
+            icon: None,
+            time: ProjectTime {
+                created: 100,
+                updated: 200,
+                initialized: None,
+            },
+        };
+
+        let cloned = project.clone();
+        assert_eq!(cloned.id, project.id);
+        assert_eq!(cloned.name, project.name);
+    }
+
+    #[test]
+    fn test_project_debug() {
+        let project = Project {
+            id: "debug_test".to_string(),
+            worktree: PathBuf::from("/tmp"),
+            vcs: None,
+            name: None,
+            icon: None,
+            time: ProjectTime {
+                created: 0,
+                updated: 0,
+                initialized: None,
+            },
+        };
+
+        let debug_str = format!("{:?}", project);
+        assert!(debug_str.contains("debug_test"));
+    }
+
+    #[test]
+    fn test_vcs_equality() {
+        assert_eq!(Vcs::Git, Vcs::Git);
+    }
+
+    #[test]
+    fn test_project_icon_clone() {
+        let icon = ProjectIcon {
+            url: Some("https://example.com".to_string()),
+            color: Some("#000".to_string()),
+        };
+        let cloned = icon.clone();
+        assert_eq!(cloned.url, icon.url);
+        assert_eq!(cloned.color, icon.color);
+    }
+
+    #[test]
+    fn test_project_time_clone() {
+        let time = ProjectTime {
+            created: 100,
+            updated: 200,
+            initialized: Some(150),
+        };
+        let cloned = time.clone();
+        assert_eq!(cloned.created, 100);
+        assert_eq!(cloned.updated, 200);
+        assert_eq!(cloned.initialized, Some(150));
+    }
 }

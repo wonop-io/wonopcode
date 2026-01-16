@@ -394,4 +394,231 @@ mod tests {
             "nightly-20260108"
         );
     }
+
+    #[test]
+    fn test_version_new() {
+        let v = Version::new(1, 2, 3);
+        assert_eq!(v.major, 1);
+        assert_eq!(v.minor, 2);
+        assert_eq!(v.patch, 3);
+        assert!(v.pre_release.is_none());
+    }
+
+    #[test]
+    fn test_version_with_pre_release() {
+        let v = Version::with_pre_release(1, 2, 3, PreRelease::Alpha(5));
+        assert_eq!(v.major, 1);
+        assert_eq!(v.minor, 2);
+        assert_eq!(v.patch, 3);
+        assert_eq!(v.pre_release, Some(PreRelease::Alpha(5)));
+    }
+
+    #[test]
+    fn test_parse_alpha() {
+        let v = Version::parse("1.2.3-alpha.2").unwrap();
+        assert_eq!(v.pre_release, Some(PreRelease::Alpha(2)));
+        assert!(v.is_beta()); // alpha counts as beta channel
+    }
+
+    #[test]
+    fn test_parse_rc() {
+        let v = Version::parse("1.2.3-rc.3").unwrap();
+        assert_eq!(v.pre_release, Some(PreRelease::Rc(3)));
+        assert!(v.is_beta()); // rc counts as beta channel
+    }
+
+    #[test]
+    fn test_parse_bare_prerelease() {
+        let alpha = Version::parse("1.2.3-alpha").unwrap();
+        assert_eq!(alpha.pre_release, Some(PreRelease::Alpha(0)));
+
+        let beta = Version::parse("1.2.3-beta").unwrap();
+        assert_eq!(beta.pre_release, Some(PreRelease::Beta(0)));
+
+        let rc = Version::parse("1.2.3-rc").unwrap();
+        assert_eq!(rc.pre_release, Some(PreRelease::Rc(0)));
+    }
+
+    #[test]
+    fn test_parse_partial_versions() {
+        // Only major
+        let v = Version::parse("1").unwrap();
+        assert_eq!(v.major, 1);
+        assert_eq!(v.minor, 0);
+        assert_eq!(v.patch, 0);
+
+        // Major and minor
+        let v = Version::parse("1.2").unwrap();
+        assert_eq!(v.major, 1);
+        assert_eq!(v.minor, 2);
+        assert_eq!(v.patch, 0);
+    }
+
+    #[test]
+    fn test_parse_invalid() {
+        assert!(Version::parse("").is_none());
+        // "not-a-version" doesn't have a parseable major version number
+        assert!(Version::parse("not-a-version").is_none());
+        assert!(Version::parse("abc").is_none()); // Can't parse "abc" as u32
+    }
+
+    #[test]
+    fn test_channel() {
+        let stable = Version::new(1, 0, 0);
+        assert_eq!(stable.channel(), ReleaseChannel::Stable);
+
+        let beta = Version::with_pre_release(1, 0, 0, PreRelease::Beta(1));
+        assert_eq!(beta.channel(), ReleaseChannel::Beta);
+
+        let alpha = Version::with_pre_release(1, 0, 0, PreRelease::Alpha(1));
+        assert_eq!(alpha.channel(), ReleaseChannel::Beta);
+
+        let rc = Version::with_pre_release(1, 0, 0, PreRelease::Rc(1));
+        assert_eq!(rc.channel(), ReleaseChannel::Beta);
+
+        let nightly = Version::with_pre_release(0, 0, 0, PreRelease::Nightly("nightly-2024".into()));
+        assert_eq!(nightly.channel(), ReleaseChannel::Nightly);
+    }
+
+    #[test]
+    fn test_prerelease_display() {
+        assert_eq!(PreRelease::Alpha(0).to_string(), "alpha");
+        assert_eq!(PreRelease::Alpha(1).to_string(), "alpha.1");
+        assert_eq!(PreRelease::Beta(0).to_string(), "beta");
+        assert_eq!(PreRelease::Beta(2).to_string(), "beta.2");
+        assert_eq!(PreRelease::Rc(0).to_string(), "rc");
+        assert_eq!(PreRelease::Rc(3).to_string(), "rc.3");
+        assert_eq!(
+            PreRelease::Nightly("nightly-2024".into()).to_string(),
+            "nightly-2024"
+        );
+    }
+
+    #[test]
+    fn test_release_channel_display() {
+        assert_eq!(ReleaseChannel::Stable.to_string(), "stable");
+        assert_eq!(ReleaseChannel::Beta.to_string(), "beta");
+        assert_eq!(ReleaseChannel::Nightly.to_string(), "nightly");
+    }
+
+    #[test]
+    fn test_release_channel_default() {
+        let channel: ReleaseChannel = Default::default();
+        assert_eq!(channel, ReleaseChannel::Stable);
+    }
+
+    #[test]
+    fn test_prerelease_detailed_ordering() {
+        // Same type comparisons
+        assert!(PreRelease::Alpha(1) < PreRelease::Alpha(2));
+        assert!(PreRelease::Beta(1) < PreRelease::Beta(2));
+        assert!(PreRelease::Rc(1) < PreRelease::Rc(2));
+        assert!(
+            PreRelease::Nightly("a".into()) < PreRelease::Nightly("b".into())
+        );
+
+        // Different type comparisons: alpha < beta < rc < nightly
+        assert!(PreRelease::Alpha(1) < PreRelease::Beta(1));
+        assert!(PreRelease::Beta(1) < PreRelease::Rc(1));
+        assert!(PreRelease::Rc(1) < PreRelease::Nightly("n".into()));
+        assert!(PreRelease::Alpha(1) < PreRelease::Rc(1));
+        assert!(PreRelease::Alpha(1) < PreRelease::Nightly("n".into()));
+        assert!(PreRelease::Beta(1) < PreRelease::Nightly("n".into()));
+    }
+
+    #[test]
+    fn test_version_ordering_with_prereleases() {
+        let v1_alpha = Version::with_pre_release(1, 0, 0, PreRelease::Alpha(1));
+        let v1_beta = Version::with_pre_release(1, 0, 0, PreRelease::Beta(1));
+        let v1_rc = Version::with_pre_release(1, 0, 0, PreRelease::Rc(1));
+        let v1_stable = Version::new(1, 0, 0);
+        let v2_alpha = Version::with_pre_release(2, 0, 0, PreRelease::Alpha(1));
+
+        assert!(v1_alpha < v1_beta);
+        assert!(v1_beta < v1_rc);
+        assert!(v1_rc < v1_stable);
+        assert!(v1_stable < v2_alpha);
+    }
+
+    #[test]
+    fn test_version_serialization() {
+        let v = Version::with_pre_release(1, 2, 3, PreRelease::Beta(1));
+        let json = serde_json::to_string(&v).unwrap();
+        let deserialized: Version = serde_json::from_str(&json).unwrap();
+        assert_eq!(v, deserialized);
+    }
+
+    #[test]
+    fn test_prerelease_serialization() {
+        let pr = PreRelease::Rc(5);
+        let json = serde_json::to_string(&pr).unwrap();
+        let deserialized: PreRelease = serde_json::from_str(&json).unwrap();
+        assert_eq!(pr, deserialized);
+    }
+
+    #[test]
+    fn test_release_channel_serialization() {
+        assert_eq!(
+            serde_json::to_string(&ReleaseChannel::Stable).unwrap(),
+            "\"stable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ReleaseChannel::Beta).unwrap(),
+            "\"beta\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ReleaseChannel::Nightly).unwrap(),
+            "\"nightly\""
+        );
+
+        let channel: ReleaseChannel = serde_json::from_str("\"beta\"").unwrap();
+        assert_eq!(channel, ReleaseChannel::Beta);
+    }
+
+    #[test]
+    fn test_version_equality() {
+        let v1 = Version::new(1, 2, 3);
+        let v2 = Version::new(1, 2, 3);
+        let v3 = Version::new(1, 2, 4);
+
+        assert_eq!(v1, v2);
+        assert_ne!(v1, v3);
+    }
+
+    #[test]
+    fn test_prerelease_equality() {
+        assert_eq!(PreRelease::Alpha(1), PreRelease::Alpha(1));
+        assert_ne!(PreRelease::Alpha(1), PreRelease::Alpha(2));
+        assert_ne!(PreRelease::Alpha(1), PreRelease::Beta(1));
+    }
+
+    #[test]
+    fn test_parse_nightly_in_version() {
+        // Nightly embedded in version string
+        let v = Version::parse("1.0.0-nightly-20260108").unwrap();
+        assert_eq!(
+            v.pre_release,
+            Some(PreRelease::Nightly("nightly-20260108".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_version_display_with_prerelease() {
+        let v = Version::with_pre_release(1, 2, 3, PreRelease::Alpha(5));
+        assert_eq!(v.to_string(), "1.2.3-alpha.5");
+
+        let v = Version::with_pre_release(1, 2, 3, PreRelease::Beta(0));
+        assert_eq!(v.to_string(), "1.2.3-beta");
+
+        let v = Version::with_pre_release(1, 2, 3, PreRelease::Rc(1));
+        assert_eq!(v.to_string(), "1.2.3-rc.1");
+    }
+
+    #[test]
+    fn test_parse_whitespace() {
+        let v = Version::parse("  1.2.3  ").unwrap();
+        assert_eq!(v.major, 1);
+        assert_eq!(v.minor, 2);
+        assert_eq!(v.patch, 3);
+    }
 }
