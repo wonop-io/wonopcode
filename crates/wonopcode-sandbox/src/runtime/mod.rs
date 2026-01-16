@@ -233,6 +233,7 @@ impl SandboxManager {
     }
 
     /// Create a new runtime instance based on configuration.
+    #[allow(clippy::cognitive_complexity)]
     async fn create_runtime(&self) -> SandboxResult<Arc<dyn SandboxRuntime>> {
         let path_mapper = PathMapper::new(
             self.project_root.clone(),
@@ -382,6 +383,7 @@ impl SandboxManager {
 /// Detect available sandbox runtimes.
 ///
 /// Checks for Docker, Podman, and Lima in order of preference.
+#[allow(clippy::cognitive_complexity)]
 pub async fn detect_runtime() -> SandboxRuntimeType {
     // Check Docker
     if is_docker_available().await {

@@ -102,6 +102,7 @@ impl Processor {
     }
 
     /// Process a prompt and stream responses via the connection.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn process_prompt(
         &self,
         session_id: &str,

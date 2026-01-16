@@ -146,6 +146,7 @@ Usage:
 
 impl WriteTool {
     /// Write file through sandbox runtime.
+    #[allow(clippy::cognitive_complexity)]
     async fn write_sandboxed(
         &self,
         sandbox: &dyn wonopcode_sandbox::SandboxRuntime,

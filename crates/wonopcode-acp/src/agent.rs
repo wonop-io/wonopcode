@@ -81,6 +81,7 @@ impl Agent {
     }
 
     /// Handle a JSON-RPC request.
+    #[allow(clippy::cognitive_complexity)]
     async fn handle_request(&self, request: JsonRpcRequest) {
         let id = match request.id {
             Some(id) => id,
@@ -263,6 +264,7 @@ impl Agent {
     }
 
     /// Replay session history to the client.
+    #[allow(clippy::cognitive_complexity)]
     async fn replay_session_history(&self, session_id: &str) {
         let processors = self.processors.read().await;
         if let Some(processor) = processors.get(session_id) {
@@ -307,6 +309,7 @@ impl Agent {
     }
 
     /// Handle prompt request.
+    #[allow(clippy::cognitive_complexity)]
     async fn handle_prompt(
         &self,
         params: Option<serde_json::Value>,

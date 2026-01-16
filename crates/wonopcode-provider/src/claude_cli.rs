@@ -269,6 +269,7 @@ impl ClaudeCliProvider {
     }
 
     /// Perform the actual authentication check (uncached, async).
+    #[allow(clippy::cognitive_complexity)]
     async fn check_auth_uncached_async() -> bool {
         let output = TokioCommand::new("claude")
             .args(["-p", "hi", "--output-format", "json"])

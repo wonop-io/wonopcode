@@ -96,6 +96,7 @@ impl SnapshotStore {
     /// * `session_id` - ID of the current session
     /// * `message_id` - ID of the current message
     /// * `description` - Description of why the snapshot was taken
+    #[allow(clippy::cognitive_complexity)]
     pub async fn take(
         &self,
         files: &[PathBuf],
@@ -172,6 +173,7 @@ impl SnapshotStore {
     ///
     /// # Arguments
     /// * `snapshot_id` - ID of the snapshot to restore
+    #[allow(clippy::cognitive_complexity)]
     pub async fn restore(&self, snapshot_id: &SnapshotId) -> SnapshotResult<Snapshot> {
         let snapshot = self.get(snapshot_id).await?;
         let snapshot_dir = self.snapshot_dir(snapshot_id);
@@ -314,6 +316,7 @@ impl SnapshotStore {
     }
 
     /// Clean up old snapshots based on configuration.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn cleanup(&self) -> SnapshotResult<u32> {
         let mut deleted = 0;
         let cutoff = Utc::now() - Duration::days(self.config.max_age_days as i64);

@@ -80,6 +80,7 @@ impl StdioTransport {
     }
 
     /// Read from stdin and dispatch messages.
+    #[allow(clippy::cognitive_complexity)]
     async fn stdin_loop(
         incoming_tx: mpsc::Sender<IncomingMessage>,
         pending: Arc<Mutex<HashMap<JsonRpcId, PendingRequest>>>,
@@ -147,6 +148,7 @@ impl StdioTransport {
     }
 
     /// Write messages to stdout.
+    #[allow(clippy::cognitive_complexity)]
     async fn stdout_loop(mut rx: mpsc::Receiver<String>) {
         let mut stdout = tokio::io::stdout();
 

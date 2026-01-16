@@ -1680,6 +1680,7 @@ impl MessagesWidget {
         self.revert_index.is_some()
     }
 
+    #[allow(clippy::cognitive_complexity)]
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let _timer = metrics::widget_timer("messages");
 

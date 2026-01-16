@@ -181,6 +181,7 @@ impl LspClient {
     }
 
     /// Get or spawn server for a file, with deduplication and broken tracking.
+    #[allow(clippy::cognitive_complexity)]
     async fn get_servers_for_file(
         &self,
         file_path: &Path,

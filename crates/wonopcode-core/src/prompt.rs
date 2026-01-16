@@ -149,6 +149,7 @@ impl PromptLoop {
     }
 
     /// Execute the prompt loop for a user message.
+    #[allow(clippy::cognitive_complexity)]
     pub async fn run(
         &self,
         session: &Session,

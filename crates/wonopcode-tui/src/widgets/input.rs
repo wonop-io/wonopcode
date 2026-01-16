@@ -991,6 +991,7 @@ impl InputWidget {
     }
 
     /// Render text with wrapping and cursor support.
+    #[allow(clippy::cognitive_complexity)]
     fn render_wrapped_text(&self, frame: &mut Frame, area: Rect, theme: &Theme, bg_style: Style) {
         let width = area.width as usize;
         if width == 0 {

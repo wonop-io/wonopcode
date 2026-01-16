@@ -2050,6 +2050,7 @@ async function fetchUserData(userId) {
     }
 
     /// Handle an event.
+    #[allow(clippy::cognitive_complexity)]
     fn handle_event(&mut self, event: Event) {
         // Time event handling by type
         let event_type = match &event {
@@ -2577,6 +2578,7 @@ async function fetchUserData(userId) {
     }
 
     /// Handle dialog key events.
+    #[allow(clippy::cognitive_complexity)]
     fn handle_dialog_key(&mut self, key: crossterm::event::KeyEvent) {
         if is_escape(&key) {
             self.dialog = ActiveDialog::None;

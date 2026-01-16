@@ -333,4 +333,157 @@ mod tests {
         assert!(result.output.contains("index.js"));
         assert!(!result.output.contains("node_modules"));
     }
+
+    #[tokio::test]
+    async fn test_list_nested_directories() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Create nested directory structure
+        fs::create_dir_all(base.join("level1/level2/level3")).unwrap();
+        fs::write(base.join("root.txt"), "content").unwrap();
+        fs::write(base.join("level1/file1.txt"), "content").unwrap();
+        fs::write(base.join("level1/level2/file2.txt"), "content").unwrap();
+        fs::write(base.join("level1/level2/level3/file3.txt"), "content").unwrap();
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        // Verify all nested files are listed
+        assert!(result.output.contains("root.txt"));
+        assert!(result.output.contains("level1/"));
+        assert!(result.output.contains("file1.txt"));
+        assert!(result.output.contains("level2/"));
+        assert!(result.output.contains("file2.txt"));
+        assert!(result.output.contains("level3/"));
+        assert!(result.output.contains("file3.txt"));
+
+        // Verify metadata
+        let metadata = result.metadata;
+        assert_eq!(metadata["count"], 4);
+        assert_eq!(metadata["truncated"], false);
+    }
+
+    #[tokio::test]
+    async fn test_list_depth_limit() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Create many files to exceed LIMIT
+        for i in 0..150 {
+            fs::write(base.join(format!("file{}.txt", i)), "content").unwrap();
+        }
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        // Verify truncation
+        let metadata = result.metadata;
+        assert_eq!(metadata["count"], LIMIT);
+        assert_eq!(metadata["truncated"], true);
+        assert!(result.title.contains("truncated"));
+    }
+
+    #[tokio::test]
+    async fn test_list_hidden_files() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Create hidden and normal files
+        fs::write(base.join("visible.txt"), "content").unwrap();
+        fs::write(base.join(".hidden"), "content").unwrap();
+        fs::write(base.join(".env"), "content").unwrap();
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        // The tool includes hidden files (hidden(false) in ignore walker)
+        assert!(result.output.contains("visible.txt"));
+        assert!(result.output.contains(".hidden"));
+        assert!(result.output.contains(".env"));
+
+        // Verify count includes hidden files
+        let metadata = result.metadata;
+        assert_eq!(metadata["count"], 3);
+    }
+
+    #[tokio::test]
+    async fn test_list_file_info() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Create files with different content
+        fs::write(base.join("small.txt"), "x").unwrap();
+        fs::write(base.join("large.txt"), "x".repeat(1000)).unwrap();
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        // Verify files are listed
+        assert!(result.output.contains("small.txt"));
+        assert!(result.output.contains("large.txt"));
+
+        // Verify metadata contains count
+        let metadata = result.metadata;
+        assert_eq!(metadata["count"], 2);
+        assert!(metadata["path"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_list_empty_directory() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Create an empty directory
+        fs::create_dir(base.join("empty")).unwrap();
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        // Verify no files listed
+        let metadata = result.metadata;
+        assert_eq!(metadata["count"], 0);
+        assert_eq!(metadata["truncated"], false);
+
+        // Output should show the root path
+        assert!(result.output.contains(&base.display().to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_list_nonexistent_path() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+
+        // Try to list a path that doesn't exist
+        let nonexistent = base.join("does_not_exist");
+
+        let tool = ListTool;
+        let ctx = test_context(base.to_path_buf());
+        let result = tool
+            .execute(
+                json!({
+                    "path": nonexistent.to_string_lossy().to_string()
+                }),
+                &ctx,
+            )
+            .await;
+
+        // The tool should return an error when the path doesn't exist
+        // If it doesn't error, it should at least indicate the issue in metadata
+        match result {
+            Err(_) => {
+                // Expected behavior - error on nonexistent path
+            }
+            Ok(output) => {
+                // Alternative behavior - succeeds but returns empty list
+                // Verify it's empty
+                assert_eq!(output.metadata["count"], 0);
+            }
+        }
+    }
 }
