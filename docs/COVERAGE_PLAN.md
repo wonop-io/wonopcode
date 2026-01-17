@@ -4,19 +4,19 @@
 
 This plan focuses on writing tests that **break the user experience** when they fail. These are not just unit tests for code coverage, but tests that verify critical user-facing functionality.
 
-## Current State (2026-01-17)
+## Current State (2026-01-17, updated)
 
 | Crate | Lines | Covered | Coverage | Status |
 |-------|-------|---------|----------|--------|
 | wonopcode | 7,465 | 388 | 5.20% | 🔴 |
-| wonopcode-acp | 2,080 | 800 | 38.46% | 🔴 |
+| wonopcode-acp | 2,247 | 1,062 | 47.26% | 🔴 |
 | wonopcode-auth | 322 | 290 | **90.06%** | ✅ |
-| wonopcode-core | 9,158 | 8,299 | **90.62%** | ✅ |
+| wonopcode-core | 9,158 | 8,298 | **90.61%** | ✅ |
 | wonopcode-discover | 1,858 | 1,634 | 87.94% | 🟡 |
 | wonopcode-lsp | 1,279 | 411 | 32.13% | 🔴 |
 | wonopcode-mcp | 3,191 | 2,715 | 85.08% | 🟡 |
 | wonopcode-protocol | 432 | 429 | **99.31%** | ✅ |
-| wonopcode-provider | 4,604 | 1,755 | 38.12% | 🔴 |
+| wonopcode-provider | 4,604 | 1,823 | 39.60% | 🔴 |
 | wonopcode-sandbox | 1,879 | 587 | 31.24% | 🔴 |
 | wonopcode-server | 6,363 | 3,457 | 54.33% | 🟠 |
 | wonopcode-snapshot | 718 | 685 | **95.40%** | ✅ |
@@ -24,13 +24,21 @@ This plan focuses on writing tests that **break the user experience** when they 
 | wonopcode-test-utils | 1,787 | 1,623 | **90.82%** | ✅ |
 | wonopcode-tools | 8,495 | 7,661 | **90.18%** | ✅ |
 | wonopcode-tui | 2,598 | 0 | 0.00% | 🔴 |
-| wonopcode-tui-core | 1,523 | 605 | 39.72% | 🔴 |
+| wonopcode-tui-core | 1,844 | 1,143 | 61.98% | 🟠 |
 | wonopcode-tui-dialog | 3,533 | 0 | 0.00% | 🔴 |
-| wonopcode-tui-messages | 2,055 | 243 | 11.82% | 🔴 |
-| wonopcode-tui-render | 1,836 | 946 | 51.53% | 🟠 |
-| wonopcode-tui-widgets | 3,552 | 844 | 23.76% | 🔴 |
+| wonopcode-tui-messages | 2,208 | 553 | 25.05% | 🔴 |
+| wonopcode-tui-render | 2,012 | 1,184 | 58.85% | 🟠 |
+| wonopcode-tui-widgets | 4,656 | 2,546 | 54.68% | 🟠 |
 | wonopcode-util | 1,633 | 1,490 | **91.24%** | ✅ |
-| **TOTAL** | **66,772** | **35,264** | **52.81%** | 🔴 |
+| **TOTAL** | **68,693** | **38,381** | **55.87%** | 🔴 |
+
+### Progress since start:
+- Total coverage: 52.81% → **55.87%** (+3.06%)
+- wonopcode-acp: 38.46% → **47.26%** (+8.8%)
+- wonopcode-tui-core: 39.72% → **61.98%** (+22.26%)
+- wonopcode-tui-messages: 11.82% → **25.05%** (+13.23%)
+- wonopcode-tui-render: 51.53% → **58.85%** (+7.32%)
+- wonopcode-tui-widgets: 23.76% → **54.68%** (+30.92%)
 
 **Legend**: ✅ ≥90% (target) │ 🟡 ≥70% │ 🟠 ≥50% │ 🔴 <50%
 
