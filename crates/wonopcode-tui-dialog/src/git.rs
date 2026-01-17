@@ -10,9 +10,9 @@ use ratatui::{
 };
 use std::collections::HashSet;
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Git file display information.
 #[derive(Debug, Clone)]

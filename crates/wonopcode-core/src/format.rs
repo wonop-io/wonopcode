@@ -389,4 +389,271 @@ mod tests {
         let rs_file = PathBuf::from("src/main.rs");
         assert!(registry.find_for_file(&rs_file).is_none());
     }
+
+    #[test]
+    fn test_registry_enable() {
+        let mut registry = FormatterRegistry::with_builtins();
+        registry.disable();
+        assert!(registry.find_for_file(&PathBuf::from("main.rs")).is_none());
+
+        registry.enable();
+        assert!(registry.find_for_file(&PathBuf::from("main.rs")).is_some());
+    }
+
+    #[test]
+    fn test_formatter_new() {
+        let formatter = Formatter::new(
+            "test-fmt",
+            vec!["fmt".to_string(), "$FILE".to_string()],
+            vec![".txt".to_string()],
+        );
+
+        assert_eq!(formatter.name, "test-fmt");
+        assert!(formatter.enabled);
+        assert!(formatter.environment.is_empty());
+        assert!(formatter.handles("txt"));
+    }
+
+    #[test]
+    fn test_formatter_handles_case_insensitive() {
+        let formatter = Formatter::new("test", vec!["test".into()], vec![".RS".into()]);
+
+        assert!(formatter.handles("rs"));
+        assert!(formatter.handles("RS"));
+        assert!(formatter.handles(".rs"));
+        assert!(formatter.handles(".RS"));
+    }
+
+    #[test]
+    fn test_registry_new() {
+        let registry = FormatterRegistry::new();
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_registry_register() {
+        let mut registry = FormatterRegistry::new();
+        let formatter = Formatter::new(
+            "custom",
+            vec!["custom-fmt".into(), "$FILE".into()],
+            vec![".custom".into()],
+        );
+
+        registry.register(formatter);
+        assert_eq!(registry.list().len(), 1);
+        assert_eq!(registry.list()[0].name, "custom");
+    }
+
+    #[test]
+    fn test_registry_list() {
+        let registry = FormatterRegistry::with_builtins();
+        let formatters = registry.list();
+
+        assert!(!formatters.is_empty());
+
+        // Check some built-in formatters exist
+        assert!(formatters.iter().any(|f| f.name == "rustfmt"));
+        assert!(formatters.iter().any(|f| f.name == "gofmt"));
+        assert!(formatters.iter().any(|f| f.name == "prettier"));
+    }
+
+    #[test]
+    fn test_find_formatter_no_extension() {
+        let registry = FormatterRegistry::with_builtins();
+        let file = PathBuf::from("Makefile");
+        assert!(registry.find_for_file(&file).is_none());
+    }
+
+    #[test]
+    fn test_find_formatter_prettier_extensions() {
+        let registry = FormatterRegistry::with_builtins();
+
+        let extensions = [
+            ".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".html", ".md", ".yaml", ".yml",
+        ];
+
+        for ext in extensions {
+            let file = PathBuf::from(format!("file{}", ext));
+            let formatter = registry.find_for_file(&file);
+            assert!(formatter.is_some(), "Expected prettier for {}", ext);
+            assert_eq!(formatter.unwrap().name, "prettier");
+        }
+    }
+
+    #[test]
+    fn test_find_formatter_python() {
+        let registry = FormatterRegistry::with_builtins();
+
+        let py_file = PathBuf::from("script.py");
+        let formatter = registry.find_for_file(&py_file);
+        assert!(formatter.is_some());
+        assert_eq!(formatter.unwrap().name, "ruff");
+
+        let pyi_file = PathBuf::from("types.pyi");
+        assert!(registry.find_for_file(&pyi_file).is_some());
+    }
+
+    #[test]
+    fn test_find_formatter_c_cpp() {
+        let registry = FormatterRegistry::with_builtins();
+
+        let c_exts = [".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx"];
+        for ext in c_exts {
+            let file = PathBuf::from(format!("file{}", ext));
+            let formatter = registry.find_for_file(&file);
+            assert!(formatter.is_some(), "Expected clang-format for {}", ext);
+            assert_eq!(formatter.unwrap().name, "clang-format");
+        }
+    }
+
+    #[test]
+    fn test_formatter_disabled() {
+        let mut formatter = Formatter::new("test", vec!["echo".into()], vec![".test".into()]);
+        formatter.enabled = false;
+
+        let mut registry = FormatterRegistry::new();
+        registry.register(formatter);
+
+        let file = PathBuf::from("file.test");
+        assert!(registry.find_for_file(&file).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_format_file_no_formatter() {
+        let registry = FormatterRegistry::with_builtins();
+        let file = PathBuf::from("file.xyz");
+
+        let result = registry.format_file(&file).await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // No formatter found
+    }
+
+    #[tokio::test]
+    async fn test_format_file_disabled() {
+        let mut registry = FormatterRegistry::with_builtins();
+        registry.disable();
+
+        let file = PathBuf::from("main.rs");
+        let result = registry.format_file(&file).await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Disabled, so nothing formatted
+    }
+
+    #[tokio::test]
+    async fn test_format_disabled_formatter() {
+        let mut formatter = Formatter::new("test", vec!["echo".into()], vec![".test".into()]);
+        formatter.enabled = false;
+
+        let file = PathBuf::from("/tmp/test.file");
+        let result = formatter.format(&file).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_format_empty_command() {
+        let formatter = Formatter::new("empty", vec![], vec![".test".into()]);
+
+        let file = PathBuf::from("/tmp/test.file");
+        let result = formatter.format(&file).await;
+        assert!(result.is_err());
+
+        if let Err(FormatterError::InvalidCommand(msg)) = result {
+            assert!(msg.contains("Empty command"));
+        } else {
+            panic!("Expected InvalidCommand error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_format_nonexistent_command() {
+        let formatter = Formatter::new(
+            "nonexistent",
+            vec!["this-command-does-not-exist-12345".into(), "$FILE".into()],
+            vec![".test".into()],
+        );
+
+        let file = PathBuf::from("/tmp/test.file");
+        let result = formatter.format(&file).await;
+        assert!(result.is_err());
+
+        if let Err(FormatterError::ExecutionFailed(msg)) = result {
+            assert!(msg.contains("Failed to execute"));
+        } else {
+            panic!("Expected ExecutionFailed error");
+        }
+    }
+
+    #[test]
+    fn test_formatter_error_display() {
+        let err = FormatterError::InvalidCommand("test error".into());
+        assert_eq!(err.to_string(), "Invalid command: test error");
+
+        let err = FormatterError::NotFound("rustfmt".into());
+        assert_eq!(err.to_string(), "Formatter not found: rustfmt");
+
+        let err = FormatterError::ExecutionFailed("exit code 1".into());
+        assert_eq!(err.to_string(), "Execution failed: exit code 1");
+    }
+
+    #[test]
+    fn test_formatter_serialization() {
+        let formatter = Formatter {
+            name: "test".to_string(),
+            command: vec!["fmt".to_string(), "$FILE".to_string()],
+            environment: {
+                let mut env = HashMap::new();
+                env.insert("KEY".to_string(), "VALUE".to_string());
+                env
+            },
+            extensions: vec![".test".to_string()],
+            enabled: true,
+        };
+
+        let json = serde_json::to_string(&formatter).unwrap();
+        let deserialized: Formatter = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.name, "test");
+        assert_eq!(deserialized.command.len(), 2);
+        assert_eq!(
+            deserialized.environment.get("KEY"),
+            Some(&"VALUE".to_string())
+        );
+        assert!(deserialized.enabled);
+    }
+
+    #[test]
+    fn test_formatter_default_enabled() {
+        let json = r#"{"name":"test","command":["fmt"],"extensions":[".test"]}"#;
+        let formatter: Formatter = serde_json::from_str(json).unwrap();
+        assert!(formatter.enabled); // defaults to true
+    }
+
+    #[tokio::test]
+    async fn test_is_available_nonexistent_formatter() {
+        let registry = FormatterRegistry::with_builtins();
+        let available = registry.is_available("nonexistent-formatter-name").await;
+        assert!(!available);
+    }
+
+    #[tokio::test]
+    async fn test_is_available_empty_command() {
+        let mut registry = FormatterRegistry::new();
+        let formatter = Formatter {
+            name: "empty".to_string(),
+            command: vec![],
+            environment: HashMap::new(),
+            extensions: vec![".test".to_string()],
+            enabled: true,
+        };
+        registry.register(formatter);
+
+        let available = registry.is_available("empty").await;
+        assert!(!available);
+    }
+
+    #[test]
+    fn test_default_registry() {
+        let registry = FormatterRegistry::default();
+        assert!(registry.list().is_empty());
+    }
 }

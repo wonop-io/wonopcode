@@ -295,3 +295,316 @@ Guidelines:
 - Summarize your findings when done
 
 Complete the task and report back with your results."#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_util::sync::CancellationToken;
+
+    fn create_test_context() -> ToolContext {
+        ToolContext {
+            session_id: "test-session".to_string(),
+            message_id: "test-message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: std::path::PathBuf::from("/test"),
+            cwd: std::path::PathBuf::from("/test"),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_subagent_result_success() {
+        let result = SubagentResult::success("done");
+        assert!(result.success);
+        assert_eq!(result.response, "done");
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_subagent_result_failure() {
+        let result = SubagentResult::failure("something went wrong");
+        assert!(!result.success);
+        assert!(result.response.is_empty());
+        assert_eq!(result.error, Some("something went wrong".to_string()));
+    }
+
+    #[test]
+    fn test_task_tool_new() {
+        let tool = TaskTool::new();
+        assert_eq!(tool.id(), "task");
+    }
+
+    #[test]
+    fn test_task_tool_default() {
+        let tool = TaskTool::default();
+        assert_eq!(tool.id(), "task");
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_has_executor_false() {
+        let tool = TaskTool::new();
+        assert!(!tool.has_executor().await);
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_with_executor() {
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("executed")) }));
+        let tool = TaskTool::with_executor(executor);
+        assert!(tool.has_executor().await);
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_set_executor() {
+        let tool = TaskTool::new();
+        assert!(!tool.has_executor().await);
+
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("done")) }));
+        tool.set_executor(executor).await;
+
+        assert!(tool.has_executor().await);
+    }
+
+    #[test]
+    fn test_task_tool_description() {
+        let tool = TaskTool::new();
+        let desc = tool.description();
+        assert!(desc.contains("Launch a new agent"));
+        assert!(desc.contains("general"));
+        assert!(desc.contains("explore"));
+    }
+
+    #[test]
+    fn test_task_tool_parameters_schema() {
+        let tool = TaskTool::new();
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("description")));
+        assert!(required.contains(&json!("prompt")));
+        assert!(required.contains(&json!("subagent_type")));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_execute_no_executor() {
+        let tool = TaskTool::new();
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "description": "test task",
+                    "prompt": "do something",
+                    "subagent_type": "general"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("subagent support"));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_execute_invalid_agent_type() {
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("done")) }));
+        let tool = TaskTool::with_executor(executor);
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "description": "test task",
+                    "prompt": "do something",
+                    "subagent_type": "invalid"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unknown agent type"));
+        assert!(err.contains("invalid"));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_execute_success() {
+        let executor: SubagentExecutor = Arc::new(|args, _ctx| {
+            Box::pin(async move {
+                Ok(SubagentResult::success(format!(
+                    "Completed: {}",
+                    args.prompt
+                )))
+            })
+        });
+        let tool = TaskTool::with_executor(executor);
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "description": "test task",
+                    "prompt": "do something",
+                    "subagent_type": "general"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.title.contains("Task completed"));
+        assert!(result.output.contains("Completed: do something"));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_execute_failure() {
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::failure("task failed")) }));
+        let tool = TaskTool::with_executor(executor);
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "description": "test task",
+                    "prompt": "do something",
+                    "subagent_type": "explore"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("task failed"));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_execute_executor_error() {
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Err("executor error".to_string()) }));
+        let tool = TaskTool::with_executor(executor);
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "description": "test task",
+                    "prompt": "do something",
+                    "subagent_type": "general"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("executor error"));
+    }
+
+    #[tokio::test]
+    async fn test_task_tool_invalid_args() {
+        let tool = TaskTool::new();
+        let ctx = create_test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "invalid": "args"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid arguments"));
+    }
+
+    #[test]
+    fn test_get_subagent_prompt_explore() {
+        let prompt = get_subagent_prompt("explore");
+        assert!(prompt.contains("file search specialist"));
+        assert!(prompt.contains("ripgrep"));
+    }
+
+    #[test]
+    fn test_get_subagent_prompt_general() {
+        let prompt = get_subagent_prompt("general");
+        assert!(prompt.contains("capable AI assistant"));
+    }
+
+    #[test]
+    fn test_get_subagent_prompt_unknown() {
+        let prompt = get_subagent_prompt("unknown");
+        assert_eq!(prompt, get_subagent_prompt("general")); // defaults to general
+    }
+
+    #[test]
+    fn test_get_subagent_tools_explore() {
+        let tools = get_subagent_tools("explore");
+        assert!(!tools.is_empty());
+
+        // Check specific tools
+        assert!(tools.contains(&("read", true)));
+        assert!(tools.contains(&("glob", true)));
+        assert!(tools.contains(&("grep", true)));
+        assert!(tools.contains(&("edit", false))); // Read-only
+        assert!(tools.contains(&("write", false))); // Read-only
+        assert!(tools.contains(&("task", false))); // No recursive
+    }
+
+    #[test]
+    fn test_get_subagent_tools_general() {
+        let tools = get_subagent_tools("general");
+        assert!(!tools.is_empty());
+
+        // General has write access
+        assert!(tools.contains(&("read", true)));
+        assert!(tools.contains(&("edit", true)));
+        assert!(tools.contains(&("write", true)));
+        assert!(tools.contains(&("task", false))); // No recursive
+    }
+
+    #[test]
+    fn test_get_subagent_tools_unknown() {
+        let tools = get_subagent_tools("unknown");
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_task_args_deserialization() {
+        let args: TaskArgs = serde_json::from_value(json!({
+            "description": "test",
+            "prompt": "do it",
+            "subagent_type": "general"
+        }))
+        .unwrap();
+
+        assert_eq!(args.description, "test");
+        assert_eq!(args.prompt, "do it");
+        assert_eq!(args.subagent_type, "general");
+        assert!(args.session_id.is_none());
+    }
+
+    #[test]
+    fn test_task_args_with_session_id() {
+        let args: TaskArgs = serde_json::from_value(json!({
+            "description": "test",
+            "prompt": "do it",
+            "subagent_type": "general",
+            "session_id": "sess-123"
+        }))
+        .unwrap();
+
+        assert_eq!(args.session_id, Some("sess-123".to_string()));
+    }
+}

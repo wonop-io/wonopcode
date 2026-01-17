@@ -276,6 +276,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_write_tool_id() {
+        let tool = WriteTool;
+        assert_eq!(tool.id(), "write");
+    }
+
+    #[test]
+    fn test_write_tool_description() {
+        let tool = WriteTool;
+        let desc = tool.description();
+        assert!(desc.contains("file"));
+        assert!(desc.contains("overwrite"));
+    }
+
+    #[test]
+    fn test_write_tool_parameters_schema() {
+        let tool = WriteTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("filePath")));
+        assert!(required.contains(&json!("content")));
+    }
+
     #[tokio::test]
     async fn test_write_file() {
         let dir = tempdir().unwrap();
@@ -364,6 +388,122 @@ mod tests {
         assert!(matches!(result, Err(ToolError::PermissionDenied(_))));
     }
 
+    #[tokio::test]
+    async fn test_write_missing_filepath() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context_with_root(dir.path().to_path_buf());
+
+        let tool = WriteTool;
+        let result = tool
+            .execute(
+                json!({
+                    "content": "some content"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("filePath"));
+    }
+
+    #[tokio::test]
+    async fn test_write_missing_content() {
+        let dir = tempdir().unwrap();
+        let canonical_dir = dir.path().canonicalize().unwrap();
+        let file_path = canonical_dir.join("test.txt");
+        let ctx = test_context_with_root(canonical_dir);
+
+        let tool = WriteTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.display().to_string()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("content"));
+    }
+
+    #[tokio::test]
+    async fn test_write_overwrites_existing() {
+        let dir = tempdir().unwrap();
+        let canonical_dir = dir.path().canonicalize().unwrap();
+        let file_path = canonical_dir.join("existing.txt");
+
+        // Create existing file
+        std::fs::write(&file_path, "old content").unwrap();
+
+        let ctx = test_context_with_root(canonical_dir);
+        let tool = WriteTool;
+
+        tool.execute(
+            json!({
+                "filePath": file_path.display().to_string(),
+                "content": "new content"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "new content");
+    }
+
+    #[tokio::test]
+    async fn test_write_empty_content() {
+        let dir = tempdir().unwrap();
+        let canonical_dir = dir.path().canonicalize().unwrap();
+        let file_path = canonical_dir.join("empty.txt");
+        let ctx = test_context_with_root(canonical_dir);
+
+        let tool = WriteTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.display().to_string(),
+                    "content": ""
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("0 bytes"));
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_write_with_metadata() {
+        let dir = tempdir().unwrap();
+        let canonical_dir = dir.path().canonicalize().unwrap();
+        let file_path = canonical_dir.join("test.txt");
+        let ctx = test_context_with_root(canonical_dir);
+
+        let tool = WriteTool;
+        let result = tool
+            .execute(
+                json!({
+                    "filePath": file_path.display().to_string(),
+                    "content": "test content"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.metadata["bytes"].as_u64().is_some());
+        assert!(result.metadata["path"].as_str().is_some());
+        assert!(result.metadata["preview"].as_str().is_some());
+    }
+
     #[test]
     fn test_normalize_path() {
         assert_eq!(
@@ -378,5 +518,28 @@ mod tests {
             normalize_path(&PathBuf::from("/a/b/c/../../d")),
             PathBuf::from("/a/d")
         );
+    }
+
+    #[test]
+    fn test_normalize_path_relative() {
+        assert_eq!(
+            normalize_path(&PathBuf::from("a/b/../c")),
+            PathBuf::from("a/c")
+        );
+    }
+
+    #[test]
+    fn test_normalize_path_only_dots() {
+        assert_eq!(normalize_path(&PathBuf::from("./a")), PathBuf::from("a"));
+    }
+
+    #[test]
+    fn test_normalize_path_empty() {
+        assert_eq!(normalize_path(&PathBuf::from("")), PathBuf::from(""));
+    }
+
+    #[test]
+    fn test_normalize_path_root() {
+        assert_eq!(normalize_path(&PathBuf::from("/")), PathBuf::from("/"));
     }
 }

@@ -328,4 +328,146 @@ mod tests {
         assert!(json.contains("\"id\":1"));
         assert!(json.contains("\"success\":true"));
     }
+
+    #[test]
+    fn test_transport_error_io() {
+        let err: TransportError = std::io::Error::other("test").into();
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn test_transport_error_json() {
+        let err: TransportError = serde_json::from_str::<i32>("invalid").unwrap_err().into();
+        assert!(err.to_string().contains("JSON error"));
+    }
+
+    #[test]
+    fn test_transport_error_channel_closed() {
+        let err = TransportError::ChannelClosed;
+        assert_eq!(err.to_string(), "Channel closed");
+    }
+
+    #[test]
+    fn test_transport_error_timeout() {
+        let err = TransportError::Timeout;
+        assert_eq!(err.to_string(), "Request timed out");
+    }
+
+    #[test]
+    fn test_transport_error_invalid_response() {
+        let err = TransportError::InvalidResponse;
+        assert_eq!(err.to_string(), "Invalid response");
+    }
+
+    #[test]
+    fn test_transport_error_debug() {
+        let err = TransportError::ChannelClosed;
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("ChannelClosed"));
+    }
+
+    #[test]
+    fn test_incoming_message_request() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::Number(1)),
+            method: "test".to_string(),
+            params: None,
+        };
+
+        let msg = IncomingMessage::Request(request);
+        let debug_str = format!("{:?}", msg);
+        assert!(debug_str.contains("Request"));
+    }
+
+    #[test]
+    fn test_incoming_message_notification() {
+        let notification = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "test".to_string(),
+            params: None,
+        };
+
+        let msg = IncomingMessage::Notification(notification);
+        let debug_str = format!("{:?}", msg);
+        assert!(debug_str.contains("Notification"));
+    }
+
+    #[test]
+    fn test_json_rpc_response_with_error() {
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: JsonRpcId::Number(1),
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32600,
+                message: "Invalid Request".to_string(),
+                data: None,
+            }),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"code\":-32600"));
+        assert!(json.contains("\"message\":\"Invalid Request\""));
+    }
+
+    #[test]
+    fn test_json_rpc_notification_serialization() {
+        let notification = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "session/update".to_string(),
+            params: Some(serde_json::json!({"sessionId": "test-123"})),
+        };
+
+        let json = serde_json::to_string(&notification).unwrap();
+        assert!(json.contains("\"method\":\"session/update\""));
+        assert!(json.contains("\"sessionId\":\"test-123\""));
+    }
+
+    #[test]
+    fn test_json_rpc_request_without_params() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::String("req-1".to_string())),
+            method: "ping".to_string(),
+            params: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"method\":\"ping\""));
+    }
+
+    #[test]
+    fn test_json_rpc_id_number() {
+        let id = JsonRpcId::Number(42);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "42");
+
+        let parsed: JsonRpcId = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, id);
+    }
+
+    #[test]
+    fn test_json_rpc_id_string() {
+        let id = JsonRpcId::String("request-123".to_string());
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"request-123\"");
+
+        let parsed: JsonRpcId = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, id);
+    }
+
+    #[test]
+    fn test_json_rpc_error_serialization() {
+        let error = JsonRpcError {
+            code: -32601,
+            message: "Method not found".to_string(),
+            data: Some(serde_json::json!({"method": "unknown"})),
+        };
+
+        let json = serde_json::to_string(&error).unwrap();
+        assert!(json.contains("\"code\":-32601"));
+        assert!(json.contains("\"Method not found\""));
+        assert!(json.contains("\"data\""));
+    }
 }

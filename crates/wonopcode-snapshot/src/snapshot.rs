@@ -94,3 +94,94 @@ impl Snapshot {
         self.files.iter().any(|f| f == path)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_id_new_is_unique() {
+        let id1 = SnapshotId::new();
+        let id2 = SnapshotId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn snapshot_id_from_string() {
+        let id = SnapshotId::from_string("test-id-123");
+        assert_eq!(id.as_str(), "test-id-123");
+    }
+
+    #[test]
+    fn snapshot_id_default() {
+        let id = SnapshotId::default();
+        assert!(!id.as_str().is_empty());
+    }
+
+    #[test]
+    fn snapshot_id_display() {
+        let id = SnapshotId::from_string("snap-abc");
+        assert_eq!(format!("{}", id), "snap-abc");
+    }
+
+    #[test]
+    fn snapshot_new_creates_with_timestamp() {
+        let snapshot = Snapshot::new("session-1", "message-1", "test snapshot", vec![]);
+        assert_eq!(snapshot.session_id, "session-1");
+        assert_eq!(snapshot.message_id, "message-1");
+        assert_eq!(snapshot.description, "test snapshot");
+        assert!(snapshot.trigger.is_none());
+    }
+
+    #[test]
+    fn snapshot_with_trigger() {
+        let snapshot =
+            Snapshot::new("session-1", "message-1", "desc", vec![]).with_trigger("edit_tool");
+        assert_eq!(snapshot.trigger, Some("edit_tool".to_string()));
+    }
+
+    #[test]
+    fn snapshot_contains_file() {
+        let snapshot = Snapshot::new(
+            "session-1",
+            "message-1",
+            "desc",
+            vec![PathBuf::from("src/main.rs"), PathBuf::from("README.md")],
+        );
+
+        assert!(snapshot.contains_file(&PathBuf::from("src/main.rs")));
+        assert!(snapshot.contains_file(&PathBuf::from("README.md")));
+        assert!(!snapshot.contains_file(&PathBuf::from("Cargo.toml")));
+    }
+
+    #[test]
+    fn snapshot_serializes_to_json() {
+        let snapshot = Snapshot::new(
+            "session-1",
+            "message-1",
+            "test",
+            vec![PathBuf::from("file.txt")],
+        );
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("session_id"));
+        assert!(json.contains("message_id"));
+        assert!(json.contains("file.txt"));
+    }
+
+    #[test]
+    fn snapshot_deserializes_from_json() {
+        let json = r#"{
+            "id": "test-id",
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "description": "test",
+            "files": ["file.txt"]
+        }"#;
+
+        let snapshot: Snapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(snapshot.session_id, "session-1");
+        assert_eq!(snapshot.files.len(), 1);
+    }
+}

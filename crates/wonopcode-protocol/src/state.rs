@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::update::{LspInfo, McpInfo, ModifiedFileInfo, TodoInfo};
+use crate::update::{LspInfo, McpInfo, ModifiedFileInfo, PhaseInfo, TodoInfo};
 
 /// Full application state for initial sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +37,10 @@ pub struct State {
     /// LSP servers.
     pub lsp_servers: Vec<LspInfo>,
 
-    /// Todo items.
+    /// Phases containing grouped todos.
+    pub phases: Vec<PhaseInfo>,
+
+    /// Todo items (flat list for backward compatibility).
     pub todos: Vec<TodoInfo>,
 
     /// Modified files.
@@ -247,6 +250,7 @@ impl Default for State {
             sandbox: SandboxState::default(),
             mcp_servers: Vec::new(),
             lsp_servers: Vec::new(),
+            phases: Vec::new(),
             todos: Vec::new(),
             modified_files: Vec::new(),
             token_usage: TokenUsage::default(),

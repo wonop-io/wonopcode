@@ -436,6 +436,7 @@ fn truncate_output(output: &str, max_size: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
     use tokio_util::sync::CancellationToken;
 
     fn test_context() -> ToolContext {
@@ -451,6 +452,65 @@ mod tests {
             sandbox: None,
             event_tx: None,
         }
+    }
+
+    fn test_context_with_root(root_dir: PathBuf) -> ToolContext {
+        ToolContext {
+            session_id: "test_session".to_string(),
+            message_id: "test_message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: root_dir.clone(),
+            cwd: root_dir,
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_bash_tool_id() {
+        let tool = BashTool;
+        assert_eq!(tool.id(), "bash");
+    }
+
+    #[test]
+    fn test_bash_tool_description() {
+        let tool = BashTool;
+        let desc = tool.description();
+        assert!(desc.contains("bash"));
+        assert!(desc.contains("timeout"));
+        assert!(desc.contains("600000"));
+    }
+
+    #[test]
+    fn test_bash_tool_parameters_schema() {
+        let tool = BashTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("command")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("description")));
+        assert!(schema["properties"]["command"].is_object());
+        assert!(schema["properties"]["workdir"].is_object());
+        assert!(schema["properties"]["timeout"].is_object());
+        assert!(schema["properties"]["run_in_background"].is_object());
+    }
+
+    #[tokio::test]
+    async fn test_bash_invalid_args() {
+        let tool = BashTool;
+        let ctx = test_context();
+        let result = tool.execute(json!({ "not_command": "test" }), &ctx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid arguments"));
     }
 
     #[tokio::test]
@@ -601,5 +661,187 @@ mod tests {
             "echo hello world this is a very long command th..."
         );
         assert_eq!(truncate_command("line1\nline2\nline3"), "line1");
+    }
+
+    #[test]
+    fn test_truncate_command_empty() {
+        assert_eq!(truncate_command(""), "");
+    }
+
+    #[test]
+    fn test_truncate_command_exactly_50() {
+        let cmd = "x".repeat(50);
+        assert_eq!(truncate_command(&cmd), cmd);
+    }
+
+    #[test]
+    fn test_truncate_output_exact_max() {
+        let content = "x".repeat(1000);
+        let (result, truncated) = truncate_output(&content, 1000);
+        assert_eq!(result, content);
+        assert!(!truncated);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_background_command() {
+        let tool = BashTool;
+        let ctx = test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "command": "sleep 1",
+                    "description": "Sleep in background",
+                    "run_in_background": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("background"));
+        assert_eq!(result.metadata["background"], true);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_nonexistent_workdir() {
+        let dir = tempdir().unwrap();
+        let tool = BashTool;
+        let ctx = test_context_with_root(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(
+                json!({
+                    "command": "echo test",
+                    "description": "Test",
+                    "workdir": dir.path().join("nonexistent").display().to_string()
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_workdir_outside_root() {
+        let dir = tempdir().unwrap();
+        let tool = BashTool;
+        let ctx = test_context_with_root(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(
+                json!({
+                    "command": "echo test",
+                    "description": "Test",
+                    "workdir": "/var/tmp"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("outside"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_stdout_and_stderr() {
+        let tool = BashTool;
+        let ctx = test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "command": "echo stdout; echo stderr >&2",
+                    "description": "Print to both"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("stdout"));
+        assert!(result.output.contains("stderr"));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_metadata_exit_code_success() {
+        let tool = BashTool;
+        let ctx = test_context();
+
+        let result = tool
+            .execute(
+                json!({
+                    "command": "true",
+                    "description": "Success"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.metadata["exit_code"], 0);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(windows, ignore)]
+    async fn test_timeout_max_clamping() {
+        let tool = BashTool;
+        let ctx = test_context();
+
+        // Timeout should be clamped to MAX_TIMEOUT_MS
+        let result = tool
+            .execute(
+                json!({
+                    "command": "echo test",
+                    "description": "Test",
+                    "timeout": 999999999  // Very large, should be clamped
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Should still work - it just uses the max timeout
+        assert!(result.output.contains("test"));
+    }
+
+    #[test]
+    fn test_bash_args_deserialization() {
+        let args: BashArgs = serde_json::from_value(json!({
+            "command": "echo test",
+            "description": "Test command"
+        }))
+        .unwrap();
+
+        assert_eq!(args.command, "echo test");
+        assert!(args.workdir.is_none());
+        assert!(args.timeout.is_none());
+        assert!(!args.run_in_background);
+    }
+
+    #[test]
+    fn test_bash_args_with_all_fields() {
+        let args: BashArgs = serde_json::from_value(json!({
+            "command": "echo test",
+            "description": "Test command",
+            "workdir": "/tmp",
+            "timeout": 5000,
+            "run_in_background": true
+        }))
+        .unwrap();
+
+        assert_eq!(args.command, "echo test");
+        assert_eq!(args.workdir, Some("/tmp".to_string()));
+        assert_eq!(args.timeout, Some(5000));
+        assert!(args.run_in_background);
     }
 }

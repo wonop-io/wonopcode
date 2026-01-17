@@ -9,9 +9,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Simple text input dialog for things like rename.
 #[derive(Debug, Clone, Default)]

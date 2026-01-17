@@ -32,7 +32,8 @@ use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
 use wonopcode_tools::{mcp::McpToolsBuilder, task, todo, ToolRegistry};
 use wonopcode_tui::{
     AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate,
-    McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, SaveScope, TodoUpdate,
+    McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, PhaseUpdate, SaveScope,
+    TodoUpdate,
 };
 use wonopcode_util::perf;
 use wonopcode_util::FileTimeState;
@@ -45,6 +46,49 @@ fn send_update(update_tx: &mpsc::UnboundedSender<AppUpdate>, update: AppUpdate) 
     if let Err(e) = update_tx.send(update) {
         warn!("Failed to send update to TUI (channel closed): {}", e);
     }
+}
+
+/// Convert PhasedTodos to TUI update format.
+fn convert_phased_todos_to_updates(
+    phased: &todo::PhasedTodos,
+) -> (Vec<PhaseUpdate>, Vec<TodoUpdate>) {
+    let phases: Vec<PhaseUpdate> = phased
+        .phases
+        .iter()
+        .map(|p| PhaseUpdate {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            status: p.status().as_str().to_string(),
+            todos: p
+                .todos
+                .iter()
+                .map(|t| TodoUpdate {
+                    id: t.id.clone(),
+                    content: t.content.clone(),
+                    status: t.status.as_str().to_string(),
+                    priority: t.priority.as_str().to_string(),
+                    phase_id: Some(p.id.clone()),
+                })
+                .collect(),
+        })
+        .collect();
+
+    // Also build flat list for backward compatibility
+    let todos: Vec<TodoUpdate> = phased
+        .phases
+        .iter()
+        .flat_map(|p| {
+            p.todos.iter().map(move |t| TodoUpdate {
+                id: t.id.clone(),
+                content: t.content.clone(),
+                status: t.status.as_str().to_string(),
+                priority: t.priority.as_str().to_string(),
+                phase_id: Some(p.id.clone()),
+            })
+        })
+        .collect();
+
+    (phases, todos)
 }
 
 /// Wrapper to store `Arc<dyn SandboxRuntime>` as `Arc<dyn Any + Send + Sync>`.
@@ -285,7 +329,7 @@ impl Runner {
             snapshot_store: None, // Will be initialized async in new_with_features
             mcp_client: None,     // Will be initialized async if configured
             external_mcp_server_names: Vec::new(), // Will be populated by initialize_mcp
-            unsupported_mcp_servers: Vec::new(),   // Will be populated by initialize_mcp
+            unsupported_mcp_servers: Vec::new(), // Will be populated by initialize_mcp
             doom_loop_detector: RwLock::new(DoomLoopDetector::new()),
             permission_manager,
             bus,
@@ -1472,27 +1516,10 @@ impl Runner {
     /// Sync todos from store to TUI.
     /// This is called after each prompt completes to pick up any changes.
     fn sync_todos_to_tui(&self, cwd: &Path, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
-        let todos = todo::get_todos(self.todo_store.as_ref(), cwd);
-        if !todos.is_empty() {
-            let todo_updates: Vec<TodoUpdate> = todos
-                .into_iter()
-                .map(|t| TodoUpdate {
-                    id: t.id,
-                    content: t.content,
-                    status: match t.status {
-                        todo::TodoStatus::Pending => "pending".to_string(),
-                        todo::TodoStatus::InProgress => "in_progress".to_string(),
-                        todo::TodoStatus::Completed => "completed".to_string(),
-                        todo::TodoStatus::Cancelled => "cancelled".to_string(),
-                    },
-                    priority: match t.priority {
-                        todo::TodoPriority::High => "high".to_string(),
-                        todo::TodoPriority::Medium => "medium".to_string(),
-                        todo::TodoPriority::Low => "low".to_string(),
-                    },
-                })
-                .collect();
-            send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+        let phased_todos = todo::get_phased_todos(self.todo_store.as_ref(), cwd);
+        if !phased_todos.is_empty() {
+            let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
+            send_update(&update_tx, AppUpdate::TodosUpdated { phases, todos });
         }
     }
 
@@ -2240,35 +2267,14 @@ impl Runner {
                                 // Sync todos if todowrite was executed (by MCP server)
                                 if base_tool_name == "todowrite" {
                                     // Read todos from the shared file store
-                                    let todos = todo::get_todos(self.todo_store.as_ref(), cwd);
-                                    let todo_updates: Vec<TodoUpdate> = todos
-                                        .into_iter()
-                                        .map(|t| TodoUpdate {
-                                            id: t.id,
-                                            content: t.content,
-                                            status: match t.status {
-                                                todo::TodoStatus::Pending => "pending".to_string(),
-                                                todo::TodoStatus::InProgress => {
-                                                    "in_progress".to_string()
-                                                }
-                                                todo::TodoStatus::Completed => {
-                                                    "completed".to_string()
-                                                }
-                                                todo::TodoStatus::Cancelled => {
-                                                    "cancelled".to_string()
-                                                }
-                                            },
-                                            priority: match t.priority {
-                                                todo::TodoPriority::High => "high".to_string(),
-                                                todo::TodoPriority::Medium => "medium".to_string(),
-                                                todo::TodoPriority::Low => "low".to_string(),
-                                            },
-                                        })
-                                        .collect();
-                                    if !todo_updates.is_empty() {
+                                    let phased =
+                                        todo::get_phased_todos(self.todo_store.as_ref(), cwd);
+                                    if !phased.is_empty() {
+                                        let (phases, todos) =
+                                            convert_phased_todos_to_updates(&phased);
                                         send_update(
                                             &update_tx,
-                                            AppUpdate::TodosUpdated(todo_updates),
+                                            AppUpdate::TodosUpdated { phases, todos },
                                         );
                                     }
                                 }
@@ -2584,35 +2590,20 @@ impl Runner {
                             debug!("Tool event receiver task started");
                             while let Some(event) = tool_event_rx.recv().await {
                                 match event {
-                                    wonopcode_tools::ToolEvent::TodosUpdated(todos) => {
+                                    wonopcode_tools::ToolEvent::TodosUpdated(phased) => {
                                         debug!(
-                                            todo_count = todos.len(),
+                                            phase_count = phased.phases.len(),
+                                            todo_count = phased.total_todos(),
                                             "Received TodosUpdated event via event_tx"
                                         );
                                         // Convert and send to TUI immediately
-                                        let todo_updates: Vec<TodoUpdate> = todos
-                                            .into_iter()
-                                            .map(|t| TodoUpdate {
-                                                id: t.id,
-                                                content: t.content,
-                                                status: match t.status {
-                                                    wonopcode_tools::todo::TodoStatus::Pending => "pending".to_string(),
-                                                    wonopcode_tools::todo::TodoStatus::InProgress => "in_progress".to_string(),
-                                                    wonopcode_tools::todo::TodoStatus::Completed => "completed".to_string(),
-                                                    wonopcode_tools::todo::TodoStatus::Cancelled => "cancelled".to_string(),
-                                                },
-                                                priority: match t.priority {
-                                                    wonopcode_tools::todo::TodoPriority::High => "high".to_string(),
-                                                    wonopcode_tools::todo::TodoPriority::Medium => "medium".to_string(),
-                                                    wonopcode_tools::todo::TodoPriority::Low => "low".to_string(),
-                                                },
-                                            })
-                                            .collect();
+                                        let (phases, todos) = convert_phased_todos_to_updates(&phased);
                                         debug!(
-                                            update_count = todo_updates.len(),
+                                            phase_count = phases.len(),
+                                            update_count = todos.len(),
                                             "Sending TodosUpdated from event_tx path"
                                         );
-                                        send_update(&update_tx_for_events, AppUpdate::TodosUpdated(todo_updates));
+                                        send_update(&update_tx_for_events, AppUpdate::TodosUpdated { phases, todos });
                                     }
                                 }
                             }
@@ -2651,31 +2642,15 @@ impl Runner {
                                         .await;
 
                                         // Sync todos after subagent completes (subagents may have called todowrite)
-                                        let todos = todo::get_todos(todo_store.as_ref(), &cwd);
-                                        if !todos.is_empty() {
+                                        let phased = todo::get_phased_todos(todo_store.as_ref(), &cwd);
+                                        if !phased.is_empty() {
                                             debug!(
-                                                todo_count = todos.len(),
+                                                phase_count = phased.phases.len(),
+                                                todo_count = phased.total_todos(),
                                                 "Syncing todos after subagent completion"
                                             );
-                                            let todo_updates: Vec<TodoUpdate> = todos
-                                                .into_iter()
-                                                .map(|t| TodoUpdate {
-                                                    id: t.id,
-                                                    content: t.content,
-                                                    status: match t.status {
-                                                        todo::TodoStatus::Pending => "pending".to_string(),
-                                                        todo::TodoStatus::InProgress => "in_progress".to_string(),
-                                                        todo::TodoStatus::Completed => "completed".to_string(),
-                                                        todo::TodoStatus::Cancelled => "cancelled".to_string(),
-                                                    },
-                                                    priority: match t.priority {
-                                                        todo::TodoPriority::High => "high".to_string(),
-                                                        todo::TodoPriority::Medium => "medium".to_string(),
-                                                        todo::TodoPriority::Low => "low".to_string(),
-                                                    },
-                                                })
-                                                .collect();
-                                            send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+                                            let (phases, todos) = convert_phased_todos_to_updates(&phased);
+                                            send_update(&update_tx, AppUpdate::TodosUpdated { phases, todos });
                                         }
 
                                         match subagent_result {
@@ -2850,36 +2825,21 @@ impl Runner {
                             );
                             if base_tool_name == "todowrite" && success {
                                 // Read todos from the file-based store (shared with MCP server)
-                                let todos = todo::get_todos(todo_store.as_ref(), &cwd);
+                                let phased = todo::get_phased_todos(todo_store.as_ref(), &cwd);
                                 debug!(
-                                    todo_count = todos.len(),
+                                    phase_count = phased.phases.len(),
+                                    todo_count = phased.total_todos(),
                                     cwd = %cwd.display(),
                                     "Read todos from store for sync"
                                 );
-                                let todo_updates: Vec<TodoUpdate> = todos
-                                    .into_iter()
-                                    .map(|t| TodoUpdate {
-                                        id: t.id,
-                                        content: t.content,
-                                        status: match t.status {
-                                            todo::TodoStatus::Pending => "pending".to_string(),
-                                            todo::TodoStatus::InProgress => "in_progress".to_string(),
-                                            todo::TodoStatus::Completed => "completed".to_string(),
-                                            todo::TodoStatus::Cancelled => "cancelled".to_string(),
-                                        },
-                                        priority: match t.priority {
-                                            todo::TodoPriority::High => "high".to_string(),
-                                            todo::TodoPriority::Medium => "medium".to_string(),
-                                            todo::TodoPriority::Low => "low".to_string(),
-                                        },
-                                    })
-                                    .collect();
-                                if !todo_updates.is_empty() {
+                                if !phased.is_empty() {
+                                    let (phases, todos) = convert_phased_todos_to_updates(&phased);
                                     debug!(
-                                        update_count = todo_updates.len(),
+                                        phase_count = phases.len(),
+                                        update_count = todos.len(),
                                         "Sending TodosUpdated from fallback sync"
                                     );
-                                    send_update(&update_tx, AppUpdate::TodosUpdated(todo_updates));
+                                    send_update(&update_tx, AppUpdate::TodosUpdated { phases, todos });
                                 } else {
                                     warn!("Todo updates empty after todowrite - file may not have been written");
                                 }
@@ -3726,7 +3686,8 @@ fn create_provider(
                                             args: args.to_vec(),
                                             env: env.clone(),
                                         };
-                                    mcp_config = mcp_config.with_external_server(name, external_server);
+                                    mcp_config =
+                                        mcp_config.with_external_server(name, external_server);
                                     info!(server = %name, "Added external MCP server");
                                 }
                             }

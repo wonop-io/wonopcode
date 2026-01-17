@@ -194,4 +194,233 @@ mod tests {
         let result = manager.get("test-session").await;
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_session_manager_new() {
+        let manager = SessionManager::new();
+        // Just verify construction doesn't panic
+        let _ = manager;
+    }
+
+    #[test]
+    fn test_session_manager_default() {
+        let manager = SessionManager::default();
+        // Just verify default construction doesn't panic
+        let _ = manager;
+    }
+
+    #[tokio::test]
+    async fn test_create_session() {
+        let manager = SessionManager::new();
+
+        let state = manager
+            .create(
+                "session_1".to_string(),
+                "/home/user".to_string(),
+                vec![],
+                None,
+            )
+            .await;
+
+        assert_eq!(state.id, "session_1");
+        assert_eq!(state.cwd, "/home/user");
+        assert!(state.mcp_servers.is_empty());
+        assert!(state.model.is_none());
+        assert!(state.mode_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_session_with_mcp_servers() {
+        use crate::types::McpServerRemote;
+
+        let manager = SessionManager::new();
+
+        let mcp_server = McpServer::Remote(McpServerRemote {
+            name: "test-server".to_string(),
+            url: "http://localhost:8080".to_string(),
+            headers: vec![],
+            server_type: "remote".to_string(),
+        });
+
+        let state = manager
+            .create(
+                "session_1".to_string(),
+                "/home/user".to_string(),
+                vec![mcp_server],
+                None,
+            )
+            .await;
+
+        assert_eq!(state.mcp_servers.len(), 1);
+        // Verify we have one server
+        match &state.mcp_servers[0] {
+            McpServer::Remote(remote) => assert_eq!(remote.url, "http://localhost:8080"),
+            _ => panic!("Expected remote server"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_session() {
+        let manager = SessionManager::new();
+        let created_at = chrono::Utc::now() - chrono::Duration::hours(1);
+
+        let state = manager
+            .load(
+                "loaded_session".to_string(),
+                "/project".to_string(),
+                vec![],
+                Some(ModelRef {
+                    provider_id: "openai".to_string(),
+                    model_id: "gpt-4".to_string(),
+                }),
+                created_at,
+            )
+            .await;
+
+        assert_eq!(state.id, "loaded_session");
+        assert_eq!(state.cwd, "/project");
+        assert_eq!(state.created_at, created_at);
+        assert!(state.model.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_not_found() {
+        let manager = SessionManager::new();
+
+        let result = manager.get("nonexistent").await;
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        assert!(error.message.contains("Session not found"));
+    }
+
+    #[tokio::test]
+    async fn test_get_model() {
+        let manager = SessionManager::new();
+
+        manager
+            .create(
+                "session_1".to_string(),
+                "/tmp".to_string(),
+                vec![],
+                Some(ModelRef {
+                    provider_id: "anthropic".to_string(),
+                    model_id: "claude-3-5-sonnet".to_string(),
+                }),
+            )
+            .await;
+
+        let model = manager.get_model("session_1").await.unwrap();
+        assert!(model.is_some());
+        assert_eq!(model.unwrap().provider_id, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn test_get_model_none() {
+        let manager = SessionManager::new();
+
+        manager
+            .create("session_1".to_string(), "/tmp".to_string(), vec![], None)
+            .await;
+
+        let model = manager.get_model("session_1").await.unwrap();
+        assert!(model.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_model_session_not_found() {
+        let manager = SessionManager::new();
+
+        let result = manager.get_model("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_model_session_not_found() {
+        let manager = SessionManager::new();
+
+        let result = manager
+            .set_model(
+                "nonexistent",
+                ModelRef {
+                    provider_id: "test".to_string(),
+                    model_id: "model".to_string(),
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_mode_session_not_found() {
+        let manager = SessionManager::new();
+
+        let result = manager.set_mode("nonexistent", "default".to_string()).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent() {
+        let manager = SessionManager::new();
+
+        let result = manager.remove("nonexistent").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions() {
+        let manager = SessionManager::new();
+
+        // Initially empty
+        let list = manager.list().await;
+        assert!(list.is_empty());
+
+        // Add sessions
+        manager
+            .create("session_1".to_string(), "/tmp".to_string(), vec![], None)
+            .await;
+        manager
+            .create("session_2".to_string(), "/tmp".to_string(), vec![], None)
+            .await;
+
+        let list = manager.list().await;
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&"session_1".to_string()));
+        assert!(list.contains(&"session_2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_operations() {
+        let manager = SessionManager::new();
+
+        // Create multiple sessions
+        manager
+            .create("s1".to_string(), "/a".to_string(), vec![], None)
+            .await;
+        manager
+            .create("s2".to_string(), "/b".to_string(), vec![], None)
+            .await;
+        manager
+            .create("s3".to_string(), "/c".to_string(), vec![], None)
+            .await;
+
+        // Modify one
+        manager
+            .set_mode("s2", "explorer".to_string())
+            .await
+            .unwrap();
+
+        // Remove one
+        manager.remove("s1").await;
+
+        // Verify state
+        let list = manager.list().await;
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&"s1".to_string()));
+
+        let s2 = manager.get("s2").await.unwrap();
+        assert_eq!(s2.mode_id, Some("explorer".to_string()));
+    }
 }

@@ -1412,8 +1412,27 @@ async fn run_headless(
                     let mut state = state_for_updates.write().await;
                     state.agent = agent.clone();
                 }
-                wonopcode_tui::AppUpdate::TodosUpdated(todos) => {
+                wonopcode_tui::AppUpdate::TodosUpdated { phases, todos } => {
                     let mut state = state_for_updates.write().await;
+                    state.phases = phases
+                        .iter()
+                        .map(|p| wonopcode_protocol::PhaseInfo {
+                            id: p.id.clone(),
+                            name: p.name.clone(),
+                            status: p.status.clone(),
+                            todos: p
+                                .todos
+                                .iter()
+                                .map(|t| wonopcode_protocol::TodoInfo {
+                                    id: t.id.clone(),
+                                    content: t.content.clone(),
+                                    status: t.status.clone(),
+                                    priority: t.priority.clone(),
+                                    phase_id: t.phase_id.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect();
                     state.todos = todos
                         .iter()
                         .map(|t| wonopcode_protocol::TodoInfo {
@@ -1421,6 +1440,7 @@ async fn run_headless(
                             content: t.content.clone(),
                             status: t.status.clone(),
                             priority: t.priority.clone(),
+                            phase_id: t.phase_id.clone(),
                         })
                         .collect();
                 }
@@ -1519,7 +1539,26 @@ async fn run_headless(
                         })
                         .collect(),
                 },
-                wonopcode_tui::AppUpdate::TodosUpdated(todos) => Update::TodosUpdated {
+                wonopcode_tui::AppUpdate::TodosUpdated { phases, todos } => Update::TodosUpdated {
+                    phases: phases
+                        .into_iter()
+                        .map(|p| wonopcode_protocol::PhaseInfo {
+                            id: p.id,
+                            name: p.name,
+                            status: p.status,
+                            todos: p
+                                .todos
+                                .into_iter()
+                                .map(|t| wonopcode_protocol::TodoInfo {
+                                    id: t.id,
+                                    content: t.content,
+                                    status: t.status,
+                                    priority: t.priority,
+                                    phase_id: t.phase_id,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
                     todos: todos
                         .into_iter()
                         .map(|t| wonopcode_protocol::TodoInfo {
@@ -1527,6 +1566,7 @@ async fn run_headless(
                             content: t.content,
                             status: t.status,
                             priority: t.priority,
+                            phase_id: t.phase_id,
                         })
                         .collect(),
                 },
@@ -1818,8 +1858,28 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
         warn!("Failed to send sandbox update: {}", e);
     }
 
-    // Apply todos
-    if !state.todos.is_empty() {
+    // Apply todos (phases and flat list)
+    if !state.phases.is_empty() || !state.todos.is_empty() {
+        let phases: Vec<wonopcode_tui::PhaseUpdate> = state
+            .phases
+            .into_iter()
+            .map(|p| wonopcode_tui::PhaseUpdate {
+                id: p.id,
+                name: p.name,
+                status: p.status,
+                todos: p
+                    .todos
+                    .into_iter()
+                    .map(|t| wonopcode_tui::TodoUpdate {
+                        id: t.id,
+                        content: t.content,
+                        status: t.status,
+                        priority: t.priority,
+                        phase_id: t.phase_id,
+                    })
+                    .collect(),
+            })
+            .collect();
         let todos: Vec<wonopcode_tui::TodoUpdate> = state
             .todos
             .into_iter()
@@ -1828,9 +1888,10 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 content: t.content,
                 status: t.status,
                 priority: t.priority,
+                phase_id: t.phase_id,
             })
             .collect();
-        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated(todos)) {
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated { phases, todos }) {
             warn!("Failed to send todos update: {}", e);
         }
     }

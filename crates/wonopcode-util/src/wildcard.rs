@@ -217,4 +217,52 @@ mod tests {
         );
         assert_eq!(find_most_specific_match(patterns, "rm -rf /"), Some("*"));
     }
+
+    #[test]
+    fn test_find_matching_pattern_returns_first_match() {
+        let patterns = &["echo *", "cat *", "ls *"];
+        assert_eq!(
+            find_matching_pattern(patterns, "echo hello"),
+            Some("echo *")
+        );
+        assert_eq!(find_matching_pattern(patterns, "cat file"), Some("cat *"));
+        assert_eq!(find_matching_pattern(patterns, "unknown"), None);
+    }
+
+    #[test]
+    fn test_find_most_specific_match_returns_none_when_no_match() {
+        let patterns = &["echo *", "cat *"];
+        assert_eq!(find_most_specific_match(patterns, "rm -rf /"), None);
+    }
+
+    #[test]
+    fn test_specificity_bonus_for_no_leading_wildcard() {
+        // Pattern that doesn't start with * gets +50 bonus
+        // "hello*" has 5 literal chars * 100 = 500, minus 1 wildcard * 10 = 490, plus 50 for not starting with * = 540
+        // "*hello" has 5 literal chars * 100 = 500, minus 1 wildcard * 10 = 490, plus 50 for not ending with * = 540
+        // They're equal because bonus is same (one doesn't start, other doesn't end)
+        // Let's test a case where one has both bonuses
+        assert!(specificity("hello") > specificity("*hello")); // no wildcards at all
+    }
+
+    #[test]
+    fn test_specificity_prefers_no_trailing_wildcard() {
+        // Pattern without trailing * should have higher specificity
+        assert!(specificity("*hello") > specificity("*hello*"));
+    }
+
+    #[test]
+    fn test_consecutive_wildcards() {
+        assert!(matches("**", "anything"));
+        assert!(matches("a**b", "ab"));
+        assert!(matches("a**b", "aXXXb"));
+    }
+
+    #[test]
+    fn test_wildcard_only_at_boundaries() {
+        assert!(matches("*end", "the end"));
+        assert!(matches("start*", "starting"));
+        assert!(!matches("*middle*", "no match here"));
+        assert!(matches("*middle*", "some middle text"));
+    }
 }

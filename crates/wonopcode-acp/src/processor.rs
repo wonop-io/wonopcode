@@ -738,6 +738,7 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
 }
 
 /// Load API key from environment or credentials file.
+#[allow(clippy::missing_panics_doc)]
 pub fn load_api_key(provider: &str) -> Option<String> {
     // Try environment variable first
     let env_var = match provider {
@@ -786,4 +787,155 @@ pub fn load_api_key(provider: &str) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === ProcessorConfig tests ===
+
+    #[test]
+    fn test_processor_config_default() {
+        let config = ProcessorConfig::default();
+        assert_eq!(config.provider, "anthropic");
+        assert!(config.model_id.contains("claude"));
+        assert!(config.api_key.is_empty());
+        assert_eq!(config.max_tokens, Some(8192));
+        assert_eq!(config.temperature, Some(0.7));
+    }
+
+    #[test]
+    fn test_processor_config_custom() {
+        let config = ProcessorConfig {
+            provider: "openai".to_string(),
+            model_id: "gpt-4o".to_string(),
+            api_key: "sk-test".to_string(),
+            max_tokens: Some(4096),
+            temperature: Some(0.5),
+        };
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model_id, "gpt-4o");
+        assert_eq!(config.api_key, "sk-test");
+    }
+
+    #[test]
+    fn test_processor_config_clone() {
+        let config = ProcessorConfig::default();
+        let cloned = config.clone();
+        assert_eq!(cloned.provider, config.provider);
+        assert_eq!(cloned.model_id, config.model_id);
+    }
+
+    #[test]
+    fn test_processor_config_debug() {
+        let config = ProcessorConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("ProcessorConfig"));
+        assert!(debug.contains("anthropic"));
+    }
+
+    // === get_model_info tests ===
+
+    #[test]
+    fn test_get_model_info_claude_sonnet() {
+        let info = get_model_info("claude-sonnet-4-5-20250929", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn test_get_model_info_claude_haiku() {
+        let info = get_model_info("claude-3-5-haiku-latest", "anthropic");
+        assert!(info.id.contains("claude") || info.id.contains("haiku"));
+    }
+
+    #[test]
+    fn test_get_model_info_gpt_4o() {
+        let info = get_model_info("gpt-4o", "openai");
+        assert!(info.id.contains("gpt"));
+    }
+
+    #[test]
+    fn test_get_model_info_gpt_5() {
+        let info = get_model_info("gpt-5.2", "openai");
+        assert!(info.id.contains("gpt"));
+    }
+
+    #[test]
+    fn test_get_model_info_o_series() {
+        let info = get_model_info("o3", "openai");
+        assert!(info.id.contains("o3"));
+    }
+
+    #[test]
+    fn test_get_model_info_gemini() {
+        let info = get_model_info("gemini-2.0-flash", "google");
+        assert!(info.id.contains("gemini"));
+    }
+
+    #[test]
+    fn test_get_model_info_grok() {
+        let info = get_model_info("grok-3", "xai");
+        assert!(info.id.contains("grok"));
+    }
+
+    #[test]
+    fn test_get_model_info_mistral() {
+        let info = get_model_info("mistral-large", "mistral");
+        assert!(info.id.contains("mistral"));
+    }
+
+    #[test]
+    fn test_get_model_info_unknown() {
+        let info = get_model_info("unknown-model", "unknown-provider");
+        assert_eq!(info.id, "unknown-model");
+    }
+
+    // === load_api_key tests ===
+
+    #[test]
+    fn test_load_api_key_unknown_provider() {
+        // Unknown provider should return None
+        let key = load_api_key("unknown-provider");
+        assert!(key.is_none());
+    }
+
+    #[test]
+    fn test_load_api_key_from_env() {
+        // Set a test environment variable
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key-12345");
+        let key = load_api_key("anthropic");
+        assert_eq!(key, Some("test-key-12345".to_string()));
+        // Clean up
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_load_api_key_empty_env() {
+        // Set an empty environment variable
+        std::env::set_var("OPENAI_API_KEY", "");
+        let key = load_api_key("openai");
+        // Empty key should not be returned
+        assert!(key.is_none());
+        // Clean up
+        std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn test_load_api_key_google_env_var_name() {
+        // Google uses GOOGLE_API_KEY
+        std::env::set_var("GOOGLE_API_KEY", "google-key");
+        let key = load_api_key("google");
+        assert_eq!(key, Some("google-key".to_string()));
+        std::env::remove_var("GOOGLE_API_KEY");
+    }
+
+    #[test]
+    fn test_load_api_key_xai_env_var_name() {
+        // xAI uses XAI_API_KEY
+        std::env::set_var("XAI_API_KEY", "xai-key");
+        let key = load_api_key("xai");
+        assert_eq!(key, Some("xai-key".to_string()));
+        std::env::remove_var("XAI_API_KEY");
+    }
 }

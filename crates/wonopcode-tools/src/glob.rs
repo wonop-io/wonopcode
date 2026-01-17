@@ -247,6 +247,137 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_glob_tool_id() {
+        let tool = GlobTool;
+        assert_eq!(tool.id(), "glob");
+    }
+
+    #[test]
+    fn test_glob_tool_description() {
+        let tool = GlobTool;
+        let desc = tool.description();
+        assert!(desc.contains("pattern matching"));
+        assert!(desc.contains("**/*.js"));
+    }
+
+    #[test]
+    fn test_glob_tool_parameters_schema() {
+        let tool = GlobTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pattern")));
+        assert!(schema["properties"]["pattern"].is_object());
+        assert!(schema["properties"]["path"].is_object());
+    }
+
+    #[test]
+    fn test_build_find_command_recursive() {
+        // **/*.rs pattern
+        let cmd = build_find_command("**/*.rs", Path::new("/test"));
+        assert!(cmd.contains("find"));
+        assert!(cmd.contains("-type f"));
+        assert!(cmd.contains("-name"));
+        assert!(cmd.contains("*.rs"));
+    }
+
+    #[test]
+    fn test_build_find_command_with_subdir() {
+        // src/**/*.ts pattern
+        let cmd = build_find_command("src/**/*.ts", Path::new("/test"));
+        assert!(cmd.contains("find"));
+        assert!(cmd.contains("/test/src"));
+        assert!(cmd.contains("-name"));
+        assert!(cmd.contains("*.ts"));
+    }
+
+    #[test]
+    fn test_build_find_command_with_slash() {
+        // src/*.rs pattern
+        let cmd = build_find_command("src/*.rs", Path::new("/test"));
+        assert!(cmd.contains("find"));
+        assert!(cmd.contains("/test/src"));
+        assert!(cmd.contains("-maxdepth 1"));
+        assert!(cmd.contains("-name"));
+    }
+
+    #[test]
+    fn test_build_find_command_simple() {
+        // *.txt pattern (no directory)
+        let cmd = build_find_command("*.txt", Path::new("/test"));
+        assert!(cmd.contains("find"));
+        assert!(cmd.contains("-maxdepth 1"));
+        assert!(cmd.contains("-name"));
+        assert!(cmd.contains("*.txt"));
+    }
+
+    #[test]
+    fn test_build_find_command_empty_subdir() {
+        // **/*.rs with empty subdir (starts with **/)
+        let cmd = build_find_command("**/*.rs", Path::new("/test"));
+        assert!(cmd.contains("find '/test'"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_missing_pattern() {
+        let dir = tempdir().unwrap();
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({ "path": dir.path().display().to_string() }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("pattern"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_nonexistent_path() {
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "*.txt",
+                    "path": "/nonexistent/directory"
+                }),
+                &test_context(PathBuf::from("/tmp")),
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_relative_path() {
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(subdir.join("file.txt"), "").unwrap();
+
+        let tool = GlobTool;
+        let result = tool
+            .execute(
+                json!({
+                    "pattern": "*.txt",
+                    "path": "subdir"
+                }),
+                &test_context(dir.path().to_path_buf()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("file.txt"));
+        assert_eq!(result.metadata["count"], 1);
+    }
+
     #[tokio::test]
     async fn test_glob_pattern() {
         let dir = tempdir().unwrap();

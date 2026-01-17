@@ -439,6 +439,266 @@ mod tests {
         (dir, ctx)
     }
 
+    #[test]
+    fn test_multiedit_tool_id() {
+        let tool = MultiEditTool;
+        assert_eq!(tool.id(), "multiedit");
+    }
+
+    #[test]
+    fn test_multiedit_tool_description() {
+        let tool = MultiEditTool;
+        let desc = tool.description();
+        assert!(desc.contains("multiple edits"));
+        assert!(desc.contains("atomically"));
+    }
+
+    #[test]
+    fn test_multiedit_tool_parameters_schema() {
+        let tool = MultiEditTool;
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("edits")));
+        assert!(schema["properties"]["edits"].is_object());
+    }
+
+    #[test]
+    fn test_find_matches_none() {
+        let result = find_matches("hello world", "xyz");
+        assert!(matches!(result, MatchResult::None));
+    }
+
+    #[test]
+    fn test_find_matches_single() {
+        let result = find_matches("hello world", "hello");
+        assert!(matches!(result, MatchResult::Single));
+    }
+
+    #[test]
+    fn test_find_matches_multiple() {
+        let result = find_matches("hello hello hello", "hello");
+        assert!(matches!(result, MatchResult::Multiple(3)));
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_line_endings() {
+        let content = "line1\nline2\nline3";
+        let target = "line1\r\nline2";
+        let result = try_fuzzy_match(content, target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_trailing_whitespace() {
+        let content = "line1\nline2";
+        let target = "line1  \nline2  "; // trailing whitespace
+        let result = try_fuzzy_match(content, target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_stripped() {
+        let content = "prefix target suffix";
+        let target = "  target  "; // leading/trailing whitespace
+        let result = try_fuzzy_match(content, target);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "target");
+    }
+
+    #[test]
+    fn test_try_fuzzy_match_no_match() {
+        let content = "hello world";
+        let target = "xyz";
+        let result = try_fuzzy_match(content, target);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_indentation_match() {
+        let content = "    fn test() {\n        body\n    }";
+        let target = "fn test() {\n    body\n}"; // different indentation
+        let result = try_indentation_match(content, target);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_try_indentation_match_empty_target() {
+        let content = "hello world";
+        let target = "";
+        let result = try_indentation_match(content, target);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_indentation_match_empty_first_line() {
+        let content = "hello world";
+        let target = "   \nmore";
+        let result = try_indentation_match(content, target);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content").unwrap();
+
+        let result = resolve_path(file_path.to_str().unwrap(), dir.path(), dir.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), file_path);
+    }
+
+    #[test]
+    fn test_resolve_path_relative_to_cwd() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content").unwrap();
+
+        let result = resolve_path("test.txt", dir.path(), dir.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), file_path);
+    }
+
+    #[test]
+    fn test_resolve_path_not_found() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_path("nonexistent.txt", dir.path(), dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_generate_diff() {
+        let old = "line1\nline2\nline3";
+        let new = "line1\nmodified\nline3";
+        let path = PathBuf::from("test.txt");
+        let diff = generate_diff(old, new, &path);
+        assert!(diff.contains("-line2"));
+        assert!(diff.contains("+modified"));
+        assert!(diff.contains("--- a/test.txt"));
+        assert!(diff.contains("+++ b/test.txt"));
+    }
+
+    #[test]
+    fn test_generate_diff_no_trailing_newline() {
+        let old = "no newline at end";
+        let new = "different content";
+        let path = PathBuf::from("test.txt");
+        let diff = generate_diff(old, new, &path);
+        // Should still produce valid diff
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn test_edit_operation_deserialization() {
+        let op: EditOperation = serde_json::from_value(json!({
+            "filePath": "/test/file.txt",
+            "oldString": "old",
+            "newString": "new"
+        }))
+        .unwrap();
+        assert_eq!(op.file_path, "/test/file.txt");
+        assert_eq!(op.old_string, "old");
+        assert_eq!(op.new_string, "new");
+        assert!(!op.replace_all);
+    }
+
+    #[test]
+    fn test_edit_operation_with_replace_all() {
+        let op: EditOperation = serde_json::from_value(json!({
+            "filePath": "/test/file.txt",
+            "oldString": "old",
+            "newString": "new",
+            "replaceAll": true
+        }))
+        .unwrap();
+        assert!(op.replace_all);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_args() {
+        let (_, ctx) = setup_test().await;
+        let tool = MultiEditTool;
+        let result = tool.execute(json!({ "not_edits": [] }), &ctx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn test_same_old_new_string() {
+        let (dir, ctx) = setup_test().await;
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "hello world").await.unwrap();
+
+        let tool = MultiEditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "edits": [{
+                        "filePath": file_path.to_str().unwrap(),
+                        "oldString": "hello",
+                        "newString": "hello"  // same as old
+                    }]
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("must be different"));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_matches_without_replace_all() {
+        let (dir, ctx) = setup_test().await;
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "foo foo foo").await.unwrap();
+
+        let tool = MultiEditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "edits": [{
+                        "filePath": file_path.to_str().unwrap(),
+                        "oldString": "foo",
+                        "newString": "bar"
+                        // replaceAll not set, should fail
+                    }]
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("found 3 times"));
+    }
+
+    #[tokio::test]
+    async fn test_file_not_found() {
+        let (dir, ctx) = setup_test().await;
+        let tool = MultiEditTool;
+        let result = tool
+            .execute(
+                json!({
+                    "edits": [{
+                        "filePath": dir.path().join("nonexistent.txt").to_str().unwrap(),
+                        "oldString": "foo",
+                        "newString": "bar"
+                    }]
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
     #[tokio::test]
     async fn test_single_edit() {
         let (dir, ctx) = setup_test().await;

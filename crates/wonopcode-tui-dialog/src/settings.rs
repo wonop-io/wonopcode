@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::{RenderSettings, Theme};
+use wonopcode_tui_core::{RenderSettings, Theme};
 
 /// Helper function to create a centered rectangle.
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -808,7 +808,7 @@ impl SettingsDialog {
     /// Create a new settings dialog with the given render settings and theme applied.
     /// This is used when opening settings to show the current runtime values.
     pub fn with_render_settings(
-        render_settings: &crate::theme::RenderSettings,
+        render_settings: &wonopcode_tui_core::RenderSettings,
         theme_name: &str,
     ) -> Self {
         let mut dialog = Self::new();

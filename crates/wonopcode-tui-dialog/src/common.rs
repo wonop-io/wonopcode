@@ -12,7 +12,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
 /// A selectable item in a dialog.
 #[derive(Debug, Clone)]

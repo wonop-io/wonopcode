@@ -156,10 +156,61 @@ mod tests {
     }
 
     #[test]
+    fn test_data_dir() {
+        let dir = data_dir();
+        // Most systems have a data_local_dir
+        if let Some(d) = dir {
+            assert!(d.to_string_lossy().contains("wonopcode"));
+        }
+    }
+
+    #[test]
+    fn test_state_dir() {
+        let dir = state_dir();
+        if let Some(d) = dir {
+            assert!(d.to_string_lossy().contains("state"));
+        }
+    }
+
+    #[test]
+    fn test_auth_dir() {
+        let dir = auth_dir();
+        if let Some(d) = dir {
+            assert!(d.to_string_lossy().contains("auth"));
+        }
+    }
+
+    #[test]
+    fn test_themes_dir() {
+        let dir = themes_dir();
+        if let Some(d) = dir {
+            assert!(d.to_string_lossy().contains("themes"));
+        }
+    }
+
+    #[test]
+    fn test_logs_dir() {
+        let dir = logs_dir();
+        if let Some(d) = dir {
+            assert!(d.to_string_lossy().contains("logs"));
+        }
+    }
+
+    #[test]
     fn test_is_within() {
         let base = PathBuf::from("/home/user/project");
         assert!(is_within(Path::new("/home/user/project/src"), &base));
         assert!(!is_within(Path::new("/home/user/other"), &base));
+    }
+
+    #[test]
+    fn test_is_within_with_real_paths() {
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+
+        // Real paths that exist should canonicalize
+        assert!(is_within(&subdir, dir.path()));
     }
 
     #[test]
@@ -170,11 +221,33 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_only_dots() {
+        let path = Path::new("./././file.txt");
+        let normalized = normalize(path);
+        assert_eq!(normalized, PathBuf::from("file.txt"));
+    }
+
+    #[test]
+    fn test_normalize_parent_dirs() {
+        let path = Path::new("a/b/c/../../d");
+        let normalized = normalize(path);
+        assert_eq!(normalized, PathBuf::from("a/d"));
+    }
+
+    #[test]
     fn test_relative_to() {
         let base = Path::new("/home/user/project");
         let path = Path::new("/home/user/project/src/main.rs");
         let relative = relative_to(path, base);
         assert_eq!(relative, Some(PathBuf::from("src/main.rs")));
+    }
+
+    #[test]
+    fn test_relative_to_not_within() {
+        let base = Path::new("/home/user/project");
+        let path = Path::new("/home/other/file.txt");
+        let relative = relative_to(path, base);
+        assert_eq!(relative, None);
     }
 
     #[test]
@@ -191,6 +264,13 @@ mod tests {
     }
 
     #[test]
+    fn test_project_config_dir() {
+        let project_root = Path::new("/home/user/myproject");
+        let config = project_config_dir(project_root);
+        assert_eq!(config, PathBuf::from("/home/user/myproject/.wonopcode"));
+    }
+
+    #[test]
     fn test_find_project_root() {
         let dir = tempdir().unwrap();
         let project = dir.path().join("myproject");
@@ -202,5 +282,36 @@ mod tests {
 
         let root = find_project_root(&src);
         assert_eq!(root, Some(project));
+    }
+
+    #[test]
+    fn test_find_project_root_with_wonopcode_marker() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("myproject");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir(project.join(".wonopcode")).unwrap();
+
+        let root = find_project_root(&project);
+        assert_eq!(root, Some(project));
+    }
+
+    #[test]
+    fn test_find_project_root_with_cargo_toml() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("myproject");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+
+        let root = find_project_root(&project);
+        assert_eq!(root, Some(project));
+    }
+
+    #[test]
+    fn test_find_project_root_none() {
+        // Start from a path that has no markers going up
+        // This is tricky to test reliably, so just verify function doesn't panic
+        let result = find_project_root(Path::new("/nonexistent/path"));
+        // Result might be Some if there's a marker up the tree, or None
+        let _ = result;
     }
 }

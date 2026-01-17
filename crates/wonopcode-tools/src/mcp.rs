@@ -171,6 +171,7 @@ impl McpToolsBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wonopcode_mcp::protocol::ResourceContent;
 
     #[test]
     fn test_tool_id_with_prefix() {
@@ -196,5 +197,244 @@ mod tests {
         let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
 
         assert_eq!(wrapper.id(), "read_file");
+    }
+
+    #[test]
+    fn test_description_with_description() {
+        let tool_def = McpToolDef {
+            name: "read_file".to_string(),
+            description: Some("Read a file from disk".to_string()),
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+        assert_eq!(wrapper.description(), "Read a file from disk");
+    }
+
+    #[test]
+    fn test_description_without_description() {
+        let tool_def = McpToolDef {
+            name: "read_file".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+        assert_eq!(wrapper.description(), "MCP tool");
+    }
+
+    #[test]
+    fn test_parameters_schema_with_schema() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"}
+            },
+            "required": ["path"]
+        });
+
+        let tool_def = McpToolDef {
+            name: "read_file".to_string(),
+            description: None,
+            input_schema: Some(schema.clone()),
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+        assert_eq!(wrapper.parameters_schema(), schema);
+    }
+
+    #[test]
+    fn test_parameters_schema_without_schema() {
+        let tool_def = McpToolDef {
+            name: "read_file".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+        let schema = wrapper.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["additionalProperties"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn test_tool_def_accessor() {
+        let tool_def = McpToolDef {
+            name: "test_tool".to_string(),
+            description: Some("Test".to_string()),
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+        assert_eq!(wrapper.tool_def().name, "test_tool");
+    }
+
+    #[test]
+    fn test_convert_result_text_content() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![ToolContent::Text {
+                text: "Hello, world!".to_string(),
+            }],
+            is_error: false,
+        };
+
+        let output = wrapper.convert_result(result).unwrap();
+        assert!(output.output.contains("Hello, world!"));
+    }
+
+    #[test]
+    fn test_convert_result_image_content() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![ToolContent::Image {
+                data: "base64data".to_string(),
+                mime_type: "image/png".to_string(),
+            }],
+            is_error: false,
+        };
+
+        let output = wrapper.convert_result(result).unwrap();
+        assert!(output.output.contains("[Image:"));
+        assert!(output.output.contains("image/png"));
+    }
+
+    #[test]
+    fn test_convert_result_resource_with_text() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![ToolContent::Resource {
+                resource: ResourceContent {
+                    uri: "file:///path/to/file".to_string(),
+                    text: Some("File content here".to_string()),
+                    blob: None,
+                    mime_type: None,
+                },
+            }],
+            is_error: false,
+        };
+
+        let output = wrapper.convert_result(result).unwrap();
+        assert!(output.output.contains("File content here"));
+    }
+
+    #[test]
+    fn test_convert_result_resource_without_text() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![ToolContent::Resource {
+                resource: ResourceContent {
+                    uri: "file:///path/to/file".to_string(),
+                    text: None,
+                    blob: Some("base64blob".to_string()),
+                    mime_type: None,
+                },
+            }],
+            is_error: false,
+        };
+
+        let output = wrapper.convert_result(result).unwrap();
+        assert!(output.output.contains("[Resource:"));
+        assert!(output.output.contains("file:///path/to/file"));
+    }
+
+    #[test]
+    fn test_convert_result_error() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![ToolContent::Text {
+                text: "Error occurred".to_string(),
+            }],
+            is_error: true,
+        };
+
+        let output = wrapper.convert_result(result);
+        assert!(output.is_err());
+        let err = output.unwrap_err().to_string();
+        assert!(err.contains("Error occurred"));
+    }
+
+    #[test]
+    fn test_convert_result_multiple_content() {
+        let tool_def = McpToolDef {
+            name: "test".to_string(),
+            description: None,
+            input_schema: None,
+        };
+
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
+
+        let result = ToolCallResult {
+            content: vec![
+                ToolContent::Text {
+                    text: "Line 1".to_string(),
+                },
+                ToolContent::Text {
+                    text: "Line 2".to_string(),
+                },
+            ],
+            is_error: false,
+        };
+
+        let output = wrapper.convert_result(result).unwrap();
+        assert!(output.output.contains("Line 1"));
+        assert!(output.output.contains("Line 2"));
+    }
+
+    #[test]
+    fn test_mcp_tools_builder_new() {
+        let client = Arc::new(McpClient::new());
+        let builder = McpToolsBuilder::new(client);
+        assert!(builder.prefix.is_none());
+    }
+
+    #[test]
+    fn test_mcp_tools_builder_with_prefix() {
+        let client = Arc::new(McpClient::new());
+        let builder = McpToolsBuilder::new(client).with_prefix("server");
+        assert_eq!(builder.prefix, Some("server".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tools_builder_build_all_empty() {
+        let client = Arc::new(McpClient::new());
+        let builder = McpToolsBuilder::new(client);
+        let tools = builder.build_all().await;
+        assert!(tools.is_empty()); // No servers connected
     }
 }

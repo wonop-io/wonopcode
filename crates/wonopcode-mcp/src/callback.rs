@@ -408,15 +408,237 @@ mod tests {
     }
 
     #[test]
+    fn test_html_escape_single_quote() {
+        assert_eq!(html_escape("it's"), "it&#39;s");
+    }
+
+    #[test]
+    fn test_html_escape_combined() {
+        assert_eq!(
+            html_escape("<a href=\"test?a=1&b=2\">"),
+            "&lt;a href=&quot;test?a=1&amp;b=2&quot;&gt;"
+        );
+    }
+
+    #[test]
+    fn test_html_escape_empty() {
+        assert_eq!(html_escape(""), "");
+    }
+
+    #[test]
+    fn test_html_escape_no_special_chars() {
+        assert_eq!(html_escape("hello world"), "hello world");
+    }
+
+    #[test]
     fn test_html_error() {
         let html = html_error("Test error");
         assert!(html.contains("Test error"));
         assert!(html.contains("Authorization Failed"));
     }
 
+    #[test]
+    fn test_html_error_with_special_chars() {
+        let html = html_error("<script>alert('xss')</script>");
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(!html.contains("<script>alert"));
+    }
+
+    #[test]
+    fn test_html_success_content() {
+        assert!(HTML_SUCCESS.contains("Authorization Successful"));
+        assert!(HTML_SUCCESS.contains("window.close()"));
+        assert!(HTML_SUCCESS.contains("<!DOCTYPE html>"));
+    }
+
     #[tokio::test]
     async fn test_callback_server_creation() {
         let server = OAuthCallbackServer::new();
         assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_default() {
+        let server = OAuthCallbackServer::default();
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_stop_when_not_running() {
+        let server = OAuthCallbackServer::new();
+
+        // Stop the server when not started should be safe
+        server.stop().await;
+
+        // Should not be running
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_multiple_stops() {
+        let server = OAuthCallbackServer::new();
+
+        // Multiple stops should be safe
+        server.stop().await;
+        server.stop().await;
+
+        assert!(!server.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_port_in_use() {
+        // This test just checks the function runs without panicking
+        let _ = OAuthCallbackServer::is_port_in_use().await;
+    }
+
+    #[test]
+    fn test_http_response_200() {
+        let response = http_response(200, "text/html", "Hello");
+        assert!(response.contains("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html"));
+        assert!(response.contains("Content-Length: 5"));
+        assert!(response.contains("Hello"));
+    }
+
+    #[test]
+    fn test_http_response_400() {
+        let response = http_response(400, "text/plain", "Bad Request");
+        assert!(response.contains("HTTP/1.1 400 Bad Request"));
+        assert!(response.contains("Content-Type: text/plain"));
+    }
+
+    #[test]
+    fn test_http_response_404() {
+        let response = http_response(404, "text/plain", "Not Found");
+        assert!(response.contains("HTTP/1.1 404 Not Found"));
+    }
+
+    #[test]
+    fn test_http_response_unknown_status() {
+        let response = http_response(500, "text/plain", "Error");
+        assert!(response.contains("HTTP/1.1 500 Unknown"));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_pending_nonexistent() {
+        let server = OAuthCallbackServer::new();
+        // Should not panic when canceling a non-existent pending auth
+        server.cancel_pending("nonexistent-state").await;
+    }
+
+    #[tokio::test]
+    async fn test_cancel_pending_with_pending_auth() {
+        let server = OAuthCallbackServer::new();
+
+        // Add a pending auth
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = server.state.write().await;
+            state
+                .pending
+                .insert("test-state".to_string(), PendingAuth { sender: tx });
+        }
+
+        // Cancel it
+        server.cancel_pending("test-state").await;
+
+        // The receiver should get an error
+        let result = rx.await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stop_cancels_pending_auths() {
+        let server = OAuthCallbackServer::new();
+
+        // Add a pending auth
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = server.state.write().await;
+            state
+                .pending
+                .insert("test-state".to_string(), PendingAuth { sender: tx });
+        }
+
+        // Stop the server
+        server.stop().await;
+
+        // The receiver should get an error
+        let result = rx.await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_html_error_structure() {
+        let html = html_error("Connection refused");
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("<html>"));
+        assert!(html.contains("</html>"));
+        assert!(html.contains("Authorization Failed"));
+        assert!(html.contains("Connection refused"));
+        assert!(html.contains("class=\"error\""));
+    }
+
+    #[test]
+    fn test_html_escape_unicode() {
+        // Unicode characters should pass through unchanged
+        assert_eq!(html_escape("日本語"), "日本語");
+        assert_eq!(html_escape("émoji 🎉"), "émoji 🎉");
+    }
+
+    #[test]
+    fn test_html_escape_mixed() {
+        assert_eq!(
+            html_escape("Hello <World> & 日本語"),
+            "Hello &lt;World&gt; &amp; 日本語"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_state_isolation() {
+        let server1 = OAuthCallbackServer::new();
+        let server2 = OAuthCallbackServer::new();
+
+        // Add pending auth to server1
+        {
+            let mut state = server1.state.write().await;
+            let (tx, _rx) = oneshot::channel();
+            state
+                .pending
+                .insert("state1".to_string(), PendingAuth { sender: tx });
+        }
+
+        // server2 should not have the pending auth
+        {
+            let state = server2.state.read().await;
+            assert!(!state.pending.contains_key("state1"));
+        }
+    }
+
+    #[test]
+    fn test_http_response_empty_body() {
+        let response = http_response(200, "text/plain", "");
+        assert!(response.contains("Content-Length: 0"));
+    }
+
+    #[test]
+    fn test_http_response_connection_close() {
+        let response = http_response(200, "text/html", "test");
+        assert!(response.contains("Connection: close"));
+    }
+
+    #[tokio::test]
+    async fn test_callback_server_initial_state() {
+        let server = OAuthCallbackServer::new();
+
+        // Check initial state
+        let state = server.state.read().await;
+        assert!(state.pending.is_empty());
+
+        // Check shutdown_tx is None
+        let tx = server.shutdown_tx.lock().await;
+        assert!(tx.is_none());
     }
 }

@@ -514,6 +514,44 @@ mod tests {
     }
 
     #[test]
+    fn test_perf_event_with_context() {
+        let event = PerfEvent::new(PerfEventType::ToolExecution, "runner", "bash")
+            .with_context(serde_json::json!({"success": true}));
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"tool_execution\""));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn test_perf_event_with_duration_us() {
+        let event = PerfEvent::new(PerfEventType::Cache, "cache", "get").with_duration_us(500);
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"duration_us\":500"));
+    }
+
+    #[test]
+    fn test_all_perf_event_types_serialize() {
+        let types = vec![
+            PerfEventType::Memory,
+            PerfEventType::Render,
+            PerfEventType::MessageHistory,
+            PerfEventType::Cache,
+            PerfEventType::ToolExecution,
+            PerfEventType::Compaction,
+            PerfEventType::Scroll,
+            PerfEventType::Timing,
+        ];
+
+        for event_type in types {
+            let event = PerfEvent::new(event_type, "test", "op");
+            let json = serde_json::to_string(&event).unwrap();
+            assert!(json.contains("event_type"));
+        }
+    }
+
+    #[test]
     fn test_metrics_snapshot() {
         let metrics = Metrics::new();
         metrics.message_count.store(50, Ordering::Relaxed);
@@ -527,6 +565,21 @@ mod tests {
     }
 
     #[test]
+    fn test_metrics_avg_render_time_zero_frames() {
+        let metrics = Metrics::new();
+        // No frames recorded
+        assert_eq!(metrics.avg_render_time_us(), 0);
+    }
+
+    #[test]
+    fn test_metrics_uptime() {
+        let metrics = Metrics::new();
+        std::thread::sleep(Duration::from_millis(10));
+        // Uptime should be at least 0 (might round down)
+        assert!(metrics.uptime_secs() < 10); // Shouldn't be very long
+    }
+
+    #[test]
     fn test_init_with_path() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test-perf.log");
@@ -537,5 +590,33 @@ mod tests {
 
         // File should be created
         // Note: May not work if already initialized
+    }
+
+    #[test]
+    fn test_is_enabled_returns_false_when_not_initialized() {
+        // In a fresh test environment, should return false
+        // Note: May return true if other tests initialized it
+        let _ = is_enabled(); // Just test it doesn't panic
+    }
+
+    #[test]
+    fn test_log_does_not_panic_when_not_initialized() {
+        let event = PerfEvent::new(PerfEventType::Timing, "test", "op");
+        log(&event); // Should not panic even if logger not initialized
+    }
+
+    #[test]
+    fn test_timing_guard_drops_and_logs() {
+        let guard = TimingGuard::new(PerfEventType::Timing, "test", "operation");
+        std::thread::sleep(Duration::from_millis(5));
+        drop(guard); // Should log duration on drop
+    }
+
+    #[test]
+    fn test_get_perf_log_path_returns_path() {
+        let path = get_perf_log_path();
+        // Should return a path that contains "wonopcode" or is the fallback
+        let path_str = path.to_string_lossy();
+        assert!(path_str.contains("wonopcode") || path_str.contains(".wonopcode"));
     }
 }

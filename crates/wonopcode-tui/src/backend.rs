@@ -655,17 +655,37 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
                 .map(|s| (s.id, s.title, s.timestamp))
                 .collect(),
         ),
-        Update::TodosUpdated { todos } => AppUpdate::TodosUpdated(
-            todos
+        Update::TodosUpdated { phases, todos } => AppUpdate::TodosUpdated {
+            phases: phases
+                .into_iter()
+                .map(|p| crate::PhaseUpdate {
+                    id: p.id,
+                    name: p.name,
+                    status: p.status,
+                    todos: p
+                        .todos
+                        .into_iter()
+                        .map(|t| crate::TodoUpdate {
+                            id: t.id,
+                            content: t.content,
+                            status: t.status,
+                            priority: t.priority,
+                            phase_id: t.phase_id,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            todos: todos
                 .into_iter()
                 .map(|t| crate::TodoUpdate {
                     id: t.id,
                     content: t.content,
                     status: t.status,
                     priority: t.priority,
+                    phase_id: t.phase_id,
                 })
                 .collect(),
-        ),
+        },
         Update::LspUpdated { servers } => AppUpdate::LspUpdated(
             servers
                 .into_iter()

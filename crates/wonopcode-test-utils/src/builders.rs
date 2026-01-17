@@ -320,6 +320,49 @@ mod tests {
     }
 
     #[test]
+    fn test_message_builder_assistant() {
+        let msg = MessageBuilder::assistant().text("Hello").build();
+        assert_eq!(msg.role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_message_builder_system() {
+        let msg = MessageBuilder::system().text("You are helpful").build();
+        assert_eq!(msg.role, Role::System);
+    }
+
+    #[test]
+    fn test_message_builder_tool() {
+        let msg = MessageBuilder::tool()
+            .tool_result("call_1", "Success", false)
+            .build();
+        assert_eq!(msg.role, Role::Tool);
+    }
+
+    #[test]
+    fn test_message_builder_with_tool_call() {
+        let msg = MessageBuilder::assistant()
+            .tool_call("read", "call_1", r#"{"path": "test.txt"}"#)
+            .build();
+        assert_eq!(msg.content.len(), 1);
+        if let ContentPart::ToolUse { id, name, .. } = &msg.content[0] {
+            assert_eq!(id, "call_1");
+            assert_eq!(name, "read");
+        } else {
+            panic!("Expected ToolUse");
+        }
+    }
+
+    #[test]
+    fn test_message_builder_with_thinking() {
+        let msg = MessageBuilder::assistant()
+            .thinking("Let me think about this...")
+            .text("Here's my answer")
+            .build();
+        assert_eq!(msg.content.len(), 2);
+    }
+
+    #[test]
     fn test_conversation_builder() {
         let history = ConversationBuilder::new()
             .user("Hi")
@@ -329,6 +372,48 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].role, Role::User);
         assert_eq!(history[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_conversation_builder_with_system() {
+        let history = ConversationBuilder::new()
+            .system("You are helpful")
+            .user("Hi")
+            .build();
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, Role::System);
+    }
+
+    #[test]
+    fn test_conversation_builder_with_message() {
+        let custom_msg = MessageBuilder::assistant().text("Custom message").build();
+
+        let history = ConversationBuilder::new()
+            .user("Hi")
+            .message(custom_msg)
+            .build();
+
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn test_conversation_builder_tool_interaction() {
+        let history = ConversationBuilder::new()
+            .user("Read a file")
+            .tool_interaction("read", "call_1", r#"{"path": "test.txt"}"#, "file content")
+            .build();
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1].role, Role::Assistant);
+        assert_eq!(history[2].role, Role::Tool);
+    }
+
+    #[test]
+    fn test_conversation_builder_default() {
+        let builder = ConversationBuilder::default();
+        let history = builder.user("Hi").build();
+        assert_eq!(history.len(), 1);
     }
 
     #[test]
@@ -343,6 +428,36 @@ mod tests {
     }
 
     #[test]
+    fn test_tool_definition_builder_optional_param() {
+        let tool = ToolDefinitionBuilder::new("search")
+            .description("Search for text")
+            .string_param("query", "Search query", true)
+            .string_param("limit", "Max results", false)
+            .build();
+
+        let required = tool["input_schema"]["required"].as_array().unwrap();
+        assert_eq!(required.len(), 1);
+        assert_eq!(required[0], "query");
+    }
+
+    #[test]
+    fn test_tool_definition_builder_with_parameters_json() {
+        let tool = ToolDefinitionBuilder::new("custom")
+            .description("Custom tool")
+            .parameters_json(r#"{"custom": "params"}"#)
+            .build();
+
+        assert_eq!(tool["name"], "custom");
+    }
+
+    #[test]
+    fn test_tool_definition_builder_default() {
+        let builder = ToolDefinitionBuilder::default();
+        let tool = builder.build();
+        assert_eq!(tool["name"], "");
+    }
+
+    #[test]
     fn test_config_builder() {
         let config = ConfigBuilder::new()
             .theme("dark")
@@ -351,5 +466,25 @@ mod tests {
 
         assert_eq!(config["theme"], "dark");
         assert_eq!(config["model"], "anthropic/claude-sonnet-4-5-20250929");
+    }
+
+    #[test]
+    fn test_config_builder_set_various_types() {
+        let config = ConfigBuilder::new()
+            .set("string_val", "hello")
+            .set("number_val", 42)
+            .set("bool_val", true)
+            .build();
+
+        assert_eq!(config["string_val"], "hello");
+        assert_eq!(config["number_val"], 42);
+        assert_eq!(config["bool_val"], true);
+    }
+
+    #[test]
+    fn test_config_builder_build_json() {
+        let builder = ConfigBuilder::new().theme("light");
+        let json = builder.build_json();
+        assert!(json.contains("light"));
     }
 }

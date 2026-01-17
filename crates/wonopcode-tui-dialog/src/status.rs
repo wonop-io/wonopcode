@@ -12,9 +12,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Status dialog showing current configuration and state.
 #[derive(Debug, Clone, Default)]

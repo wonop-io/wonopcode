@@ -428,6 +428,8 @@ data: [DONE]"#;
 
         let result = parse_sse_response(sse_data);
         assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("API error"));
     }
 
     #[test]
@@ -436,5 +438,222 @@ data: [DONE]"#;
 
         let result = parse_sse_response(json_data).unwrap();
         assert_eq!(result, "Direct result");
+    }
+
+    #[test]
+    fn test_parse_direct_json_error() {
+        let json_data =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Direct error"}}"#;
+
+        let result = parse_sse_response(json_data);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Direct error"));
+    }
+
+    #[test]
+    fn test_parse_sse_no_results() {
+        let sse_data = r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[]}}"#;
+
+        let result = parse_sse_response(sse_data).unwrap();
+        assert_eq!(result, "No results found");
+    }
+
+    #[test]
+    fn test_parse_sse_skips_done() {
+        let sse_data = r#"data: [DONE]
+data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"After done"}]}}"#;
+
+        let result = parse_sse_response(sse_data).unwrap();
+        assert_eq!(result, "After done");
+    }
+
+    #[test]
+    fn test_parse_sse_skips_invalid_json() {
+        let sse_data = r#"data: invalid json
+data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Valid result"}]}}"#;
+
+        let result = parse_sse_response(sse_data).unwrap();
+        assert_eq!(result, "Valid result");
+    }
+
+    #[test]
+    fn test_parse_sse_non_text_content_type() {
+        let sse_data = r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"image","data":"base64"}]}}"#;
+
+        let result = parse_sse_response(sse_data).unwrap();
+        assert_eq!(result, "No results found");
+    }
+
+    #[test]
+    fn test_parse_sse_text_without_text_field() {
+        let sse_data = r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text"}]}}"#;
+
+        let result = parse_sse_response(sse_data).unwrap();
+        assert_eq!(result, "No results found");
+    }
+
+    #[test]
+    fn test_parse_empty_body() {
+        let result = parse_sse_response("").unwrap();
+        assert_eq!(result, "No results found");
+    }
+
+    #[test]
+    fn test_web_search_tool_new() {
+        let tool = WebSearchTool::new();
+        assert_eq!(tool.id(), "websearch");
+    }
+
+    #[test]
+    fn test_web_search_tool_default() {
+        let tool = WebSearchTool::default();
+        assert_eq!(tool.id(), "websearch");
+    }
+
+    #[test]
+    fn test_web_search_tool_description() {
+        let tool = WebSearchTool::new();
+        let desc = tool.description();
+        assert!(desc.contains("Search the web"));
+        assert!(desc.contains("Exa AI"));
+    }
+
+    #[test]
+    fn test_web_search_tool_parameters_schema() {
+        let tool = WebSearchTool::new();
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("query")));
+        assert!(schema["properties"]["num_results"].get("default").is_some());
+    }
+
+    #[test]
+    fn test_code_search_tool_new() {
+        let tool = CodeSearchTool::new();
+        assert_eq!(tool.id(), "codesearch");
+    }
+
+    #[test]
+    fn test_code_search_tool_default() {
+        let tool = CodeSearchTool::default();
+        assert_eq!(tool.id(), "codesearch");
+    }
+
+    #[test]
+    fn test_code_search_tool_description() {
+        let tool = CodeSearchTool::new();
+        let desc = tool.description();
+        assert!(desc.contains("code examples"));
+        assert!(desc.contains("API documentation"));
+    }
+
+    #[test]
+    fn test_code_search_tool_parameters_schema() {
+        let tool = CodeSearchTool::new();
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("query")));
+        assert!(schema["properties"]["tokens_num"].get("default").is_some());
+    }
+
+    #[test]
+    fn test_default_functions() {
+        assert_eq!(default_num_results(), 8);
+        assert_eq!(default_livecrawl(), "fallback");
+        assert_eq!(default_search_type(), "auto");
+        assert_eq!(default_tokens_num(), 5000);
+    }
+
+    #[test]
+    fn test_web_search_args_deserialization() {
+        let args: WebSearchArgs = serde_json::from_value(json!({
+            "query": "rust programming"
+        }))
+        .unwrap();
+
+        assert_eq!(args.query, "rust programming");
+        assert_eq!(args.num_results, 8); // default
+        assert_eq!(args.livecrawl, "fallback"); // default
+        assert_eq!(args.search_type, "auto"); // default
+        assert!(args.context_max_characters.is_none());
+    }
+
+    #[test]
+    fn test_web_search_args_with_options() {
+        let args: WebSearchArgs = serde_json::from_value(json!({
+            "query": "rust programming",
+            "num_results": 15,
+            "livecrawl": "preferred",
+            "search_type": "deep",
+            "context_max_characters": 5000
+        }))
+        .unwrap();
+
+        assert_eq!(args.query, "rust programming");
+        assert_eq!(args.num_results, 15);
+        assert_eq!(args.livecrawl, "preferred");
+        assert_eq!(args.search_type, "deep");
+        assert_eq!(args.context_max_characters, Some(5000));
+    }
+
+    #[test]
+    fn test_code_search_args_deserialization() {
+        let args: CodeSearchArgs = serde_json::from_value(json!({
+            "query": "async rust"
+        }))
+        .unwrap();
+
+        assert_eq!(args.query, "async rust");
+        assert_eq!(args.tokens_num, 5000); // default
+    }
+
+    #[test]
+    fn test_code_search_args_with_tokens() {
+        let args: CodeSearchArgs = serde_json::from_value(json!({
+            "query": "async rust",
+            "tokens_num": 10000
+        }))
+        .unwrap();
+
+        assert_eq!(args.query, "async rust");
+        assert_eq!(args.tokens_num, 10000);
+    }
+
+    #[test]
+    fn test_mcp_response_deserialization() {
+        let response: McpResponse = serde_json::from_value(json!({
+            "result": {
+                "content": [
+                    {"type": "text", "text": "Result text"}
+                ]
+            }
+        }))
+        .unwrap();
+
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result.content.len(), 1);
+        assert_eq!(result.content[0].content_type, "text");
+        assert_eq!(result.content[0].text, Some("Result text".to_string()));
+    }
+
+    #[test]
+    fn test_mcp_error_deserialization() {
+        let response: McpResponse = serde_json::from_value(json!({
+            "error": {
+                "code": -32000,
+                "message": "Error occurred"
+            }
+        }))
+        .unwrap();
+
+        assert!(response.result.is_none());
+        assert!(response.error.is_some());
+        let error = response.error.unwrap();
+        assert_eq!(error.message, "Error occurred");
     }
 }

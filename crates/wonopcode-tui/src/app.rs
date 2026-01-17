@@ -1,34 +1,27 @@
 //! Main application for the TUI.
 
-use crate::{
-    event::{is_escape, Event, EventHandler},
-    metrics::{self, EventType},
-    model_state::ModelState,
-    theme::{AgentMode, RenderSettings, Theme},
-    widgets::{
-        autocomplete::{AutocompleteAction, FileAutocomplete},
-        dialog::{
-            AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
-            GitFileDisplay, HelpDialog, InputDialog, InputDialogResult, McpDialog, McpServerInfo,
-            McpStatus as DialogMcpStatus, ModelDialog, PerfDialog, PermissionDialog,
-            PermissionResult, SandboxAction, SandboxDialog, SandboxState as DialogSandboxState,
-            SessionDialog, SettingsDialog, SettingsResult, StatusDialog, ThemeDialog,
-            TimelineDialog, TimelineItem,
-        },
-        footer::{FooterStatus, FooterWidget},
-        help_overlay::{HelpContext, HelpOverlay},
-        input::{InputAction, InputWidget},
-        logo::LogoWidget,
-        messages::{DisplayMessage, DisplayToolCall, MessageSegment, MessagesWidget, ToolStatus},
-        mode_indicator::{DisplayMode, ModeIndicator},
-        onboarding::OnboardingOverlay,
-        search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget},
-        sidebar::{LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarWidget, TodoItem},
-        slash_commands::{SlashCommandAction, SlashCommandAutocomplete},
-        toast::{Toast, ToastManager},
-        topbar::TopBarWidget,
-        which_key::WhichKeyOverlay,
+use crate::widgets::{
+    autocomplete::{AutocompleteAction, FileAutocomplete},
+    dialog::{
+        AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
+        GitFileDisplay, HelpDialog, InputDialog, InputDialogResult, McpDialog, McpServerInfo,
+        McpStatus as DialogMcpStatus, ModelDialog, PerfDialog, PermissionDialog, PermissionResult,
+        SandboxAction, SandboxDialog, SandboxState as DialogSandboxState, SessionDialog,
+        SettingsDialog, SettingsResult, StatusDialog, ThemeDialog, TimelineDialog, TimelineItem,
     },
+    footer::{FooterStatus, FooterWidget},
+    help_overlay::{HelpContext, HelpOverlay},
+    input::{InputAction, InputWidget},
+    logo::LogoWidget,
+    messages::{DisplayMessage, DisplayToolCall, MessageSegment, MessagesWidget, ToolStatus},
+    mode_indicator::{DisplayMode, ModeIndicator},
+    onboarding::OnboardingOverlay,
+    search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget},
+    sidebar::{LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarWidget, TodoItem},
+    slash_commands::{SlashCommandAction, SlashCommandAutocomplete},
+    toast::{Toast, ToastManager},
+    topbar::TopBarWidget,
+    which_key::WhichKeyOverlay,
 };
 use arboard::Clipboard;
 use crossterm::{
@@ -49,6 +42,10 @@ use ratatui::{
 use std::io::{self, Write};
 use std::process::Command;
 use tokio::sync::mpsc;
+use wonopcode_tui_core::{
+    is_escape, metrics, AgentMode, Event, EventHandler, EventType, ModelState, RenderSettings,
+    Theme,
+};
 
 // Re-export SaveScope for use in runner
 pub use crate::widgets::dialog::SaveScope;
@@ -82,6 +79,57 @@ pub fn install_panic_hook() {
         // Then call the original panic hook to print the panic message
         original_hook(panic_info);
     }));
+}
+
+/// RAII guard for terminal state management.
+///
+/// This struct ensures that the terminal is properly restored to its normal state
+/// when it goes out of scope, regardless of how the scope is exited (normal return,
+/// early return via `?`, or drop due to unwinding).
+///
+/// # Example
+/// ```ignore
+/// let _guard = TerminalGuard::new()?;
+/// // Terminal is now in raw mode with alternate screen
+/// // ... do TUI stuff ...
+/// // Terminal is automatically restored when _guard is dropped
+/// ```
+pub struct TerminalGuard {
+    /// Whether the terminal was successfully set up.
+    /// If false, we don't try to restore on drop.
+    initialized: bool,
+}
+
+impl TerminalGuard {
+    /// Create a new terminal guard and set up the terminal for TUI mode.
+    ///
+    /// This enables raw mode, enters the alternate screen, enables mouse capture,
+    /// and enables bracketed paste.
+    pub fn new() -> io::Result<Self> {
+        enable_raw_mode()?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
+        Ok(Self { initialized: true })
+    }
+
+    /// Create a guard without initializing the terminal.
+    /// Useful for tests or when terminal is already set up.
+    #[allow(dead_code)]
+    pub fn already_initialized() -> Self {
+        Self { initialized: true }
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        if self.initialized {
+            restore_terminal();
+        }
+    }
 }
 
 /// Current view/route.
@@ -234,6 +282,15 @@ pub enum EditorResult {
     Cancelled,
 }
 
+/// A phase containing grouped todos (from tool execution).
+#[derive(Debug, Clone)]
+pub struct PhaseUpdate {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub todos: Vec<TodoUpdate>,
+}
+
 /// A todo item for the sidebar (from tool execution).
 #[derive(Debug, Clone)]
 pub struct TodoUpdate {
@@ -241,6 +298,8 @@ pub struct TodoUpdate {
     pub content: String,
     pub status: String,
     pub priority: String,
+    /// Optional phase ID this todo belongs to.
+    pub phase_id: Option<String>,
 }
 
 /// Updates that can be received by the UI.
@@ -280,8 +339,11 @@ pub enum AppUpdate {
     ModelInfo { context_limit: u32 },
     /// Session list update.
     Sessions(Vec<(String, String, String)>),
-    /// Todos updated (from todowrite tool).
-    TodosUpdated(Vec<TodoUpdate>),
+    /// Todos updated (from todowrite tool) - includes phases.
+    TodosUpdated {
+        phases: Vec<PhaseUpdate>,
+        todos: Vec<TodoUpdate>,
+    },
     /// LSP servers updated.
     LspUpdated(Vec<LspStatusUpdate>),
     /// MCP servers updated.
@@ -1720,16 +1782,10 @@ async function fetchUserData(userId) {
         // Initialize performance metrics
         metrics::init();
 
-        // Setup terminal
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            EnterAlternateScreen,
-            EnableMouseCapture,
-            EnableBracketedPaste
-        )?;
-        let backend = CrosstermBackend::new(stdout);
+        // Setup terminal with RAII guard - terminal will be restored when _guard is dropped,
+        // regardless of how this function exits (normal return, early return via ?, or panic)
+        let _guard = TerminalGuard::new()?;
+        let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
 
         // Start event loop
@@ -1807,9 +1863,9 @@ async function fetchUserData(userId) {
             );
         }
 
-        // Cleanup
+        // Cleanup - event loop abort
+        // Note: terminal restoration is handled by TerminalGuard's Drop impl
         event_loop.abort();
-        restore_terminal();
 
         Ok(())
     }
@@ -3105,11 +3161,32 @@ async function fetchUserData(userId) {
             AppUpdate::Sessions(sessions) => {
                 self.sessions = sessions;
             }
-            AppUpdate::TodosUpdated(todos) => {
-                // Convert TodoUpdate to sidebar::TodoItem
-                let sidebar_todos: Vec<TodoItem> = todos
+            AppUpdate::TodosUpdated { phases, todos } => {
+                // Convert phases to sidebar format
+                use crate::widgets::sidebar::{PhaseItem, TodoItem as SidebarTodo};
+                let sidebar_phases: Vec<PhaseItem> = phases
                     .into_iter()
-                    .map(|t| TodoItem {
+                    .map(|p| PhaseItem {
+                        id: p.id,
+                        name: p.name,
+                        status: p.status,
+                        todos: p
+                            .todos
+                            .into_iter()
+                            .map(|t| SidebarTodo {
+                                content: t.content,
+                                completed: t.status == "completed",
+                                in_progress: t.status == "in_progress",
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                self.sidebar.set_phases(sidebar_phases);
+
+                // Also maintain flat todos for backward compatibility
+                let sidebar_todos: Vec<SidebarTodo> = todos
+                    .into_iter()
+                    .map(|t| SidebarTodo {
                         content: t.content,
                         completed: t.status == "completed",
                         in_progress: t.status == "in_progress",

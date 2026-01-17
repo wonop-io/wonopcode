@@ -363,6 +363,97 @@ mod tests {
     }
 
     #[test]
+    fn test_mock_command_executor_prefix_match() {
+        let executor =
+            MockCommandExecutor::new().with_response("git", Ok("git output".to_string()));
+
+        // "git status" should match "git" prefix
+        let result = executor.execute("git status");
+        assert_eq!(result.unwrap(), "git output");
+    }
+
+    #[test]
+    fn test_mock_command_executor_with_workdir() {
+        let executor = MockCommandExecutor::new().with_workdir("/custom/workdir");
+        assert_eq!(executor.workdir(), Path::new("/custom/workdir"));
+    }
+
+    #[test]
+    fn test_mock_command_executor_default() {
+        let executor = MockCommandExecutor::default();
+        assert_eq!(executor.execution_count(), 0);
+    }
+
+    #[test]
+    fn test_mock_command_executor_was_executed() {
+        let executor = MockCommandExecutor::new();
+        let _ = executor.execute("test command");
+        assert!(executor.was_executed("test"));
+        assert!(!executor.was_executed("other"));
+    }
+
+    #[test]
+    fn test_mock_command_executor_last_execution() {
+        let executor = MockCommandExecutor::new();
+        let _ = executor.execute("first");
+        let _ = executor.execute("second");
+
+        let last = executor.last_execution().unwrap();
+        assert_eq!(last.command, "second");
+    }
+
+    #[test]
+    fn test_mock_command_executor_clear_executions() {
+        let executor = MockCommandExecutor::new();
+        let _ = executor.execute("test");
+        assert_eq!(executor.execution_count(), 1);
+
+        executor.clear_executions();
+        assert_eq!(executor.execution_count(), 0);
+    }
+
+    #[test]
+    fn test_mock_command_executor_executions() {
+        let executor = MockCommandExecutor::new();
+        let _ = executor.execute("cmd1");
+        let _ = executor.execute("cmd2");
+
+        let executions = executor.executions();
+        assert_eq!(executions.len(), 2);
+        assert_eq!(executions[0].command, "cmd1");
+        assert_eq!(executions[1].command, "cmd2");
+    }
+
+    #[test]
+    fn test_mock_command_executor_with_options() {
+        let executor = MockCommandExecutor::new().with_response("test", Ok("output".to_string()));
+
+        let mut env = HashMap::new();
+        env.insert("KEY".to_string(), "VALUE".to_string());
+
+        let result = executor.execute_with_options(
+            "test",
+            Some(Path::new("/custom/dir")),
+            Some(&env),
+            Some(5000),
+        );
+
+        assert!(result.is_ok());
+
+        let last = executor.last_execution().unwrap();
+        assert_eq!(last.workdir, PathBuf::from("/custom/dir"));
+        assert_eq!(last.env.get("KEY"), Some(&"VALUE".to_string()));
+        assert_eq!(last.timeout_ms, Some(5000));
+    }
+
+    #[test]
+    fn test_mock_command_executor_no_default_returns_empty() {
+        let executor = MockCommandExecutor::new();
+        let result = executor.execute("unknown");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
     fn test_mock_command_default_response() {
         let executor =
             MockCommandExecutor::new().with_default_response(Ok("default output".to_string()));
@@ -401,6 +492,41 @@ mod tests {
     }
 
     #[test]
+    fn test_mock_filesystem_list() {
+        let fs = MockFileSystem::new()
+            .with_file("/dir/file1.txt", "1")
+            .with_file("/dir/file2.txt", "2")
+            .with_file("/other/file3.txt", "3");
+
+        let files = fs.list("/dir");
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_mock_filesystem_all_files() {
+        let fs = MockFileSystem::new()
+            .with_file("/a.txt", "a")
+            .with_file("/b.txt", "b");
+
+        let all = fs.all_files();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_mock_filesystem_all_directories() {
+        let fs = MockFileSystem::new().with_dir("/dir1").with_dir("/dir2");
+
+        let dirs = fs.all_directories();
+        assert_eq!(dirs.len(), 2);
+    }
+
+    #[test]
+    fn test_mock_filesystem_delete_nonexistent() {
+        let mut fs = MockFileSystem::new();
+        assert!(!fs.delete("/nonexistent"));
+    }
+
+    #[test]
     fn test_mock_http_client() {
         let client = MockHttpClient::new()
             .with_response("/api/test", MockHttpResponse::json(r#"{"ok": true}"#));
@@ -409,5 +535,52 @@ mod tests {
         assert_eq!(response.status, 200);
         assert!(response.body.contains("ok"));
         assert!(client.was_requested("/api/test"));
+    }
+
+    #[test]
+    fn test_mock_http_client_post() {
+        let client = MockHttpClient::new().with_response(
+            "/api/create",
+            MockHttpResponse::json(r#"{"created": true}"#),
+        );
+
+        let response = client.post("/api/create", r#"{"name": "test"}"#).unwrap();
+        assert_eq!(response.status, 200);
+
+        let requests = client.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "POST");
+        assert_eq!(requests[0].body, Some(r#"{"name": "test"}"#.to_string()));
+    }
+
+    #[test]
+    fn test_mock_http_response_text() {
+        let response = MockHttpResponse::text("plain text");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "plain text");
+        assert_eq!(
+            response.headers.get("content-type"),
+            Some(&"text/plain".to_string())
+        );
+    }
+
+    #[test]
+    fn test_mock_http_response_error() {
+        let response = MockHttpResponse::error(404, "Not found");
+        assert_eq!(response.status, 404);
+        assert_eq!(response.body, "Not found");
+    }
+
+    #[test]
+    fn test_mock_http_client_get_nonexistent() {
+        let client = MockHttpClient::new();
+        let response = client.get("/unknown");
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn test_mock_http_client_was_requested_false() {
+        let client = MockHttpClient::new();
+        assert!(!client.was_requested("/anything"));
     }
 }

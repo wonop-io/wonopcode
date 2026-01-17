@@ -42,8 +42,8 @@ use wonopcode_util::FileTimeState;
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
-    /// Todo list was updated with new items.
-    TodosUpdated(Vec<todo::TodoItem>),
+    /// Todo list was updated with new phased structure.
+    TodosUpdated(todo::PhasedTodos),
 }
 
 /// Context provided to tools during execution.
@@ -164,3 +164,104 @@ pub trait Tool: Send + Sync {
 
 /// A boxed tool for dynamic dispatch.
 pub type BoxedTool = Arc<dyn Tool>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn create_test_context() -> ToolContext {
+        ToolContext {
+            session_id: "test-session".to_string(),
+            message_id: "test-message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: PathBuf::from("/test/root"),
+            cwd: PathBuf::from("/test/root/subdir"),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_tool_context_is_sandboxed() {
+        let ctx = create_test_context();
+        assert!(!ctx.is_sandboxed());
+    }
+
+    #[test]
+    fn test_tool_context_sandbox_none() {
+        let ctx = create_test_context();
+        assert!(ctx.sandbox().is_none());
+    }
+
+    #[test]
+    fn test_tool_context_to_sandbox_path_no_sandbox() {
+        let ctx = create_test_context();
+        let path = PathBuf::from("/test/file.txt");
+        let result = ctx.to_sandbox_path(&path);
+        assert_eq!(result, path); // Should return the same path when no sandbox
+    }
+
+    #[test]
+    fn test_tool_context_to_host_path_no_sandbox() {
+        let ctx = create_test_context();
+        let path = PathBuf::from("/test/file.txt");
+        let result = ctx.to_host_path(&path);
+        assert_eq!(result, path); // Should return the same path when no sandbox
+    }
+
+    #[test]
+    fn test_tool_context_effective_cwd() {
+        let ctx = create_test_context();
+        let result = ctx.effective_cwd();
+        assert_eq!(result, PathBuf::from("/test/root/subdir"));
+    }
+
+    #[test]
+    fn test_tool_context_effective_root() {
+        let ctx = create_test_context();
+        let result = ctx.effective_root();
+        assert_eq!(result, PathBuf::from("/test/root"));
+    }
+
+    #[test]
+    fn test_tool_output_new() {
+        let output = ToolOutput::new("Title", "Content");
+        assert_eq!(output.title, "Title");
+        assert_eq!(output.output, "Content");
+        assert!(output.metadata.is_null());
+    }
+
+    #[test]
+    fn test_tool_output_with_metadata() {
+        let output = ToolOutput::new("Title", "Content").with_metadata(json!({"key": "value"}));
+        assert_eq!(output.title, "Title");
+        assert_eq!(output.output, "Content");
+        assert_eq!(output.metadata["key"], "value");
+    }
+
+    #[test]
+    fn test_tool_event_clone() {
+        let mut phased = todo::PhasedTodos::new();
+        let mut phase = todo::Phase::new("phase_1", "Test Phase");
+        phase.add_todo(todo::TodoItem {
+            id: "1".to_string(),
+            content: "Test".to_string(),
+            status: todo::TodoStatus::Pending,
+            priority: todo::TodoPriority::High,
+        });
+        phased.add_phase(phase);
+
+        let event = ToolEvent::TodosUpdated(phased);
+
+        // Test that we can clone the event
+        let cloned = event;
+        let ToolEvent::TodosUpdated(phased_todos) = cloned;
+        assert_eq!(phased_todos.phases.len(), 1);
+        assert_eq!(phased_todos.phases[0].todos.len(), 1);
+        assert_eq!(phased_todos.phases[0].todos[0].id, "1");
+    }
+}

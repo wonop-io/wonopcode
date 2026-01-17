@@ -9,9 +9,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Timeline item representing a message in the conversation.
 #[derive(Debug, Clone)]

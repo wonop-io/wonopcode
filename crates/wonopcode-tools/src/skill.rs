@@ -377,6 +377,22 @@ Use this when a task matches an available skill's description.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_util::sync::CancellationToken;
+
+    fn create_test_context() -> ToolContext {
+        ToolContext {
+            session_id: "test-session".to_string(),
+            message_id: "test-message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: std::path::PathBuf::from("/test"),
+            cwd: std::path::PathBuf::from("/test"),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
 
     #[test]
     fn test_parse_frontmatter() {
@@ -401,6 +417,109 @@ This skill provides step-by-step instructions...
         let content = "# No frontmatter here";
         let result = parse_frontmatter(content);
         assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Missing frontmatter delimiter"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_missing_closing_delimiter() {
+        let content = "---\nname: test\n";
+        let result = parse_frontmatter(content);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing closing"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_invalid_yaml() {
+        let content = "---\ninvalid: yaml: syntax:\n---\nbody";
+        let result = parse_frontmatter(content);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid frontmatter YAML"));
+    }
+
+    #[test]
+    fn test_skill_registry_new() {
+        let registry = SkillRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_skill_registry_get() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: None,
+            },
+        );
+
+        assert!(registry.get("test").is_some());
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_skill_registry_contains() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: None,
+            },
+        );
+
+        assert!(registry.contains("test"));
+        assert!(!registry.contains("other"));
+    }
+
+    #[test]
+    fn test_skill_registry_list() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "skill1".to_string(),
+            Skill {
+                name: "skill1".to_string(),
+                description: "First skill".to_string(),
+                location: PathBuf::from("/test/skill1/SKILL.md"),
+                content: None,
+            },
+        );
+        registry.skills.insert(
+            "skill2".to_string(),
+            Skill {
+                name: "skill2".to_string(),
+                description: "Second skill".to_string(),
+                location: PathBuf::from("/test/skill2/SKILL.md"),
+                content: None,
+            },
+        );
+
+        let list = registry.list();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_skill_registry_names() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "skill1".to_string(),
+            Skill {
+                name: "skill1".to_string(),
+                description: "First".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: None,
+            },
+        );
+
+        let names = registry.names();
+        assert!(names.contains(&"skill1"));
     }
 
     #[test]
@@ -420,6 +539,14 @@ This skill provides step-by-step instructions...
         assert!(output.contains("<available_skills>"));
         assert!(output.contains("<name>test</name>"));
         assert!(output.contains("<description>A test skill</description>"));
+        assert!(output.contains("</available_skills>"));
+    }
+
+    #[test]
+    fn test_format_available_skills_empty() {
+        let registry = SkillRegistry::new();
+        let output = registry.format_available_skills();
+        assert_eq!(output, "No skills are currently available.");
     }
 
     #[test]
@@ -427,5 +554,211 @@ This skill provides step-by-step instructions...
         let registry = SkillRegistry::new();
         let desc = skill_description_with_available(&registry);
         assert!(desc.contains("No skills are currently available"));
+    }
+
+    #[test]
+    fn test_skill_description_with_skills() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: None,
+            },
+        );
+
+        let desc = skill_description_with_available(&registry);
+        assert!(desc.contains("Load a skill"));
+        assert!(desc.contains("<available_skills>"));
+    }
+
+    #[test]
+    fn test_skill_tool_id() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry);
+        assert_eq!(tool.id(), "skill");
+    }
+
+    #[test]
+    fn test_skill_tool_description() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry);
+        let desc = tool.description();
+        assert!(desc.contains("Load a skill"));
+        assert!(desc.contains("specialized"));
+    }
+
+    #[test]
+    fn test_skill_tool_parameters_schema_empty() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry);
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["name"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("No skills"));
+    }
+
+    #[test]
+    fn test_skill_tool_parameters_schema_with_skills() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: None,
+            },
+        );
+        let registry = Arc::new(RwLock::new(registry));
+        let tool = SkillTool::new(registry);
+
+        let schema = tool.parameters_schema();
+        let enum_values = schema["properties"]["name"]["enum"].as_array().unwrap();
+        assert!(enum_values.contains(&json!("test")));
+    }
+
+    #[test]
+    fn test_skill_tool_registry() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry.clone());
+        let returned = tool.registry();
+        assert!(Arc::ptr_eq(&registry, &returned));
+    }
+
+    #[tokio::test]
+    async fn test_skill_tool_execute_not_found() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry);
+        let ctx = create_test_context();
+
+        let result = tool.execute(json!({"name": "nonexistent"}), &ctx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found"));
+        assert!(err.contains("nonexistent"));
+    }
+
+    #[tokio::test]
+    async fn test_skill_tool_execute_invalid_args() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let tool = SkillTool::new(registry);
+        let ctx = create_test_context();
+
+        let result = tool.execute(json!({"invalid": "args"}), &ctx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid arguments"));
+    }
+
+    #[tokio::test]
+    async fn test_skill_tool_execute_with_content() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: Some("# Test Content\nThis is test content.".to_string()),
+            },
+        );
+        let registry = Arc::new(RwLock::new(registry));
+        let tool = SkillTool::new(registry);
+        let ctx = create_test_context();
+
+        let result = tool.execute(json!({"name": "test"}), &ctx).await.unwrap();
+
+        assert!(result.title.contains("Skill: test"));
+        assert!(result.output.contains("# Test Content"));
+        assert!(result.output.contains("**Description:** A test skill"));
+        assert_eq!(result.metadata["name"], "test");
+    }
+
+    #[tokio::test]
+    async fn test_skill_registry_discover_empty() {
+        let registry = SkillRegistry::discover(&[]).await;
+        assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_skill_registry_discover_nonexistent_dir() {
+        let registry = SkillRegistry::discover(&[PathBuf::from("/nonexistent/path")]).await;
+        assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_skill_tool_discover() {
+        let tool = SkillTool::discover(&[]).await;
+        assert_eq!(tool.id(), "skill");
+    }
+
+    #[tokio::test]
+    async fn test_skill_registry_get_with_content_already_loaded() {
+        let mut registry = SkillRegistry::new();
+        registry.skills.insert(
+            "test".to_string(),
+            Skill {
+                name: "test".to_string(),
+                description: "A test skill".to_string(),
+                location: PathBuf::from("/test/SKILL.md"),
+                content: Some("Already loaded".to_string()),
+            },
+        );
+
+        let skill = registry.get_with_content("test").await;
+        assert!(skill.is_some());
+        let skill = skill.unwrap();
+        assert_eq!(skill.content, Some("Already loaded".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_skill_registry_get_with_content_not_found() {
+        let registry = SkillRegistry::new();
+        let skill = registry.get_with_content("nonexistent").await;
+        assert!(skill.is_none());
+    }
+
+    #[test]
+    fn test_skill_args_deserialization() {
+        let args: SkillArgs = serde_json::from_value(json!({
+            "name": "my-skill"
+        }))
+        .unwrap();
+        assert_eq!(args.name, "my-skill");
+    }
+
+    #[test]
+    fn test_skill_serialization() {
+        let skill = Skill {
+            name: "test".to_string(),
+            description: "A test".to_string(),
+            location: PathBuf::from("/path/to/skill"),
+            content: Some("Content here".to_string()),
+        };
+
+        let json = serde_json::to_string(&skill).unwrap();
+        assert!(json.contains("\"name\":\"test\""));
+        assert!(json.contains("\"description\":\"A test\""));
+        assert!(json.contains("\"content\":\"Content here\""));
+    }
+
+    #[test]
+    fn test_skill_serialization_without_content() {
+        let skill = Skill {
+            name: "test".to_string(),
+            description: "A test".to_string(),
+            location: PathBuf::from("/path/to/skill"),
+            content: None,
+        };
+
+        let json = serde_json::to_string(&skill).unwrap();
+        assert!(!json.contains("content"));
     }
 }

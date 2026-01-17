@@ -4288,7 +4288,78 @@ dependencies = [
  "tui-textarea",
  "wonopcode-core",
  "wonopcode-protocol",
+ "wonopcode-tui-core",
+ "wonopcode-tui-dialog",
+ "wonopcode-tui-messages",
+ "wonopcode-tui-render",
+ "wonopcode-tui-widgets",
  "wonopcode-util",
+]
+
+[[package]]
+name = "wonopcode-tui-core"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "dirs",
+ "once_cell",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "wonopcode-tui-dialog"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "wonopcode-core",
+ "wonopcode-tui-core",
+]
+
+[[package]]
+name = "wonopcode-tui-messages"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tracing",
+ "unicode-width 0.2.0",
+ "wonopcode-tui-core",
+ "wonopcode-tui-render",
+]
+
+[[package]]
+name = "wonopcode-tui-render"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "ratatui",
+ "syntect",
+ "unicode-width 0.2.0",
+ "wonopcode-tui-core",
+]
+
+[[package]]
+name = "wonopcode-tui-widgets"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "ignore",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tui-textarea",
+ "unicode-width 0.2.0",
+ "wonopcode-tui-core",
 ]
 
 [[package]]

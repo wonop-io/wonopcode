@@ -661,4 +661,337 @@ mod tests {
         assert!(!constant_time_eq(b"test-longer", b"test"));
         assert!(constant_time_eq(b"", b""));
     }
+
+    #[tokio::test]
+    async fn test_handle_request_initialize() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            method: "initialize".to_string(),
+            params: None,
+        };
+
+        let response = state.handle_request(request).await;
+        assert!(response.is_some());
+        let response = response.unwrap();
+        assert_eq!(response.id, 1);
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_tools_list() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(2),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+
+        let response = state.handle_request(request).await;
+        assert!(response.is_some());
+        let response = response.unwrap();
+        assert_eq!(response.id, 2);
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_tools_call() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(3),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "echo",
+                "arguments": { "message": "test" }
+            })),
+        };
+
+        let response = state.handle_request(request).await;
+        assert!(response.is_some());
+        let response = response.unwrap();
+        assert_eq!(response.id, 3);
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_unknown_method() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(4),
+            method: "unknown/method".to_string(),
+            params: None,
+        };
+
+        let response = state.handle_request(request).await;
+        assert!(response.is_some());
+        let response = response.unwrap();
+        assert_eq!(response.id, 4);
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_notification_initialized() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None, // Notification has no ID
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+
+        // Notifications should not return a response
+        let response = state.handle_request(request).await;
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_request_notification_unknown() {
+        let state = create_test_state();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None, // Notification has no ID
+            method: "notifications/unknown".to_string(),
+            params: None,
+        };
+
+        // Unknown notifications should still not return a response
+        let response = state.handle_request(request).await;
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_missing_params() {
+        let state = create_test_state();
+        let response = state.handle_call_tool(5, None).await;
+
+        assert_eq!(response.id, 5);
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_invalid_params() {
+        let state = create_test_state();
+        let params = serde_json::json!("invalid-not-object");
+        let response = state.handle_call_tool(6, Some(params)).await;
+
+        assert_eq!(response.id, 6);
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_no_arguments() {
+        let state = create_test_state();
+        let params = serde_json::json!({
+            "name": "echo"
+            // no arguments field
+        });
+
+        let response = state.handle_call_tool(7, Some(params)).await;
+        assert_eq!(response.id, 7);
+        // Should work with default args
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn test_error_response() {
+        let state = create_test_state();
+        let response = state.error_response(10, -32700, "Parse error");
+
+        assert_eq!(response.id, 10);
+        assert!(response.result.is_none());
+        assert!(response.error.is_some());
+
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32700);
+        assert_eq!(error.message, "Parse error");
+    }
+
+    #[tokio::test]
+    async fn test_register_and_unregister_session() {
+        let state = create_test_state();
+        let (tx, _rx) = mpsc::unbounded_channel::<JsonRpcResponse>();
+
+        // Register
+        state.register_session("test-session".to_string(), tx).await;
+
+        // Verify session exists by trying to send a response
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: None,
+            error: None,
+        };
+        assert!(state.send_response("test-session", response).await.is_ok());
+
+        // Unregister
+        state.unregister_session("test-session").await;
+
+        // Now sending should fail
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 2,
+            result: None,
+            error: None,
+        };
+        assert!(state.send_response("test-session", response).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_send_response_nonexistent_session() {
+        let state = create_test_state();
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: None,
+            error: None,
+        };
+
+        assert!(state.send_response("nonexistent", response).await.is_err());
+    }
+
+    #[test]
+    fn test_state_with_api_key_chain() {
+        let state = McpHttpState::new(
+            "server",
+            "1.0",
+            HashMap::new(),
+            McpToolContext::default(),
+            "/message",
+        )
+        .with_api_key("secret-key");
+
+        assert!(state.has_auth());
+    }
+
+    #[test]
+    fn test_create_mcp_router() {
+        let state = create_test_state();
+        let _router = create_mcp_router(state);
+        // Router creation should not panic
+    }
+
+    #[test]
+    fn test_create_mcp_router_with_auth() {
+        let state = create_test_state().with_api_key("test-key");
+        let _router = create_mcp_router(state);
+        // Router creation with auth should not panic
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_error() {
+        // Create a tool that always fails
+        let mut tools = HashMap::new();
+        tools.insert(
+            "failing_tool".to_string(),
+            McpServerTool {
+                name: "failing_tool".to_string(),
+                description: "A tool that always fails".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+                executor: Arc::new(ClosureExecutor::new(|_args, _ctx| {
+                    Err("Tool execution failed".to_string())
+                })),
+            },
+        );
+
+        let state = McpHttpState::new(
+            "test-server",
+            "1.0.0",
+            tools,
+            McpToolContext::default(),
+            "/mcp/message",
+        );
+
+        let params = serde_json::json!({
+            "name": "failing_tool",
+            "arguments": {}
+        });
+
+        let response = state.handle_call_tool(100, Some(params)).await;
+        assert_eq!(response.id, 100);
+        assert!(response.error.is_none());
+
+        let result: ToolCallResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(result.is_error);
+        match &result.content[0] {
+            ToolContent::Text { text } => assert_eq!(text, "Tool execution failed"),
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn test_message_url_stored() {
+        let state = McpHttpState::new(
+            "server",
+            "1.0",
+            HashMap::new(),
+            McpToolContext::default(),
+            "http://localhost:8080/mcp/message",
+        );
+
+        assert_eq!(state.message_url, "http://localhost:8080/mcp/message");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_sessions() {
+        let state = create_test_state();
+        let (tx1, _rx1) = mpsc::unbounded_channel::<JsonRpcResponse>();
+        let (tx2, _rx2) = mpsc::unbounded_channel::<JsonRpcResponse>();
+
+        // Register multiple sessions
+        state.register_session("session-1".to_string(), tx1).await;
+        state.register_session("session-2".to_string(), tx2).await;
+
+        // Both should be able to receive responses
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 1,
+            result: None,
+            error: None,
+        };
+
+        assert!(state
+            .send_response("session-1", response.clone())
+            .await
+            .is_ok());
+        assert!(state.send_response("session-2", response).await.is_ok());
+
+        // Unregister one
+        state.unregister_session("session-1").await;
+
+        // Only session-2 should work
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: 2,
+            result: None,
+            error: None,
+        };
+
+        assert!(state
+            .send_response("session-1", response.clone())
+            .await
+            .is_err());
+        assert!(state.send_response("session-2", response).await.is_ok());
+    }
+
+    #[test]
+    fn test_constant_time_eq_unicode() {
+        assert!(constant_time_eq("日本語".as_bytes(), "日本語".as_bytes()));
+        assert!(!constant_time_eq("日本語".as_bytes(), "中文".as_bytes()));
+    }
+
+    #[test]
+    fn test_constant_time_eq_special_chars() {
+        assert!(constant_time_eq(b"!@#$%^&*()", b"!@#$%^&*()"));
+        assert!(!constant_time_eq(b"!@#$%^&*()", b"!@#$%^&*()!"));
+    }
 }

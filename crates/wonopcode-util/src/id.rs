@@ -164,4 +164,65 @@ mod tests {
         assert!(Identifier::part().starts_with("prt_"));
         assert!(Identifier::project().starts_with("prj_"));
     }
+
+    #[test]
+    fn test_id_prefix_as_str_all_variants() {
+        assert_eq!(IdPrefix::Session.as_str(), "ses");
+        assert_eq!(IdPrefix::Message.as_str(), "msg");
+        assert_eq!(IdPrefix::Part.as_str(), "prt");
+        assert_eq!(IdPrefix::Project.as_str(), "prj");
+    }
+
+    #[test]
+    fn test_id_prefix_parse_all_variants() {
+        assert_eq!(IdPrefix::parse("ses"), Some(IdPrefix::Session));
+        assert_eq!(IdPrefix::parse("msg"), Some(IdPrefix::Message));
+        assert_eq!(IdPrefix::parse("prt"), Some(IdPrefix::Part));
+        assert_eq!(IdPrefix::parse("prj"), Some(IdPrefix::Project));
+        assert_eq!(IdPrefix::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_parse_invalid_format_no_underscore() {
+        assert!(Identifier::parse("nounderscore").is_none());
+    }
+
+    #[test]
+    fn test_parse_invalid_format_unknown_prefix() {
+        assert!(Identifier::parse("xyz_01HQXYZ").is_none());
+    }
+
+    #[test]
+    fn test_parse_invalid_ulid() {
+        assert!(Identifier::parse("ses_notaulid").is_none());
+    }
+
+    #[test]
+    fn test_with_ulid() {
+        let ulid = Ulid::new();
+        let id = Identifier::with_ulid(IdPrefix::Message, ulid);
+        assert!(id.starts_with("msg_"));
+        let (_, parsed_ulid) = Identifier::parse(&id).unwrap();
+        assert_eq!(parsed_ulid, ulid);
+    }
+
+    #[test]
+    fn test_has_prefix_without_underscore() {
+        // "ses123" starts with "ses" but doesn't have underscore after
+        assert!(!Identifier::has_prefix("ses123", IdPrefix::Session));
+    }
+
+    #[test]
+    fn test_all_prefixes_different_lengths() {
+        // All our prefixes are 3 chars, verify IDs have correct length
+        let session_id = Identifier::session();
+        let message_id = Identifier::message();
+        let part_id = Identifier::part();
+        let project_id = Identifier::project();
+
+        assert_eq!(session_id.len(), 30);
+        assert_eq!(message_id.len(), 30);
+        assert_eq!(part_id.len(), 30);
+        assert_eq!(project_id.len(), 30);
+    }
 }

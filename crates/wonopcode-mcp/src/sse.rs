@@ -228,6 +228,26 @@ mod tests {
     }
 
     #[test]
+    fn test_sse_config_clone() {
+        let config = SseConfig {
+            url: "https://example.com".to_string(),
+            auth_token: Some("token".to_string()),
+            timeout_secs: 30,
+        };
+        let cloned = config;
+        assert_eq!(cloned.url, "https://example.com");
+        assert_eq!(cloned.auth_token, Some("token".to_string()));
+        assert_eq!(cloned.timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_sse_config_debug() {
+        let config = SseConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("SseConfig"));
+    }
+
+    #[test]
     fn test_sse_transport_creation() {
         let config = SseConfig {
             url: "https://example.com/mcp".to_string(),
@@ -237,5 +257,145 @@ mod tests {
 
         let transport = SseTransport::new(config);
         assert!(transport.is_ok());
+    }
+
+    #[test]
+    fn test_sse_transport_creation_no_auth() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        assert!(!transport.is_connected());
+    }
+
+    #[test]
+    fn test_sse_transport_set_auth_token() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let mut transport = SseTransport::new(config).unwrap();
+        assert!(transport.config.auth_token.is_none());
+
+        transport.set_auth_token("new-token".to_string());
+        assert_eq!(transport.config.auth_token, Some("new-token".to_string()));
+    }
+
+    #[test]
+    fn test_sse_transport_is_connected_initially_false() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        assert!(!transport.is_connected());
+    }
+
+    #[tokio::test]
+    async fn test_sse_transport_close() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        // Set connected to true
+        transport.connected.store(true, Ordering::SeqCst);
+        assert!(transport.is_connected());
+
+        // Close should set connected to false
+        let result = transport.close().await;
+        assert!(result.is_ok());
+        assert!(!transport.is_connected());
+    }
+
+    #[test]
+    fn test_sse_transport_build_request_with_auth() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: Some("test-token".to_string()),
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        let _request = transport.build_request(r#"{"test": true}"#);
+        // Verify the config was set correctly
+        assert_eq!(transport.config.url, "https://example.com/mcp");
+        assert!(transport.config.auth_token.is_some());
+    }
+
+    #[test]
+    fn test_sse_transport_build_request_without_auth() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        let _request = transport.build_request(r#"{"test": true}"#);
+        // Verify the config was set correctly
+        assert_eq!(transport.config.url, "https://example.com/mcp");
+        assert!(transport.config.auth_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sse_transport_request_connection_refused() {
+        let config = SseConfig {
+            url: "http://127.0.0.1:1".to_string(), // Invalid port
+            auth_token: None,
+            timeout_secs: 1,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            method: "test".to_string(),
+            params: None,
+        };
+
+        let result = transport.request(request).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sse_transport_notify_connection_refused() {
+        let config = SseConfig {
+            url: "http://127.0.0.1:1".to_string(), // Invalid port
+            auth_token: None,
+            timeout_secs: 1,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        let notification = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "test".to_string(),
+            params: None,
+        };
+
+        let result = transport.notify(notification).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sse_transport_session_id_initially_none() {
+        let config = SseConfig {
+            url: "https://example.com/mcp".to_string(),
+            auth_token: None,
+            timeout_secs: 60,
+        };
+
+        let transport = SseTransport::new(config).unwrap();
+        let session_id = transport.session_id.read().await;
+        assert!(session_id.is_none());
     }
 }

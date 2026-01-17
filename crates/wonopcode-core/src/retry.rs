@@ -249,6 +249,13 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_delay_caps_at_max() {
+        // Very high attempt number should cap at max
+        let delay = calculate_delay(20, None);
+        assert_eq!(delay, Duration::from_millis(RETRY_MAX_DELAY_NO_HEADERS_MS));
+    }
+
+    #[test]
     fn test_calculate_delay_with_retry_after() {
         let info = RateLimitInfo {
             retry_after_ms: Some(5000),
@@ -256,6 +263,81 @@ mod tests {
         };
         let delay = calculate_delay(1, Some(&info));
         assert_eq!(delay, Duration::from_millis(5000));
+    }
+
+    #[test]
+    fn test_calculate_delay_with_retry_after_secs() {
+        let info = RateLimitInfo {
+            retry_after_ms: None,
+            retry_after_secs: Some(10),
+            reset_at: None,
+        };
+        let delay = calculate_delay(1, Some(&info));
+        assert_eq!(delay, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_calculate_delay_retry_after_ms_takes_precedence() {
+        let info = RateLimitInfo {
+            retry_after_ms: Some(500),
+            retry_after_secs: Some(60),
+            reset_at: None,
+        };
+        let delay = calculate_delay(1, Some(&info));
+        assert_eq!(delay, Duration::from_millis(500)); // ms takes precedence
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_retry_after_ms() {
+        let headers = vec![("retry-after-ms".to_string(), "1500".to_string())];
+        let info = RateLimitInfo::from_headers(&headers).unwrap();
+        assert_eq!(info.retry_after_ms, Some(1500));
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_retry_after() {
+        let headers = vec![("Retry-After".to_string(), "30".to_string())];
+        let info = RateLimitInfo::from_headers(&headers).unwrap();
+        assert_eq!(info.retry_after_secs, Some(30));
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_reset() {
+        let headers = vec![("x-ratelimit-reset".to_string(), "1234567890".to_string())];
+        let info = RateLimitInfo::from_headers(&headers).unwrap();
+        assert_eq!(info.reset_at, Some(1234567890));
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_alt_reset() {
+        let headers = vec![("X-Rate-Limit-Reset".to_string(), "9876543210".to_string())];
+        let info = RateLimitInfo::from_headers(&headers).unwrap();
+        assert_eq!(info.reset_at, Some(9876543210));
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_empty() {
+        let headers: Vec<(String, String)> = vec![];
+        let info = RateLimitInfo::from_headers(&headers);
+        assert!(info.is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_info_from_headers_invalid_values() {
+        let headers = vec![
+            ("retry-after-ms".to_string(), "not_a_number".to_string()),
+            ("x-ratelimit-reset".to_string(), "also_not".to_string()),
+        ];
+        let info = RateLimitInfo::from_headers(&headers);
+        assert!(info.is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_info_default() {
+        let info = RateLimitInfo::default();
+        assert!(info.retry_after_ms.is_none());
+        assert!(info.retry_after_secs.is_none());
+        assert!(info.reset_at.is_none());
     }
 
     #[test]
@@ -282,6 +364,66 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_error_server_errors() {
+        for status in [500, 502, 503, 504, 520, 599] {
+            assert!(matches!(
+                classify_error(Some(status), ""),
+                RetryableError::ServerError { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn test_classify_error_message_rate_limit() {
+        assert!(matches!(
+            classify_error(None, "rate_limit exceeded"),
+            RetryableError::RateLimited { .. }
+        ));
+        assert!(matches!(
+            classify_error(None, "too_many_requests please slow down"),
+            RetryableError::RateLimited { .. }
+        ));
+    }
+
+    #[test]
+    fn test_classify_error_message_server_error() {
+        assert!(matches!(
+            classify_error(None, "server_error occurred"),
+            RetryableError::ServerError { .. }
+        ));
+        assert!(matches!(
+            classify_error(None, "internal_error please try again"),
+            RetryableError::ServerError { .. }
+        ));
+    }
+
+    #[test]
+    fn test_classify_error_message_exhausted() {
+        assert!(matches!(
+            classify_error(None, "resources exhausted"),
+            RetryableError::Overloaded { .. }
+        ));
+        assert!(matches!(
+            classify_error(None, "service unavailable"),
+            RetryableError::Overloaded { .. }
+        ));
+    }
+
+    #[test]
+    fn test_should_retry() {
+        assert!(should_retry(&RetryableError::RateLimited {
+            message: "test".to_string()
+        }));
+        assert!(should_retry(&RetryableError::Overloaded {
+            message: "test".to_string()
+        }));
+        assert!(should_retry(&RetryableError::ServerError {
+            message: "test".to_string()
+        }));
+        assert!(!should_retry(&RetryableError::NotRetryable));
+    }
+
+    #[test]
     fn test_retry_helper() {
         let mut helper = RetryHelper::new(3);
 
@@ -295,5 +437,45 @@ mod tests {
         assert_eq!(helper.current_attempt(), 3);
 
         assert!(helper.next_attempt(None).is_none());
+    }
+
+    #[test]
+    fn test_retry_helper_default_attempts() {
+        let mut helper = RetryHelper::default_attempts();
+        // Should allow RETRY_MAX_ATTEMPTS attempts
+        for _ in 0..RETRY_MAX_ATTEMPTS {
+            assert!(helper.next_attempt(None).is_some());
+        }
+        assert!(helper.next_attempt(None).is_none());
+    }
+
+    #[test]
+    fn test_retry_helper_with_rate_limit() {
+        let mut helper = RetryHelper::new(3);
+        let info = RateLimitInfo {
+            retry_after_ms: Some(100),
+            ..Default::default()
+        };
+        let delay = helper.next_attempt(Some(&info)).unwrap();
+        assert_eq!(delay, Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    async fn test_sleep_with_cancel_completes() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let result = sleep_with_cancel(Duration::from_millis(10), &token).await;
+        assert!(result); // Completed without cancellation
+    }
+
+    #[tokio::test]
+    async fn test_sleep_with_cancel_cancelled() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let token_clone = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            token_clone.cancel();
+        });
+        let result = sleep_with_cancel(Duration::from_secs(10), &token).await;
+        assert!(!result); // Cancelled
     }
 }

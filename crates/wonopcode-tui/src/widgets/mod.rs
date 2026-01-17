@@ -1,7 +1,6 @@
 //! UI widgets for the TUI.
 
 pub mod autocomplete;
-pub mod dialog;
 pub mod diff;
 pub mod footer;
 pub mod help_overlay;
@@ -21,6 +20,11 @@ pub mod timeline;
 pub mod toast;
 pub mod topbar;
 pub mod which_key;
+
+// Re-export dialog types from wonopcode-tui-dialog
+pub mod dialog {
+    pub use wonopcode_tui_dialog::*;
+}
 
 pub use autocomplete::{AutocompleteAction, FileAutocomplete};
 pub use dialog::{

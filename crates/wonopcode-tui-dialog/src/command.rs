@@ -7,9 +7,9 @@
 use crossterm::event::KeyEvent;
 use ratatui::{layout::Rect, Frame};
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::{DialogItem, SelectDialog};
+use crate::common::{DialogItem, SelectDialog};
 
 /// Command palette dialog.
 #[derive(Debug, Clone)]

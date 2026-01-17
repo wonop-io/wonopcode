@@ -42,7 +42,7 @@ jobs:
 
       - name: Generate coverage summary
         run: |
-          cargo llvm-cov report --all-features --workspace \
+          cargo llvm-cov report \
             --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' \
             > coverage-summary.txt
           echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
@@ -62,7 +62,7 @@ jobs:
       - name: Check coverage threshold
         run: |
           # Extract total line coverage percentage
-          COVERAGE=$(cargo llvm-cov report --all-features --workspace \
+          COVERAGE=$(cargo llvm-cov report \
             --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' 2>/dev/null \
             | grep -E '^TOTAL' | awk '{print $NF}' | tr -d '%')
 

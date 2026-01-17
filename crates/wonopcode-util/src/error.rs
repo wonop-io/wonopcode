@@ -135,4 +135,49 @@ mod tests {
         let err: Error = io_err.into();
         assert_eq!(err.kind(), ErrorKind::Io);
     }
+
+    #[test]
+    fn test_error_io() {
+        let err = Error::io("disk full");
+        assert_eq!(err.kind(), ErrorKind::Io);
+        assert_eq!(err.to_string(), "disk full");
+    }
+
+    #[test]
+    fn test_error_not_found() {
+        let err = Error::not_found("file not found");
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_error_permission_denied() {
+        let err = Error::permission_denied("access denied");
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn test_error_internal() {
+        let err = Error::internal("unexpected state");
+        assert_eq!(err.kind(), ErrorKind::Internal);
+    }
+
+    #[test]
+    fn test_error_from_serde_json() {
+        let json_err = serde_json::from_str::<String>("invalid").unwrap_err();
+        let err: Error = json_err.into();
+        assert_eq!(err.kind(), ErrorKind::Serialization);
+    }
+
+    #[test]
+    fn test_error_without_source() {
+        let err = Error::new(ErrorKind::Config, "invalid config");
+        assert!(StdError::source(&err).is_none());
+        assert_eq!(err.kind(), ErrorKind::Config);
+    }
+
+    #[test]
+    fn test_error_kind_equality() {
+        assert_eq!(ErrorKind::InvalidInput, ErrorKind::InvalidInput);
+        assert_ne!(ErrorKind::InvalidInput, ErrorKind::Io);
+    }
 }

@@ -1207,7 +1207,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded global MCP servers from .mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(global_mcp_path);
                         }
                     }
@@ -1252,7 +1254,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded project MCP servers from .mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(project_mcp_path);
                         }
                     }
@@ -1278,7 +1282,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded VS Code MCP servers from .vscode/mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(vscode_mcp_path);
                         }
                     }
@@ -1420,8 +1426,6 @@ impl Config {
         })
     }
 
-
-
     /// Merge another config into this one (other takes precedence).
     pub fn merge(mut self, other: Self) -> Self {
         // Simple fields - other overwrites if Some
@@ -1523,6 +1527,92 @@ fn merge_hashmap<K: std::hash::Hash + Eq, V>(
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // UX-Critical: Variable Substitution Tests
+    // If these fail, users' API keys and secrets won't be loaded correctly
+    // =========================================================================
+
+    #[test]
+    fn user_env_variables_are_substituted_in_config() {
+        // UX: Users commonly store API keys in environment variables
+        // If this fails, their provider configurations won't work
+        std::env::set_var("TEST_API_KEY_12345", "secret-key-value");
+
+        let content =
+            r#"{"provider": {"openai": {"options": {"api_key": "{env:TEST_API_KEY_12345}"}}}}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json")).unwrap();
+
+        assert!(
+            result.contains("secret-key-value"),
+            "Environment variable should be substituted"
+        );
+        assert!(
+            !result.contains("{env:"),
+            "Substitution placeholder should be removed"
+        );
+
+        std::env::remove_var("TEST_API_KEY_12345");
+    }
+
+    #[test]
+    fn missing_env_variable_returns_helpful_error() {
+        // UX: When users forget to set an env var, they should get a clear error
+        // not a cryptic parsing failure
+        let content = r#"{"api_key": "{env:NONEXISTENT_VAR_THAT_DOES_NOT_EXIST}"}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json"));
+
+        assert!(result.is_err(), "Missing env var should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("NONEXISTENT_VAR_THAT_DOES_NOT_EXIST"),
+            "Error should mention the missing variable name: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn user_file_references_are_substituted() {
+        // UX: Users can store secrets in files (e.g., for Docker secrets)
+        let dir = tempfile::tempdir().unwrap();
+        let secret_path = dir.path().join("api_key.txt");
+        tokio::fs::write(&secret_path, "my-secret-from-file\n")
+            .await
+            .unwrap();
+
+        let content = r#"{"api_key": "{file:api_key.txt}"}"#;
+        let config_path = dir.path().join("config.json");
+        let result = substitute_variables(content, &config_path).unwrap();
+
+        assert!(
+            result.contains("my-secret-from-file"),
+            "File content should be substituted"
+        );
+        assert!(
+            !result.contains("{file:"),
+            "Substitution placeholder should be removed"
+        );
+    }
+
+    #[test]
+    fn missing_file_reference_returns_helpful_error() {
+        // UX: When users reference a non-existent file, the error should be clear
+        let content = r#"{"api_key": "{file:nonexistent_secret.txt}"}"#;
+        let result = substitute_variables(content, Path::new("/tmp/config.json"));
+
+        assert!(result.is_err(), "Missing file should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nonexistent_secret.txt"),
+            "Error should mention the missing file: {}",
+            err
+        );
+    }
+
+    // =========================================================================
+    // UX-Critical: JSONC Comment Stripping Tests
+    // If these fail, users' commented configs will fail to parse
+    // =========================================================================
+
     #[test]
     fn test_strip_comments() {
         let input = r#"{
@@ -1537,6 +1627,43 @@ mod tests {
         assert!(!result.contains("trailing comment"));
         assert!(!result.contains("block comment"));
         assert!(result.contains("val/*not a comment*/ue"));
+    }
+
+    #[test]
+    fn test_strip_comments_escaped_quotes() {
+        // Test that escaped quotes in strings don't break comment detection
+        let input = r#"{"key": "value with \"escaped\" quote"}"#;
+        let result = strip_comments(input);
+        assert_eq!(result, input); // No change expected
+    }
+
+    #[test]
+    fn test_strip_comments_multiline_block() {
+        // Test multi-line block comment with newlines preserved
+        let input = "{\n/* comment\nspanning\nlines */\n\"key\": \"value\"\n}";
+        let result = strip_comments(input);
+        assert!(result.contains("\"key\""));
+        assert!(!result.contains("comment"));
+        assert!(!result.contains("spanning"));
+        // Newlines should be preserved
+        assert!(result.contains('\n'));
+    }
+
+    #[test]
+    fn test_strip_comments_no_comments() {
+        // Test input without any comments
+        let input = r#"{"key": "value"}"#;
+        let result = strip_comments(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_strip_comments_line_ending() {
+        // Test line comment at end of input (no newline)
+        let input = r#"{"key": "value"} // end comment"#;
+        let result = strip_comments(input);
+        assert!(result.contains("\"key\""));
+        assert!(!result.contains("end comment"));
     }
 
     #[test]
@@ -1911,13 +2038,851 @@ mod tests {
         // Load config from directory
         let (config, sources) = Config::load(Some(dir.path())).await.unwrap();
 
-        // Verify .vscode/mcp.json was loaded
-        assert!(sources.iter().any(|s| s
-            .to_string_lossy()
-            .contains(".vscode/mcp.json")));
+        // Verify .vscode/mcp.json was loaded (use path components for cross-platform)
+        assert!(sources.iter().any(|s| {
+            let path_str = s.to_string_lossy();
+            path_str.contains(".vscode") && path_str.contains("mcp.json")
+        }));
 
         // Verify MCP servers were loaded
         let mcp = config.mcp.expect("MCP config should be present");
         assert!(mcp.contains_key("vscode-server"));
+    }
+
+    // =========================================================================
+    // UX-Critical: Config Loading Priority Tests
+    // If these fail, users' project-specific settings won't override global ones
+    // =========================================================================
+
+    #[tokio::test]
+    async fn project_config_overrides_global_settings() {
+        // UX: Users expect project config to override their global config
+        // This is critical for per-project model selection, permissions, etc.
+        let project_dir = tempfile::tempdir().unwrap();
+
+        // Create project config with specific settings
+        let project_config = r#"{
+            "model": "anthropic/claude-3-5-sonnet",
+            "theme": "tokyo-night"
+        }"#;
+        tokio::fs::write(project_dir.path().join("wonopcode.json"), project_config)
+            .await
+            .unwrap();
+
+        // Load config
+        let (config, _) = Config::load(Some(project_dir.path())).await.unwrap();
+
+        // Verify project settings are applied
+        assert_eq!(
+            config.model,
+            Some("anthropic/claude-3-5-sonnet".to_string())
+        );
+        assert_eq!(config.theme, Some("tokyo-night".to_string()));
+    }
+
+    #[tokio::test]
+    async fn config_loads_without_any_config_files() {
+        // UX: App should work out of the box without requiring config files
+        let empty_dir = tempfile::tempdir().unwrap();
+
+        let (config, sources) = Config::load(Some(empty_dir.path())).await.unwrap();
+
+        // Should return default config with no sources
+        assert!(sources.is_empty() || sources.iter().all(|s| !s.starts_with(empty_dir.path())));
+        // Default values should be usable
+        assert!(config.theme.is_none()); // Will use built-in default
+        assert!(config.model.is_none()); // Will use built-in default
+    }
+
+    #[tokio::test]
+    async fn invalid_json_shows_file_path_in_error() {
+        // UX: When config parsing fails, users need to know WHICH file is broken
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("wonopcode.json");
+
+        // Create invalid JSON
+        tokio::fs::write(&config_path, r#"{ "theme": "dark", invalid }"#)
+            .await
+            .unwrap();
+
+        let result = Config::load_file(&config_path).await;
+
+        assert!(result.is_err(), "Invalid JSON should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("wonopcode.json") || err.contains("invalid"),
+            "Error should mention the file or parse error: {}",
+            err
+        );
+    }
+
+    // =========================================================================
+    // UX-Critical: Permission Configuration Tests
+    // If these fail, security-critical permission settings won't work
+    // =========================================================================
+
+    #[test]
+    fn permission_config_parses_simple_values() {
+        // UX: Users configure permissions to control what the AI can do
+        let json = r#"{
+            "permission": {
+                "edit": "allow",
+                "webfetch": "ask",
+                "external_directory": "deny"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let perm = config.permission.unwrap();
+
+        assert_eq!(perm.edit, Some(Permission::Allow));
+        assert_eq!(perm.webfetch, Some(Permission::Ask));
+        assert_eq!(perm.external_directory, Some(Permission::Deny));
+    }
+
+    #[test]
+    fn permission_config_parses_pattern_maps() {
+        // UX: Users can set different permissions for different command patterns
+        let json = r#"{
+            "permission": {
+                "bash": {
+                    "git *": "allow",
+                    "rm -rf *": "deny",
+                    "*": "ask"
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let perm = config.permission.unwrap();
+
+        match perm.bash {
+            Some(PermissionOrMap::Map(map)) => {
+                assert_eq!(map.get("git *"), Some(&Permission::Allow));
+                assert_eq!(map.get("rm -rf *"), Some(&Permission::Deny));
+                assert_eq!(map.get("*"), Some(&Permission::Ask));
+            }
+            _ => panic!("Expected permission map for bash"),
+        }
+    }
+
+    // =========================================================================
+    // UX-Critical: Sandbox Configuration Tests
+    // If these fail, isolated execution won't work correctly
+    // =========================================================================
+
+    #[test]
+    fn sandbox_config_parses_all_options() {
+        // UX: Users configure sandbox for secure code execution
+        let json = r#"{
+            "sandbox": {
+                "enabled": true,
+                "runtime": "docker",
+                "image": "node:20",
+                "network": "limited",
+                "resources": {
+                    "memory": "2G",
+                    "cpus": 2.0,
+                    "pids": 100
+                },
+                "mounts": {
+                    "workspace_writable": true,
+                    "persist_caches": true
+                },
+                "bypass_tools": ["read", "glob"]
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let sandbox = config.sandbox.unwrap();
+
+        assert_eq!(sandbox.enabled, Some(true));
+        assert_eq!(sandbox.runtime, Some("docker".to_string()));
+        assert_eq!(sandbox.image, Some("node:20".to_string()));
+        assert_eq!(sandbox.network, Some("limited".to_string()));
+
+        let resources = sandbox.resources.unwrap();
+        assert_eq!(resources.memory, Some("2G".to_string()));
+        assert_eq!(resources.cpus, Some(2.0));
+        assert_eq!(resources.pids, Some(100));
+
+        let mounts = sandbox.mounts.unwrap();
+        assert_eq!(mounts.workspace_writable, Some(true));
+        assert_eq!(mounts.persist_caches, Some(true));
+
+        let bypass = sandbox.bypass_tools.unwrap();
+        assert!(bypass.contains(&"read".to_string()));
+        assert!(bypass.contains(&"glob".to_string()));
+    }
+
+    // =========================================================================
+    // UX-Critical: Agent Configuration Tests
+    // If these fail, custom agents won't work correctly
+    // =========================================================================
+
+    #[test]
+    fn agent_config_with_all_options() {
+        // UX: Users create custom agents with specific behaviors
+        let json = r##"{
+            "agent": {
+                "code-review": {
+                    "model": "anthropic/claude-3-5-sonnet",
+                    "temperature": 0.3,
+                    "prompt": "You are a code reviewer. Be thorough and constructive.",
+                    "tools": {
+                        "bash": false,
+                        "read": true,
+                        "write": false
+                    },
+                    "mode": "subagent",
+                    "max_steps": 10,
+                    "color": "#FF5733"
+                }
+            }
+        }"##;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let agents = config.agent.unwrap();
+        let reviewer = agents.get("code-review").unwrap();
+
+        assert_eq!(
+            reviewer.model,
+            Some("anthropic/claude-3-5-sonnet".to_string())
+        );
+        assert_eq!(reviewer.temperature, Some(0.3));
+        assert!(reviewer.prompt.as_ref().unwrap().contains("code reviewer"));
+        assert_eq!(reviewer.mode, Some(AgentMode::Subagent));
+        assert_eq!(reviewer.max_steps, Some(10));
+        assert_eq!(reviewer.color, Some("#FF5733".to_string()));
+
+        let tools = reviewer.tools.as_ref().unwrap();
+        assert_eq!(tools.get("bash"), Some(&false));
+        assert_eq!(tools.get("read"), Some(&true));
+        assert_eq!(tools.get("write"), Some(&false));
+    }
+
+    // =========================================================================
+    // UX-Critical: Model Parsing Tests
+    // If these fail, users can't switch between AI providers
+    // =========================================================================
+
+    #[test]
+    fn model_string_parses_provider_and_name() {
+        // UX: Users specify models as "provider/model-name"
+        assert_eq!(
+            Config::parse_model("anthropic/claude-3-5-sonnet"),
+            Some(("anthropic", "claude-3-5-sonnet"))
+        );
+        assert_eq!(
+            Config::parse_model("openai/gpt-4o"),
+            Some(("openai", "gpt-4o"))
+        );
+        assert_eq!(
+            Config::parse_model("google/gemini-2.0-flash"),
+            Some(("google", "gemini-2.0-flash"))
+        );
+    }
+
+    #[test]
+    fn invalid_model_strings_return_none() {
+        // UX: Invalid model strings should be handled gracefully
+        assert_eq!(Config::parse_model("invalid"), None);
+        assert_eq!(Config::parse_model(""), None);
+        assert_eq!(Config::parse_model("no-slash-here"), None);
+    }
+
+    #[test]
+    fn model_with_multiple_slashes_parses_correctly() {
+        // UX: Some model names might contain slashes (e.g., org/repo/model)
+        let result = Config::parse_model("openrouter/anthropic/claude-3");
+        // Should split on first slash
+        assert_eq!(result, Some(("openrouter", "anthropic/claude-3")));
+    }
+
+    // =========================================================================
+    // UX-Critical: TUI Configuration Tests
+    // If these fail, the user interface won't behave as configured
+    // =========================================================================
+
+    #[test]
+    fn tui_config_merge_preserves_unset_fields() {
+        // UX: When updating TUI settings, only changed fields should be affected
+        let base = TuiConfig {
+            mouse: Some(true),
+            markdown: Some(true),
+            syntax_highlighting: Some(true),
+            ..Default::default()
+        };
+
+        let update = TuiConfig {
+            markdown: Some(false), // Only changing this
+            ..Default::default()
+        };
+
+        let merged = base.merge(update);
+
+        assert_eq!(merged.mouse, Some(true)); // Preserved
+        assert_eq!(merged.markdown, Some(false)); // Updated
+        assert_eq!(merged.syntax_highlighting, Some(true)); // Preserved
+    }
+
+    #[test]
+    fn tui_config_merge_all_fields() {
+        // Test that all TuiConfig fields can be merged
+        let base = TuiConfig {
+            disabled: Some(false),
+            mouse: Some(true),
+            paste: Some(PasteMode::Bracketed),
+            markdown: Some(true),
+            syntax_highlighting: Some(true),
+            code_backgrounds: Some(false),
+            tables: Some(true),
+            streaming_fps: Some(30),
+            max_messages: Some(100),
+            low_memory_mode: Some(false),
+            enable_test_commands: Some(false),
+            test_model_enabled: Some(false),
+            test_emulate_thinking: Some(false),
+            test_emulate_tool_calls: Some(false),
+            test_emulate_tool_observed: Some(false),
+            test_emulate_streaming: Some(false),
+        };
+
+        // Update with new values for all fields
+        let update = TuiConfig {
+            disabled: Some(true),
+            mouse: Some(false),
+            paste: Some(PasteMode::Direct),
+            markdown: Some(false),
+            syntax_highlighting: Some(false),
+            code_backgrounds: Some(true),
+            tables: Some(false),
+            streaming_fps: Some(60),
+            max_messages: Some(200),
+            low_memory_mode: Some(true),
+            enable_test_commands: Some(true),
+            test_model_enabled: Some(true),
+            test_emulate_thinking: Some(true),
+            test_emulate_tool_calls: Some(true),
+            test_emulate_tool_observed: Some(true),
+            test_emulate_streaming: Some(true),
+        };
+
+        let merged = base.merge(update);
+
+        // All fields should be updated
+        assert_eq!(merged.disabled, Some(true));
+        assert_eq!(merged.mouse, Some(false));
+        assert_eq!(merged.paste, Some(PasteMode::Direct));
+        assert_eq!(merged.markdown, Some(false));
+        assert_eq!(merged.syntax_highlighting, Some(false));
+        assert_eq!(merged.code_backgrounds, Some(true));
+        assert_eq!(merged.tables, Some(false));
+        assert_eq!(merged.streaming_fps, Some(60));
+        assert_eq!(merged.max_messages, Some(200));
+        assert_eq!(merged.low_memory_mode, Some(true));
+        assert_eq!(merged.enable_test_commands, Some(true));
+        assert_eq!(merged.test_model_enabled, Some(true));
+        assert_eq!(merged.test_emulate_thinking, Some(true));
+        assert_eq!(merged.test_emulate_tool_calls, Some(true));
+        assert_eq!(merged.test_emulate_tool_observed, Some(true));
+        assert_eq!(merged.test_emulate_streaming, Some(true));
+    }
+
+    #[test]
+    fn tui_config_default() {
+        let config = TuiConfig::default();
+        assert!(config.disabled.is_none());
+        assert!(config.mouse.is_none());
+        assert!(config.paste.is_none());
+        assert!(config.markdown.is_none());
+        assert!(config.syntax_highlighting.is_none());
+        assert!(config.code_backgrounds.is_none());
+        assert!(config.tables.is_none());
+        assert!(config.streaming_fps.is_none());
+        assert!(config.max_messages.is_none());
+        assert!(config.low_memory_mode.is_none());
+        assert!(config.enable_test_commands.is_none());
+        assert!(config.test_model_enabled.is_none());
+        assert!(config.test_emulate_thinking.is_none());
+        assert!(config.test_emulate_tool_calls.is_none());
+        assert!(config.test_emulate_tool_observed.is_none());
+        assert!(config.test_emulate_streaming.is_none());
+    }
+
+    #[test]
+    fn paste_mode_serialization() {
+        let bracketed = PasteMode::Bracketed;
+        let json = serde_json::to_string(&bracketed).unwrap();
+        assert_eq!(json, r#""bracketed""#);
+
+        let direct = PasteMode::Direct;
+        let json = serde_json::to_string(&direct).unwrap();
+        assert_eq!(json, r#""direct""#);
+
+        let parsed: PasteMode = serde_json::from_str(r#""bracketed""#).unwrap();
+        assert_eq!(parsed, PasteMode::Bracketed);
+    }
+
+    #[test]
+    fn log_level_serialization() {
+        let debug = LogLevel::Debug;
+        let json = serde_json::to_string(&debug).unwrap();
+        assert_eq!(json, r#""debug""#);
+
+        let info = LogLevel::Info;
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#""info""#);
+
+        let warn = LogLevel::Warn;
+        let json = serde_json::to_string(&warn).unwrap();
+        assert_eq!(json, r#""warn""#);
+
+        let error = LogLevel::Error;
+        let json = serde_json::to_string(&error).unwrap();
+        assert_eq!(json, r#""error""#);
+
+        let parsed: LogLevel = serde_json::from_str(r#""debug""#).unwrap();
+        assert_eq!(parsed, LogLevel::Debug);
+    }
+
+    #[test]
+    fn share_mode_serialization() {
+        let manual = ShareMode::Manual;
+        let json = serde_json::to_string(&manual).unwrap();
+        assert_eq!(json, r#""manual""#);
+
+        let auto = ShareMode::Auto;
+        let json = serde_json::to_string(&auto).unwrap();
+        assert_eq!(json, r#""auto""#);
+
+        let disabled = ShareMode::Disabled;
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, r#""disabled""#);
+
+        let parsed: ShareMode = serde_json::from_str(r#""manual""#).unwrap();
+        assert_eq!(parsed, ShareMode::Manual);
+    }
+
+    #[test]
+    fn auto_update_serialization() {
+        let enabled = AutoUpdate::Bool(true);
+        let json = serde_json::to_string(&enabled).unwrap();
+        assert_eq!(json, "true");
+
+        let disabled = AutoUpdate::Bool(false);
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, "false");
+
+        let parsed: AutoUpdate = serde_json::from_str("true").unwrap();
+        assert_eq!(parsed, AutoUpdate::Bool(true));
+    }
+
+    #[test]
+    fn agent_mode_serialization() {
+        let subagent = AgentMode::Subagent;
+        let json = serde_json::to_string(&subagent).unwrap();
+        assert_eq!(json, r#""subagent""#);
+
+        let primary = AgentMode::Primary;
+        let json = serde_json::to_string(&primary).unwrap();
+        assert_eq!(json, r#""primary""#);
+
+        let all = AgentMode::All;
+        let json = serde_json::to_string(&all).unwrap();
+        assert_eq!(json, r#""all""#);
+
+        let parsed: AgentMode = serde_json::from_str(r#""subagent""#).unwrap();
+        assert_eq!(parsed, AgentMode::Subagent);
+    }
+
+    #[test]
+    fn timeout_config_serialization() {
+        let disabled = TimeoutConfig::Disabled(false);
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, "false");
+
+        let ms = TimeoutConfig::Milliseconds(5000);
+        let json = serde_json::to_string(&ms).unwrap();
+        assert_eq!(json, "5000");
+
+        let parsed: TimeoutConfig = serde_json::from_str("false").unwrap();
+        match parsed {
+            TimeoutConfig::Disabled(v) => assert!(!v),
+            _ => panic!("Expected Disabled"),
+        }
+
+        let parsed: TimeoutConfig = serde_json::from_str("5000").unwrap();
+        match parsed {
+            TimeoutConfig::Milliseconds(v) => assert_eq!(v, 5000),
+            _ => panic!("Expected Milliseconds"),
+        }
+    }
+
+    #[test]
+    fn auto_update_mode_serialization() {
+        let auto = AutoUpdateMode::Auto;
+        let json = serde_json::to_string(&auto).unwrap();
+        assert_eq!(json, r#""auto""#);
+
+        let notify = AutoUpdateMode::Notify;
+        let json = serde_json::to_string(&notify).unwrap();
+        assert_eq!(json, r#""notify""#);
+
+        let disabled = AutoUpdateMode::Disabled;
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, r#""disabled""#);
+
+        let parsed: AutoUpdateMode = serde_json::from_str(r#""auto""#).unwrap();
+        assert_eq!(parsed, AutoUpdateMode::Auto);
+
+        // Test default
+        let default = AutoUpdateMode::default();
+        assert_eq!(default, AutoUpdateMode::Notify);
+    }
+
+    #[test]
+    fn config_default() {
+        let config = Config::default();
+        assert!(config.schema.is_none());
+        assert!(config.theme.is_none());
+        assert!(config.log_level.is_none());
+        assert!(config.model.is_none());
+        assert!(config.small_model.is_none());
+        assert!(config.default_agent.is_none());
+        assert!(config.username.is_none());
+        assert!(config.snapshot.is_none());
+        assert!(config.share.is_none());
+        assert!(config.autoupdate.is_none());
+    }
+
+    #[test]
+    fn mcp_local_config_serialization() {
+        let config = McpLocalConfig {
+            command: vec!["npx".to_string(), "server".to_string()],
+            environment: Some([("KEY".to_string(), "value".to_string())].into()),
+            enabled: Some(true),
+            timeout: Some(5000),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("npx"));
+        assert!(json.contains("KEY"));
+
+        let parsed: McpLocalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.command, vec!["npx", "server"]);
+        assert_eq!(parsed.enabled, Some(true));
+        assert_eq!(parsed.timeout, Some(5000));
+    }
+
+    #[test]
+    fn mcp_remote_config_serialization() {
+        let config = McpRemoteConfig {
+            url: "https://example.com/mcp".to_string(),
+            enabled: Some(true),
+            headers: Some([("Auth".to_string(), "token".to_string())].into()),
+            oauth: None,
+            timeout: Some(10000),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("example.com"));
+
+        let parsed: McpRemoteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.url, "https://example.com/mcp");
+        assert_eq!(parsed.timeout, Some(10000));
+    }
+
+    #[test]
+    fn mcp_oauth_config_default() {
+        let oauth = McpOAuthConfig::default();
+        assert!(oauth.client_id.is_none());
+        assert!(oauth.client_secret.is_none());
+        assert!(oauth.scope.is_none());
+    }
+
+    #[test]
+    fn keybinds_config_default() {
+        let config = KeybindsConfig::default();
+        assert!(config.leader.is_none());
+        assert!(config.app_exit.is_none());
+        assert!(config.editor_open.is_none());
+        assert!(config.theme_list.is_none());
+        assert!(config.sidebar_toggle.is_none());
+        assert!(config.session_new.is_none());
+        assert!(config.session_list.is_none());
+        assert!(config.extra.is_empty());
+    }
+
+    #[test]
+    fn server_config_default() {
+        let config = ServerConfig::default();
+        assert!(config.disabled.is_none());
+        assert!(config.port.is_none());
+        assert!(config.api_key.is_none());
+    }
+
+    #[test]
+    fn agent_config_default() {
+        let config = AgentConfig::default();
+        assert!(config.model.is_none());
+        assert!(config.temperature.is_none());
+        assert!(config.top_p.is_none());
+        assert!(config.prompt.is_none());
+        assert!(config.tools.is_none());
+        assert!(config.disable.is_none());
+        assert!(config.description.is_none());
+        assert!(config.mode.is_none());
+        assert!(config.color.is_none());
+        assert!(config.max_steps.is_none());
+        assert!(config.permission.is_none());
+        assert!(config.sandbox.is_none());
+    }
+
+    #[test]
+    fn provider_config_default() {
+        let config = ProviderConfig::default();
+        assert!(config.api.is_none());
+        assert!(config.name.is_none());
+        assert!(config.env.is_none());
+        assert!(config.id.is_none());
+        assert!(config.whitelist.is_none());
+        assert!(config.blacklist.is_none());
+        assert!(config.models.is_none());
+        assert!(config.options.is_none());
+    }
+
+    #[test]
+    fn provider_options_default() {
+        let options = ProviderOptions::default();
+        assert!(options.api_key.is_none());
+        assert!(options.base_url.is_none());
+        assert!(options.timeout.is_none());
+        assert!(options.extra.is_empty());
+    }
+
+    #[test]
+    fn model_override_default() {
+        let override_ = ModelOverride::default();
+        assert!(override_.name.is_none());
+        assert!(override_.context_length.is_none());
+        assert!(override_.max_tokens.is_none());
+    }
+
+    #[test]
+    fn permission_config_default() {
+        let config = PermissionConfig::default();
+        assert!(config.edit.is_none());
+        assert!(config.bash.is_none());
+        assert!(config.webfetch.is_none());
+        assert!(config.external_directory.is_none());
+        assert!(config.allow_all_in_sandbox.is_none());
+    }
+
+    #[test]
+    fn compaction_config_default() {
+        let config = CompactionConfig::default();
+        assert!(config.auto.is_none());
+        assert!(config.prune.is_none());
+    }
+
+    #[test]
+    fn enterprise_config_default() {
+        let config = EnterpriseConfig::default();
+        assert!(config.url.is_none());
+    }
+
+    #[test]
+    fn experimental_config_default() {
+        let config = ExperimentalConfig::default();
+        assert!(config.flags.is_empty());
+    }
+
+    #[test]
+    fn sandbox_config_default() {
+        let config = SandboxConfig::default();
+        assert!(config.enabled.is_none());
+        assert!(config.runtime.is_none());
+        assert!(config.image.is_none());
+        assert!(config.resources.is_none());
+        assert!(config.network.is_none());
+        assert!(config.mounts.is_none());
+        assert!(config.bypass_tools.is_none());
+        assert!(config.keep_alive.is_none());
+    }
+
+    #[test]
+    fn sandbox_resources_config_default() {
+        let config = SandboxResourcesConfig::default();
+        assert!(config.memory.is_none());
+        assert!(config.cpus.is_none());
+        assert!(config.pids.is_none());
+    }
+
+    #[test]
+    fn sandbox_mounts_config_default() {
+        let config = SandboxMountsConfig::default();
+        assert!(config.workspace_writable.is_none());
+        assert!(config.persist_caches.is_none());
+        assert!(config.workspace_path.is_none());
+    }
+
+    #[test]
+    fn update_config_default() {
+        let config = UpdateConfig::default();
+        assert!(config.auto.is_none());
+        assert!(config.channel.is_none());
+        assert!(config.check_interval.is_none());
+    }
+
+    #[test]
+    fn agent_sandbox_config_default() {
+        let config = AgentSandboxConfig::default();
+        assert!(config.enabled.is_none());
+        assert!(config.workspace_writable.is_none());
+        assert!(config.network.is_none());
+        assert!(config.bypass_tools.is_none());
+        assert!(config.resources.is_none());
+    }
+
+    #[test]
+    fn agent_permission_config_default() {
+        let config = AgentPermissionConfig::default();
+        assert!(config.edit.is_none());
+        assert!(config.bash.is_none());
+        assert!(config.skill.is_none());
+        assert!(config.webfetch.is_none());
+        assert!(config.doom_loop.is_none());
+        assert!(config.external_directory.is_none());
+    }
+
+    #[test]
+    fn mcp_json_file_default() {
+        let file = McpJsonFile::default();
+        assert!(file.mcp_servers.is_none());
+        assert!(file.servers.is_none());
+        assert!(file.inputs.is_none());
+    }
+
+    #[test]
+    fn test_global_config_dir() {
+        // Just verify it doesn't panic
+        let dir = Config::global_config_dir();
+        if let Some(d) = dir {
+            assert!(!d.as_os_str().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_all_global_config_dirs() {
+        let dirs = Config::all_global_config_dirs();
+        // Should return at least one directory
+        assert!(!dirs.is_empty());
+    }
+
+    #[test]
+    fn test_data_dir() {
+        // Just verify it doesn't panic
+        let dir = Config::data_dir();
+        if let Some(d) = dir {
+            assert!(!d.as_os_str().is_empty());
+        }
+    }
+
+    // =========================================================================
+    // UX-Critical: Custom Command Configuration Tests
+    // If these fail, users' custom slash commands won't work
+    // =========================================================================
+
+    #[test]
+    fn custom_command_config_parses() {
+        // UX: Users create custom /commands for repetitive tasks
+        let json = r#"{
+            "command": {
+                "review": {
+                    "template": "Review this code for bugs and security issues: $ARGUMENTS",
+                    "description": "Review code for issues",
+                    "agent": "code-review",
+                    "model": "anthropic/claude-3-5-sonnet"
+                },
+                "test": {
+                    "template": "Write tests for: $ARGUMENTS",
+                    "subtask": true
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let commands = config.command.unwrap();
+
+        let review = commands.get("review").unwrap();
+        assert!(review.template.contains("$ARGUMENTS"));
+        assert_eq!(
+            review.description,
+            Some("Review code for issues".to_string())
+        );
+        assert_eq!(review.agent, Some("code-review".to_string()));
+
+        let test = commands.get("test").unwrap();
+        assert_eq!(test.subtask, Some(true));
+    }
+
+    // =========================================================================
+    // UX-Critical: Provider Configuration Tests
+    // If these fail, AI providers won't be configured correctly
+    // =========================================================================
+
+    #[test]
+    fn provider_config_with_custom_base_url() {
+        // UX: Users may use self-hosted or enterprise API endpoints
+        let json = r#"{
+            "provider": {
+                "custom-openai": {
+                    "api": "openai",
+                    "name": "My Custom OpenAI",
+                    "options": {
+                        "baseURL": "https://my-proxy.example.com/v1",
+                        "api_key": "my-key"
+                    }
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let providers = config.provider.unwrap();
+        let custom = providers.get("custom-openai").unwrap();
+
+        assert_eq!(custom.api, Some("openai".to_string()));
+        assert_eq!(custom.name, Some("My Custom OpenAI".to_string()));
+
+        let options = custom.options.as_ref().unwrap();
+        assert_eq!(
+            options.base_url,
+            Some("https://my-proxy.example.com/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_config_with_model_whitelist() {
+        // UX: Users can restrict which models are available
+        let json = r#"{
+            "provider": {
+                "openai": {
+                    "whitelist": ["gpt-4o", "gpt-4o-mini"],
+                    "blacklist": ["gpt-3.5-turbo"]
+                }
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let providers = config.provider.unwrap();
+        let openai = providers.get("openai").unwrap();
+
+        let whitelist = openai.whitelist.as_ref().unwrap();
+        assert!(whitelist.contains(&"gpt-4o".to_string()));
+        assert!(whitelist.contains(&"gpt-4o-mini".to_string()));
+
+        let blacklist = openai.blacklist.as_ref().unwrap();
+        assert!(blacklist.contains(&"gpt-3.5-turbo".to_string()));
     }
 }
