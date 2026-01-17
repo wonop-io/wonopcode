@@ -409,3 +409,298 @@ impl FooterWidget {
         frame.render_widget(para, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // FooterStatus tests
+
+    #[test]
+    fn test_footer_status_default() {
+        let status = FooterStatus::default();
+        assert_eq!(status, FooterStatus::Idle);
+    }
+
+    #[test]
+    fn test_footer_status_variants() {
+        assert_eq!(FooterStatus::Idle, FooterStatus::Idle);
+        assert_eq!(FooterStatus::Thinking, FooterStatus::Thinking);
+        assert_eq!(
+            FooterStatus::Running("test".to_string()),
+            FooterStatus::Running("test".to_string())
+        );
+        assert_eq!(
+            FooterStatus::Error("error".to_string()),
+            FooterStatus::Error("error".to_string())
+        );
+    }
+
+    #[test]
+    fn test_footer_status_clone() {
+        let status = FooterStatus::Running("Action".to_string());
+        let cloned = status.clone();
+        assert_eq!(cloned, FooterStatus::Running("Action".to_string()));
+    }
+
+    #[test]
+    fn test_footer_status_debug() {
+        assert!(format!("{:?}", FooterStatus::Idle).contains("Idle"));
+        assert!(format!("{:?}", FooterStatus::Thinking).contains("Thinking"));
+    }
+
+    // SandboxDisplayState tests
+
+    #[test]
+    fn test_sandbox_display_state_default() {
+        let state = SandboxDisplayState::default();
+        assert_eq!(state, SandboxDisplayState::Disabled);
+    }
+
+    #[test]
+    fn test_sandbox_display_state_variants() {
+        assert_eq!(SandboxDisplayState::Disabled, SandboxDisplayState::Disabled);
+        assert_eq!(SandboxDisplayState::Stopped, SandboxDisplayState::Stopped);
+        assert_eq!(SandboxDisplayState::Starting, SandboxDisplayState::Starting);
+        assert_eq!(SandboxDisplayState::Running, SandboxDisplayState::Running);
+        assert_eq!(SandboxDisplayState::Error, SandboxDisplayState::Error);
+    }
+
+    #[test]
+    fn test_sandbox_display_state_clone() {
+        let state = SandboxDisplayState::Running;
+        let cloned = state.clone();
+        assert_eq!(cloned, SandboxDisplayState::Running);
+    }
+
+    #[test]
+    fn test_sandbox_display_state_debug() {
+        assert!(format!("{:?}", SandboxDisplayState::Running).contains("Running"));
+    }
+
+    // FooterMode tests
+
+    #[test]
+    fn test_footer_mode_default() {
+        let mode = FooterMode::default();
+        assert_eq!(mode, FooterMode::Input);
+    }
+
+    #[test]
+    fn test_footer_mode_name() {
+        assert_eq!(FooterMode::Input.name(), "INPUT");
+        assert_eq!(FooterMode::Scroll.name(), "SCROLL");
+        assert_eq!(FooterMode::Select.name(), "SELECT");
+        assert_eq!(FooterMode::Search.name(), "SEARCH");
+        assert_eq!(FooterMode::Waiting.name(), "WAITING");
+        assert_eq!(FooterMode::Leader.name(), "CTRL+X");
+    }
+
+    #[test]
+    fn test_footer_mode_hints_input() {
+        let hints = FooterMode::Input.hints();
+        assert!(!hints.is_empty());
+        assert!(hints.iter().any(|(k, _)| *k == "Enter"));
+    }
+
+    #[test]
+    fn test_footer_mode_hints_scroll() {
+        let hints = FooterMode::Scroll.hints();
+        assert!(!hints.is_empty());
+        assert!(hints.iter().any(|(k, _)| *k == "j/k"));
+    }
+
+    #[test]
+    fn test_footer_mode_hints_select() {
+        let hints = FooterMode::Select.hints();
+        assert!(hints.iter().any(|(k, _)| *k == "y"));
+    }
+
+    #[test]
+    fn test_footer_mode_hints_search() {
+        let hints = FooterMode::Search.hints();
+        assert!(hints.iter().any(|(k, _)| *k == "n/N"));
+    }
+
+    #[test]
+    fn test_footer_mode_hints_waiting() {
+        let hints = FooterMode::Waiting.hints();
+        assert_eq!(hints.len(), 1);
+    }
+
+    #[test]
+    fn test_footer_mode_hints_leader() {
+        let hints = FooterMode::Leader.hints();
+        assert!(hints.iter().any(|(k, _)| *k == "N"));
+    }
+
+    #[test]
+    fn test_footer_mode_clone() {
+        let mode = FooterMode::Search;
+        let cloned = mode.clone();
+        assert_eq!(cloned, FooterMode::Search);
+    }
+
+    // FooterWidget tests
+
+    #[test]
+    fn test_footer_widget_new() {
+        let widget = FooterWidget::new();
+        assert_eq!(widget.mode, FooterMode::Input);
+        assert!(widget.directory.is_empty());
+        assert!(widget.model.is_empty());
+        assert!(widget.connected);
+        assert_eq!(widget.status, FooterStatus::Idle);
+        assert!(widget.tokens.is_none());
+    }
+
+    #[test]
+    fn test_footer_widget_default() {
+        let widget = FooterWidget::default();
+        assert_eq!(widget.mode, FooterMode::Input);
+        assert_eq!(widget.pending_permissions, 0);
+        assert_eq!(widget.lsp_count, 0);
+        assert_eq!(widget.mcp_count, 0);
+    }
+
+    #[test]
+    fn test_footer_widget_set_directory() {
+        let mut widget = FooterWidget::new();
+        widget.set_directory("/home/user");
+        assert_eq!(widget.directory, "/home/user");
+    }
+
+    #[test]
+    fn test_footer_widget_set_model() {
+        let mut widget = FooterWidget::new();
+        widget.set_model("claude-sonnet-4");
+        assert_eq!(widget.model, "claude-sonnet-4");
+    }
+
+    #[test]
+    fn test_footer_widget_set_provider() {
+        let mut widget = FooterWidget::new();
+        widget.set_provider("anthropic");
+        assert_eq!(widget.provider, "anthropic");
+    }
+
+    #[test]
+    fn test_footer_widget_set_connected() {
+        let mut widget = FooterWidget::new();
+        assert!(widget.connected);
+        widget.set_connected(false);
+        assert!(!widget.connected);
+    }
+
+    #[test]
+    fn test_footer_widget_set_status() {
+        let mut widget = FooterWidget::new();
+        widget.set_status(FooterStatus::Thinking);
+        assert_eq!(widget.status, FooterStatus::Thinking);
+    }
+
+    #[test]
+    fn test_footer_widget_is_busy() {
+        let mut widget = FooterWidget::new();
+        assert!(!widget.is_busy());
+
+        widget.set_status(FooterStatus::Thinking);
+        assert!(widget.is_busy());
+
+        widget.set_status(FooterStatus::Running("Action".to_string()));
+        assert!(widget.is_busy());
+
+        widget.set_status(FooterStatus::Idle);
+        assert!(!widget.is_busy());
+
+        widget.set_status(FooterStatus::Error("err".to_string()));
+        assert!(!widget.is_busy());
+    }
+
+    #[test]
+    fn test_footer_widget_set_tokens() {
+        let mut widget = FooterWidget::new();
+        widget.set_tokens(1000, 500);
+        assert_eq!(widget.tokens, Some((1000, 500)));
+    }
+
+    #[test]
+    fn test_footer_widget_tick_when_idle() {
+        let mut widget = FooterWidget::new();
+        let initial_frame = widget.spinner_frame;
+        widget.tick();
+        // Should not change when idle
+        assert_eq!(widget.spinner_frame, initial_frame);
+    }
+
+    #[test]
+    fn test_footer_widget_tick_when_thinking() {
+        let mut widget = FooterWidget::new();
+        widget.set_status(FooterStatus::Thinking);
+        // Fast-forward the last_update
+        widget.spinner_last_update = Instant::now() - Duration::from_millis(100);
+        widget.tick();
+        assert_eq!(widget.spinner_frame, 1);
+    }
+
+    #[test]
+    fn test_footer_widget_spinner_char() {
+        let widget = FooterWidget::new();
+        assert_eq!(widget.spinner_char(), "⠋");
+    }
+
+    #[test]
+    fn test_footer_widget_set_pending_permissions() {
+        let mut widget = FooterWidget::new();
+        widget.set_pending_permissions(5);
+        assert_eq!(widget.pending_permissions, 5);
+        assert_eq!(widget.get_permissions_pending(), 5);
+    }
+
+    #[test]
+    fn test_footer_widget_set_lsp_count() {
+        let mut widget = FooterWidget::new();
+        widget.set_lsp_count(3);
+        assert_eq!(widget.lsp_count, 3);
+    }
+
+    #[test]
+    fn test_footer_widget_set_mcp_status() {
+        let mut widget = FooterWidget::new();
+        widget.set_mcp_status(2, true);
+        assert_eq!(widget.mcp_count, 2);
+        assert!(widget.mcp_has_error);
+    }
+
+    #[test]
+    fn test_footer_widget_set_sandbox_status() {
+        let mut widget = FooterWidget::new();
+        widget.set_sandbox_status(SandboxDisplayState::Running, Some("docker".to_string()));
+        assert_eq!(widget.get_sandbox_state(), SandboxDisplayState::Running);
+        assert_eq!(widget.get_sandbox_runtime(), Some("docker"));
+    }
+
+    #[test]
+    fn test_footer_widget_set_mode() {
+        let mut widget = FooterWidget::new();
+        widget.set_mode(FooterMode::Scroll);
+        assert_eq!(widget.mode, FooterMode::Scroll);
+    }
+
+    #[test]
+    fn test_footer_widget_clone() {
+        let mut widget = FooterWidget::new();
+        widget.set_model("test-model");
+        widget.set_tokens(100, 50);
+        let cloned = widget.clone();
+        assert_eq!(cloned.model, "test-model");
+        assert_eq!(cloned.tokens, Some((100, 50)));
+    }
+
+    #[test]
+    fn test_footer_widget_debug() {
+        let widget = FooterWidget::new();
+        let debug = format!("{:?}", widget);
+        assert!(debug.contains("FooterWidget"));
+    }
+}

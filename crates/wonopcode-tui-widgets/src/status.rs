@@ -146,3 +146,153 @@ impl StatusWidget {
         frame.render_widget(paragraph, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Status enum tests
+
+    #[test]
+    fn test_status_default() {
+        let status = Status::default();
+        assert_eq!(status, Status::Idle);
+    }
+
+    #[test]
+    fn test_status_variants() {
+        assert_eq!(Status::Idle, Status::Idle);
+        assert_eq!(Status::Thinking, Status::Thinking);
+        assert_eq!(
+            Status::Running("test".to_string()),
+            Status::Running("test".to_string())
+        );
+        assert_eq!(
+            Status::Error("error".to_string()),
+            Status::Error("error".to_string())
+        );
+    }
+
+    #[test]
+    fn test_status_clone() {
+        let status = Status::Running("Test".to_string());
+        let cloned = status.clone();
+        assert_eq!(cloned, Status::Running("Test".to_string()));
+    }
+
+    #[test]
+    fn test_status_debug() {
+        assert!(format!("{:?}", Status::Idle).contains("Idle"));
+        assert!(format!("{:?}", Status::Thinking).contains("Thinking"));
+        assert!(format!("{:?}", Status::Running("test".to_string())).contains("Running"));
+        assert!(format!("{:?}", Status::Error("error".to_string())).contains("Error"));
+    }
+
+    // StatusMode tests
+
+    #[test]
+    fn test_status_mode_default() {
+        let mode = StatusMode::default();
+        assert_eq!(mode, StatusMode::Input);
+    }
+
+    #[test]
+    fn test_status_mode_name() {
+        assert_eq!(StatusMode::Input.name(), "INPUT");
+        assert_eq!(StatusMode::Scroll.name(), "SCROLL");
+        assert_eq!(StatusMode::Select.name(), "SELECT");
+        assert_eq!(StatusMode::Search.name(), "SEARCH");
+        assert_eq!(StatusMode::Waiting.name(), "WAIT");
+        assert_eq!(StatusMode::Leader.name(), "CTRL+X");
+    }
+
+    #[test]
+    fn test_status_mode_clone() {
+        let mode = StatusMode::Search;
+        let cloned = mode.clone();
+        assert_eq!(cloned, StatusMode::Search);
+    }
+
+    #[test]
+    fn test_status_mode_debug() {
+        assert!(format!("{:?}", StatusMode::Input).contains("Input"));
+        assert!(format!("{:?}", StatusMode::Scroll).contains("Scroll"));
+    }
+
+    // StatusWidget tests
+
+    #[test]
+    fn test_status_widget_new() {
+        let widget = StatusWidget::new();
+        assert_eq!(widget.status, Status::Idle);
+        assert_eq!(widget.mode, StatusMode::Input);
+        assert!(widget.model.is_empty());
+        assert!(widget.tokens.is_none());
+        assert!(widget.project.is_empty());
+    }
+
+    #[test]
+    fn test_status_widget_default() {
+        let widget = StatusWidget::default();
+        assert_eq!(widget.status, Status::Idle);
+        assert_eq!(widget.mode, StatusMode::Input);
+    }
+
+    #[test]
+    fn test_status_widget_set_status() {
+        let mut widget = StatusWidget::new();
+        widget.set_status(Status::Thinking);
+        assert_eq!(widget.status, Status::Thinking);
+
+        widget.set_status(Status::Error("Bad".to_string()));
+        assert_eq!(widget.status, Status::Error("Bad".to_string()));
+    }
+
+    #[test]
+    fn test_status_widget_set_mode() {
+        let mut widget = StatusWidget::new();
+        widget.set_mode(StatusMode::Scroll);
+        assert_eq!(widget.mode, StatusMode::Scroll);
+    }
+
+    #[test]
+    fn test_status_widget_set_model() {
+        let mut widget = StatusWidget::new();
+        widget.set_model("claude-sonnet-4");
+        assert_eq!(widget.model, "claude-sonnet-4");
+
+        widget.set_model(String::from("gpt-4"));
+        assert_eq!(widget.model, "gpt-4");
+    }
+
+    #[test]
+    fn test_status_widget_set_tokens() {
+        let mut widget = StatusWidget::new();
+        widget.set_tokens(1000, 500);
+        assert_eq!(widget.tokens, Some((1000, 500)));
+    }
+
+    #[test]
+    fn test_status_widget_set_project() {
+        let mut widget = StatusWidget::new();
+        widget.set_project("my-project");
+        assert_eq!(widget.project, "my-project");
+    }
+
+    #[test]
+    fn test_status_widget_clone() {
+        let mut widget = StatusWidget::new();
+        widget.set_model("test-model");
+        widget.set_tokens(100, 50);
+        let cloned = widget.clone();
+        assert_eq!(cloned.model, "test-model");
+        assert_eq!(cloned.tokens, Some((100, 50)));
+    }
+
+    #[test]
+    fn test_status_widget_debug() {
+        let widget = StatusWidget::new();
+        let debug = format!("{:?}", widget);
+        assert!(debug.contains("StatusWidget"));
+    }
+}

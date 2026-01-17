@@ -218,3 +218,184 @@ impl ToastManager {
         frame.render_widget(para, inner);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_toast_type_clone() {
+        let t = ToastType::Success;
+        let cloned = t.clone();
+        assert_eq!(cloned, ToastType::Success);
+    }
+
+    #[test]
+    fn test_toast_type_debug() {
+        assert!(format!("{:?}", ToastType::Success).contains("Success"));
+        assert!(format!("{:?}", ToastType::Error).contains("Error"));
+        assert!(format!("{:?}", ToastType::Warning).contains("Warning"));
+        assert!(format!("{:?}", ToastType::Info).contains("Info"));
+    }
+
+    #[test]
+    fn test_toast_type_equality() {
+        assert_eq!(ToastType::Success, ToastType::Success);
+        assert_ne!(ToastType::Success, ToastType::Error);
+        assert_ne!(ToastType::Warning, ToastType::Info);
+    }
+
+    #[test]
+    fn test_toast_new() {
+        let toast = Toast::new(ToastType::Info, "Test");
+        assert_eq!(toast.toast_type, ToastType::Info);
+        assert_eq!(toast.title, "Test");
+        assert!(toast.message.is_none());
+        assert_eq!(toast.duration, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn test_toast_with_message() {
+        let toast = Toast::new(ToastType::Info, "Title").with_message("Message");
+        assert_eq!(toast.message, Some("Message".to_string()));
+    }
+
+    #[test]
+    fn test_toast_with_duration() {
+        let toast = Toast::new(ToastType::Info, "Test").with_duration(Duration::from_secs(10));
+        assert_eq!(toast.duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_toast_success() {
+        let toast = Toast::success("Success!");
+        assert_eq!(toast.toast_type, ToastType::Success);
+        assert_eq!(toast.title, "Success!");
+    }
+
+    #[test]
+    fn test_toast_error() {
+        let toast = Toast::error("Error!");
+        assert_eq!(toast.toast_type, ToastType::Error);
+        assert_eq!(toast.title, "Error!");
+        assert_eq!(toast.duration, Duration::from_secs(5)); // Errors last longer
+    }
+
+    #[test]
+    fn test_toast_warning() {
+        let toast = Toast::warning("Warning!");
+        assert_eq!(toast.toast_type, ToastType::Warning);
+        assert_eq!(toast.title, "Warning!");
+    }
+
+    #[test]
+    fn test_toast_info() {
+        let toast = Toast::info("Info!");
+        assert_eq!(toast.toast_type, ToastType::Info);
+        assert_eq!(toast.title, "Info!");
+    }
+
+    #[test]
+    fn test_toast_is_expired() {
+        let toast = Toast::new(ToastType::Info, "Test").with_duration(Duration::from_millis(1));
+        // Give time for it to expire
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(toast.is_expired());
+    }
+
+    #[test]
+    fn test_toast_not_expired() {
+        let toast = Toast::new(ToastType::Info, "Test").with_duration(Duration::from_secs(100));
+        assert!(!toast.is_expired());
+    }
+
+    #[test]
+    fn test_toast_progress() {
+        let toast = Toast::new(ToastType::Info, "Test");
+        let progress = toast.progress();
+        assert!(progress >= 0.0);
+        assert!(progress <= 1.0);
+    }
+
+    #[test]
+    fn test_toast_is_fading() {
+        let toast = Toast::new(ToastType::Info, "Test").with_duration(Duration::from_secs(100));
+        assert!(!toast.is_fading()); // Just created, shouldn't be fading
+    }
+
+    #[test]
+    fn test_toast_clone() {
+        let toast = Toast::new(ToastType::Success, "Test").with_message("Msg");
+        let cloned = toast.clone();
+        assert_eq!(cloned.toast_type, ToastType::Success);
+        assert_eq!(cloned.title, "Test");
+        assert_eq!(cloned.message, Some("Msg".to_string()));
+    }
+
+    #[test]
+    fn test_toast_debug() {
+        let toast = Toast::new(ToastType::Info, "Test");
+        let debug = format!("{:?}", toast);
+        assert!(debug.contains("Toast"));
+    }
+
+    // ToastManager tests
+
+    #[test]
+    fn test_toast_manager_new() {
+        let manager = ToastManager::new();
+        assert!(manager.toasts().is_empty());
+    }
+
+    #[test]
+    fn test_toast_manager_default() {
+        let manager = ToastManager::default();
+        assert!(manager.toasts().is_empty());
+    }
+
+    #[test]
+    fn test_toast_manager_push() {
+        let mut manager = ToastManager::new();
+        manager.push(Toast::info("Test"));
+        assert_eq!(manager.toasts().len(), 1);
+    }
+
+    #[test]
+    fn test_toast_manager_clear() {
+        let mut manager = ToastManager::new();
+        manager.push(Toast::info("Test1"));
+        manager.push(Toast::info("Test2"));
+        assert_eq!(manager.toasts().len(), 2);
+
+        manager.clear();
+        assert!(manager.toasts().is_empty());
+    }
+
+    #[test]
+    fn test_toast_manager_cleanup() {
+        let mut manager = ToastManager::new();
+        manager.push(Toast::info("Long").with_duration(Duration::from_secs(100)));
+        manager.push(Toast::info("Short").with_duration(Duration::from_millis(1)));
+
+        std::thread::sleep(Duration::from_millis(5));
+        manager.cleanup();
+
+        assert_eq!(manager.toasts().len(), 1);
+        assert_eq!(manager.toasts()[0].title, "Long");
+    }
+
+    #[test]
+    fn test_toast_manager_clone() {
+        let mut manager = ToastManager::new();
+        manager.push(Toast::info("Test"));
+        let cloned = manager.clone();
+        assert_eq!(cloned.toasts().len(), 1);
+    }
+
+    #[test]
+    fn test_toast_manager_debug() {
+        let manager = ToastManager::new();
+        let debug = format!("{:?}", manager);
+        assert!(debug.contains("ToastManager"));
+    }
+}

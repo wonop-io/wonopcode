@@ -873,4 +873,259 @@ mod tests {
         assert_eq!(additions, 3); // +println, +fn new, +fn extra
         assert_eq!(deletions, 1); // -fn old
     }
+
+    // === Additional DiffWidget tests ===
+
+    #[test]
+    fn test_diff_widget_new() {
+        let widget = DiffWidget::new();
+        assert!(widget.is_empty());
+        assert_eq!(widget.hunk_count(), 0);
+    }
+
+    #[test]
+    fn test_diff_widget_set_diffs() {
+        let mut widget = DiffWidget::new();
+        let diffs = vec![
+            FileDiff::new("test.rs"),
+        ];
+        widget.set_diffs(diffs);
+        assert!(!widget.is_empty());
+    }
+
+    #[test]
+    fn test_diff_widget_is_empty() {
+        let mut widget = DiffWidget::new();
+        assert!(widget.is_empty());
+
+        widget.set_unified_diff(SAMPLE_DIFF);
+        assert!(!widget.is_empty());
+    }
+
+    #[test]
+    fn test_diff_widget_toggle_collapsed() {
+        let mut widget = DiffWidget::new();
+        widget.set_unified_diff(SAMPLE_DIFF);
+
+        let initial = widget.collapsed;
+        widget.toggle_collapsed();
+        assert_ne!(widget.collapsed, initial);
+        widget.toggle_collapsed();
+        assert_eq!(widget.collapsed, initial);
+    }
+
+    #[test]
+    fn test_diff_widget_set_style() {
+        let mut widget = DiffWidget::new();
+        widget.set_style(DiffStyle::SideBySide);
+        assert_eq!(widget.style(), DiffStyle::SideBySide);
+
+        widget.set_style(DiffStyle::Unified);
+        assert_eq!(widget.style(), DiffStyle::Unified);
+    }
+
+    #[test]
+    fn test_diff_widget_toggle_style() {
+        let mut widget = DiffWidget::new();
+        widget.set_style(DiffStyle::Unified);
+        widget.toggle_style();
+        assert_eq!(widget.style(), DiffStyle::SideBySide);
+        widget.toggle_style();
+        assert_eq!(widget.style(), DiffStyle::Unified);
+    }
+
+    #[test]
+    fn test_diff_widget_scroll() {
+        let mut widget = DiffWidget::new();
+        widget.set_unified_diff(SAMPLE_DIFF);
+
+        assert_eq!(widget.scroll, 0);
+        widget.scroll_down(5);
+        assert_eq!(widget.scroll, 5);
+        widget.scroll_up(3);
+        assert_eq!(widget.scroll, 2);
+        widget.scroll_up(10); // Should clamp to 0
+        assert_eq!(widget.scroll, 0);
+    }
+
+    #[test]
+    fn test_diff_widget_first_last_hunk() {
+        let mut widget = DiffWidget::new();
+        widget.set_unified_diff(SAMPLE_DIFF);
+
+        widget.last_hunk();
+        assert_eq!(widget.current_file, 1);
+
+        widget.first_hunk();
+        assert_eq!(widget.current_file, 0);
+        assert_eq!(widget.current_hunk, 0);
+    }
+
+    #[test]
+    fn test_diff_widget_current_hunk_index() {
+        let mut widget = DiffWidget::new();
+        widget.set_unified_diff(SAMPLE_DIFF);
+
+        assert_eq!(widget.current_hunk_index(), 0);
+        widget.next_hunk();
+        assert_eq!(widget.current_hunk_index(), 1);
+    }
+
+    #[test]
+    fn test_diff_widget_set_focused() {
+        let mut widget = DiffWidget::new();
+        widget.set_focused(true);
+        assert!(widget.focused);
+        widget.set_focused(false);
+        assert!(!widget.focused);
+    }
+
+    #[test]
+    fn test_diff_widget_handle_nav() {
+        let mut widget = DiffWidget::new();
+        widget.set_unified_diff(SAMPLE_DIFF);
+
+        widget.handle_nav(DiffNavAction::NextHunk);
+        assert_eq!(widget.current_file, 1);
+
+        widget.handle_nav(DiffNavAction::PrevHunk);
+        assert_eq!(widget.current_file, 0);
+
+        widget.handle_nav(DiffNavAction::NextFile);
+        assert_eq!(widget.current_file, 1);
+
+        widget.handle_nav(DiffNavAction::PrevFile);
+        assert_eq!(widget.current_file, 0);
+
+        widget.handle_nav(DiffNavAction::LastHunk);
+        assert_eq!(widget.current_file, 1);
+
+        widget.handle_nav(DiffNavAction::FirstHunk);
+        assert_eq!(widget.current_file, 0);
+
+        // Reset scroll to test ScrollDown/ScrollUp
+        widget.scroll = 0;
+        widget.handle_nav(DiffNavAction::ScrollDown(5));
+        assert_eq!(widget.scroll, 5);
+
+        widget.handle_nav(DiffNavAction::ScrollUp(3));
+        assert_eq!(widget.scroll, 2);
+
+        widget.handle_nav(DiffNavAction::ToggleStyle);
+        assert_eq!(widget.style(), DiffStyle::SideBySide);
+
+        widget.handle_nav(DiffNavAction::ToggleCollapsed);
+        assert!(widget.collapsed);
+    }
+
+    // === FileDiff tests ===
+
+    #[test]
+    fn test_file_diff_new() {
+        let diff = FileDiff::new("test/file.rs");
+        assert_eq!(diff.path, "test/file.rs");
+        assert!(diff.hunks.is_empty());
+    }
+
+    #[test]
+    fn test_file_diff_parse_empty() {
+        let diffs = FileDiff::parse_unified("");
+        assert!(diffs.is_empty());
+    }
+
+    #[test]
+    fn test_file_diff_parse_no_hunks() {
+        let diff = "--- a/file.rs\n+++ b/file.rs\n";
+        let diffs = FileDiff::parse_unified(diff);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].path, "file.rs");
+    }
+
+    // === DiffStyle tests ===
+
+    #[test]
+    fn test_diff_style_default() {
+        let style = DiffStyle::default();
+        assert_eq!(style, DiffStyle::Unified);
+    }
+
+    #[test]
+    fn test_diff_style_clone() {
+        let style = DiffStyle::SideBySide;
+        let cloned = style.clone();
+        assert_eq!(cloned, DiffStyle::SideBySide);
+    }
+
+    #[test]
+    fn test_diff_style_debug() {
+        let style = DiffStyle::Unified;
+        let debug = format!("{:?}", style);
+        assert!(debug.contains("Unified"));
+    }
+
+    // === DiffNavAction tests ===
+
+    #[test]
+    fn test_diff_nav_action_debug() {
+        let action = DiffNavAction::NextHunk;
+        let debug = format!("{:?}", action);
+        assert!(debug.contains("NextHunk"));
+    }
+
+    #[test]
+    fn test_diff_nav_action_clone() {
+        let action = DiffNavAction::ScrollDown(10);
+        let cloned = action.clone();
+        assert!(matches!(cloned, DiffNavAction::ScrollDown(10)));
+    }
+
+    // === DiffLine tests ===
+
+    #[test]
+    fn test_diff_line_debug() {
+        let line = DiffLine::Context("test".to_string());
+        let debug = format!("{:?}", line);
+        assert!(debug.contains("Context"));
+    }
+
+    #[test]
+    fn test_diff_line_added() {
+        let line = DiffLine::Added("new line".to_string());
+        assert!(matches!(line, DiffLine::Added(_)));
+    }
+
+    #[test]
+    fn test_diff_line_removed() {
+        let line = DiffLine::Removed("old line".to_string());
+        assert!(matches!(line, DiffLine::Removed(_)));
+    }
+
+    // === DiffHunk tests ===
+
+    #[test]
+    fn test_diff_hunk_debug() {
+        let hunk = DiffHunk {
+            old_start: 1,
+            old_count: 5,
+            new_start: 1,
+            new_count: 6,
+            lines: vec![],
+        };
+        let debug = format!("{:?}", hunk);
+        assert!(debug.contains("DiffHunk"));
+    }
+
+    #[test]
+    fn test_diff_hunk_clone() {
+        let hunk = DiffHunk {
+            old_start: 10,
+            old_count: 3,
+            new_start: 10,
+            new_count: 4,
+            lines: vec![DiffLine::Added("test".to_string())],
+        };
+        let cloned = hunk.clone();
+        assert_eq!(cloned.old_start, 10);
+        assert_eq!(cloned.lines.len(), 1);
+    }
 }

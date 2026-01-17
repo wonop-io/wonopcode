@@ -76,3 +76,64 @@ impl LogoWidget {
         frame.render_widget(paragraph, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logo_widget_new() {
+        let widget = LogoWidget::new();
+        assert!(!widget.small);
+    }
+
+    #[test]
+    fn test_logo_widget_default() {
+        let widget = LogoWidget::default();
+        assert!(!widget.small);
+    }
+
+    #[test]
+    fn test_logo_widget_small() {
+        let widget = LogoWidget::new().small(true);
+        assert!(widget.small);
+
+        let widget = LogoWidget::new().small(false);
+        assert!(!widget.small);
+    }
+
+    #[test]
+    fn test_logo_widget_height_large() {
+        let widget = LogoWidget::new();
+        assert_eq!(widget.height(), 13);
+    }
+
+    #[test]
+    fn test_logo_widget_height_small() {
+        let widget = LogoWidget::new().small(true);
+        assert_eq!(widget.height(), 3);
+    }
+
+    #[test]
+    fn test_logo_widget_clone() {
+        let widget = LogoWidget::new().small(true);
+        let cloned = widget.clone();
+        assert!(cloned.small);
+    }
+
+    #[test]
+    fn test_logo_widget_debug() {
+        let widget = LogoWidget::new();
+        let debug = format!("{:?}", widget);
+        assert!(debug.contains("LogoWidget"));
+    }
+
+    #[test]
+    fn test_logo_constants() {
+        // Verify the logo constants exist and have content
+        assert!(!LOGO.is_empty());
+        assert!(!LOGO_SMALL.is_empty());
+        assert!(LOGO.contains("$$"));
+        assert!(LOGO_SMALL.contains("Wonop"));
+    }
+}

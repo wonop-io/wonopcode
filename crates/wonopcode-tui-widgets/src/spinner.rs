@@ -109,3 +109,110 @@ impl Spinner {
 
 /// Alias for backward compatibility.
 pub type DotsSpinner = Spinner;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spinner_new() {
+        let spinner = Spinner::new();
+        assert_eq!(spinner.frame, 0);
+        assert!(!spinner.active);
+        assert!(spinner.label.is_empty());
+        assert_eq!(spinner.frames.len(), 10);
+    }
+
+    #[test]
+    fn test_spinner_default() {
+        let spinner = Spinner::default();
+        assert_eq!(spinner.frame, 0);
+        assert!(!spinner.active);
+    }
+
+    #[test]
+    fn test_spinner_start_stop() {
+        let mut spinner = Spinner::new();
+        assert!(!spinner.is_active());
+
+        spinner.start();
+        assert!(spinner.is_active());
+        assert_eq!(spinner.frame, 0);
+
+        spinner.stop();
+        assert!(!spinner.is_active());
+    }
+
+    #[test]
+    fn test_spinner_set_label() {
+        let mut spinner = Spinner::new();
+        spinner.set_label("Loading...");
+        assert_eq!(spinner.label, "Loading...");
+
+        spinner.set_label(String::from("Processing"));
+        assert_eq!(spinner.label, "Processing");
+    }
+
+    #[test]
+    fn test_spinner_char() {
+        let spinner = Spinner::new();
+        assert_eq!(spinner.char(), "⠋");
+    }
+
+    #[test]
+    fn test_spinner_tick_inactive() {
+        let mut spinner = Spinner::new();
+        let initial_frame = spinner.frame;
+        spinner.tick();
+        // Should not advance when inactive
+        assert_eq!(spinner.frame, initial_frame);
+    }
+
+    #[test]
+    fn test_spinner_tick_active() {
+        let mut spinner = Spinner::new();
+        spinner.start();
+        // Fast-forward the last_update to force tick
+        spinner.last_update = Instant::now() - Duration::from_millis(100);
+        spinner.tick();
+        assert_eq!(spinner.frame, 1);
+
+        // Another tick
+        spinner.last_update = Instant::now() - Duration::from_millis(100);
+        spinner.tick();
+        assert_eq!(spinner.frame, 2);
+    }
+
+    #[test]
+    fn test_spinner_tick_wrap_around() {
+        let mut spinner = Spinner::new();
+        spinner.start();
+        spinner.frame = 9; // Last frame
+        spinner.last_update = Instant::now() - Duration::from_millis(100);
+        spinner.tick();
+        assert_eq!(spinner.frame, 0); // Should wrap to first frame
+    }
+
+    #[test]
+    fn test_spinner_clone() {
+        let mut spinner = Spinner::new();
+        spinner.set_label("Test");
+        spinner.start();
+        let cloned = spinner.clone();
+        assert_eq!(cloned.label, "Test");
+        assert!(cloned.is_active());
+    }
+
+    #[test]
+    fn test_spinner_debug() {
+        let spinner = Spinner::new();
+        let debug = format!("{:?}", spinner);
+        assert!(debug.contains("Spinner"));
+    }
+
+    #[test]
+    fn test_dots_spinner_alias() {
+        let spinner: DotsSpinner = Spinner::new();
+        assert!(!spinner.is_active());
+    }
+}
