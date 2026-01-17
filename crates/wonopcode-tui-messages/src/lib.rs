@@ -2921,6 +2921,230 @@ impl MessagesWidget {
 mod tests {
     use super::*;
 
+    // === MessageRole tests ===
+
+    #[test]
+    fn test_message_role_debug() {
+        assert!(format!("{:?}", MessageRole::User).contains("User"));
+        assert!(format!("{:?}", MessageRole::Assistant).contains("Assistant"));
+        assert!(format!("{:?}", MessageRole::System).contains("System"));
+        assert!(format!("{:?}", MessageRole::Tool).contains("Tool"));
+    }
+
+    #[test]
+    fn test_message_role_clone_eq() {
+        let role = MessageRole::User;
+        let cloned = role.clone();
+        assert_eq!(role, cloned);
+        assert_ne!(MessageRole::User, MessageRole::Assistant);
+    }
+
+    // === ToolStatus tests ===
+
+    #[test]
+    fn test_tool_status_debug() {
+        assert!(format!("{:?}", ToolStatus::Pending).contains("Pending"));
+        assert!(format!("{:?}", ToolStatus::Running).contains("Running"));
+        assert!(format!("{:?}", ToolStatus::Success).contains("Success"));
+        assert!(format!("{:?}", ToolStatus::Error).contains("Error"));
+    }
+
+    #[test]
+    fn test_tool_status_clone_eq() {
+        let status = ToolStatus::Running;
+        let cloned = status.clone();
+        assert_eq!(status, cloned);
+        assert_ne!(ToolStatus::Pending, ToolStatus::Success);
+    }
+
+    // === DisplayToolCall tests ===
+
+    #[test]
+    fn test_display_tool_call_new() {
+        let tool = DisplayToolCall::new("id-123", "bash");
+        assert_eq!(tool.id, "id-123");
+        assert_eq!(tool.name, "bash");
+        assert_eq!(tool.status, ToolStatus::Pending);
+        assert!(tool.input.is_none());
+        assert!(tool.output.is_none());
+        assert!(!tool.expanded);
+    }
+
+    #[test]
+    fn test_display_tool_call_clone() {
+        let mut tool = DisplayToolCall::new("id-1", "read");
+        tool.input = Some("test input".to_string());
+        tool.status = ToolStatus::Success;
+        tool.expanded = true;
+
+        let cloned = tool.clone();
+        assert_eq!(cloned.id, "id-1");
+        assert_eq!(cloned.name, "read");
+        assert_eq!(cloned.input, Some("test input".to_string()));
+        assert_eq!(cloned.status, ToolStatus::Success);
+        assert!(cloned.expanded);
+    }
+
+    #[test]
+    fn test_display_tool_call_debug() {
+        let tool = DisplayToolCall::new("id-1", "bash");
+        let debug = format!("{:?}", tool);
+        assert!(debug.contains("DisplayToolCall"));
+        assert!(debug.contains("bash"));
+    }
+
+    // === MessageSegment tests ===
+
+    #[test]
+    fn test_message_segment_text() {
+        let segment = MessageSegment::Text("Hello".to_string());
+        if let MessageSegment::Text(t) = segment {
+            assert_eq!(t, "Hello");
+        } else {
+            panic!("Expected Text segment");
+        }
+    }
+
+    #[test]
+    fn test_message_segment_tool() {
+        let tool = DisplayToolCall::new("id-1", "bash");
+        let segment = MessageSegment::Tool(tool);
+        if let MessageSegment::Tool(t) = segment {
+            assert_eq!(t.name, "bash");
+        } else {
+            panic!("Expected Tool segment");
+        }
+    }
+
+    #[test]
+    fn test_message_segment_clone_debug() {
+        let segment = MessageSegment::Text("Test".to_string());
+        let cloned = segment.clone();
+        assert!(format!("{:?}", cloned).contains("Text"));
+    }
+
+    // === DisplayMessage tests ===
+
+    #[test]
+    fn test_display_message_user() {
+        let msg = DisplayMessage::user("Hello");
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "Hello");
+        assert!(msg.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn test_display_message_assistant() {
+        let msg = DisplayMessage::assistant("Hi there");
+        assert_eq!(msg.role, MessageRole::Assistant);
+        assert_eq!(msg.content, "Hi there");
+    }
+
+    #[test]
+    fn test_display_message_system() {
+        let msg = DisplayMessage::system("System prompt");
+        assert_eq!(msg.role, MessageRole::System);
+        assert_eq!(msg.content, "System prompt");
+    }
+
+    #[test]
+    fn test_display_message_assistant_with_segments() {
+        let segments = vec![
+            MessageSegment::Text("Before tool".to_string()),
+            MessageSegment::Tool(DisplayToolCall::new("id-1", "bash")),
+            MessageSegment::Text("After tool".to_string()),
+        ];
+        let msg = DisplayMessage::assistant_with_segments(segments);
+        assert_eq!(msg.role, MessageRole::Assistant);
+        assert_eq!(msg.content, "Before toolAfter tool"); // Concatenated text
+        assert_eq!(msg.segments.len(), 3);
+        assert_eq!(msg.tool_calls.len(), 1);
+    }
+
+    #[test]
+    fn test_display_message_with_model_agent() {
+        let msg = DisplayMessage::assistant("Hi")
+            .with_model_agent(Some("claude-sonnet-4".to_string()), Some(AgentMode::Build));
+        assert_eq!(msg.model, Some("claude-sonnet-4".to_string()));
+        assert_eq!(msg.agent, AgentMode::Build);
+    }
+
+    #[test]
+    fn test_display_message_cache_operations() {
+        let msg = DisplayMessage::user("Test");
+        assert!(!msg.has_cache());
+        
+        msg.clear_cache();
+        assert!(!msg.has_cache());
+        
+        let size = msg.cache_size();
+        assert_eq!(size, 0);
+    }
+
+    #[test]
+    fn test_display_message_estimated_size() {
+        let msg = DisplayMessage::user("Hello world");
+        let size = msg.estimated_size();
+        assert!(size >= msg.content.len());
+    }
+
+    #[test]
+    fn test_display_message_estimate_line_count() {
+        let msg = DisplayMessage::user("Short message");
+        let count = msg.estimate_line_count(80);
+        assert!(count >= 3); // At least header + role + spacing
+    }
+
+    // === Helper function tests ===
+
+    #[test]
+    fn test_normalize_tool_name() {
+        assert_eq!(normalize_tool_name("bash"), "bash");
+        assert_eq!(normalize_tool_name("mcp__wonopcode-tools__bash"), "bash");
+        assert_eq!(normalize_tool_name("mcp__server__read"), "read");
+        assert_eq!(normalize_tool_name("mcp__"), "mcp__"); // Edge case
+    }
+
+    #[test]
+    fn test_tool_icon() {
+        assert_eq!(tool_icon("bash"), "#");
+        assert_eq!(tool_icon("read"), "→");
+        assert_eq!(tool_icon("write"), "←");
+        assert_eq!(tool_icon("glob"), "✱");
+        assert_eq!(tool_icon("unknown_tool"), "◇");
+        assert_eq!(tool_icon("mcp__server__bash"), "#"); // MCP normalized
+    }
+
+    #[test]
+    fn test_is_block_tool() {
+        assert!(is_block_tool("bash"));
+        assert!(is_block_tool("edit"));
+        assert!(is_block_tool("write"));
+        assert!(is_block_tool("mcp__server__bash")); // MCP normalized
+        assert!(!is_block_tool("unknown_tool"));
+    }
+
+    #[test]
+    fn test_truncate_tool_output() {
+        // Short output - no truncation
+        let short = truncate_tool_output(Some("short".to_string()));
+        assert_eq!(short, Some("short".to_string()));
+
+        // None input
+        let none = truncate_tool_output(None);
+        assert!(none.is_none());
+
+        // Long output - truncated
+        let long_str = "x".repeat(15_000);
+        let truncated = truncate_tool_output(Some(long_str));
+        assert!(truncated.is_some());
+        let result = truncated.unwrap();
+        assert!(result.len() < 15_000);
+        assert!(result.contains("truncated"));
+    }
+
+    // === Selection mode tests ===
+
     #[test]
     fn test_selection_mode() {
         let mut widget = MessagesWidget::new();
