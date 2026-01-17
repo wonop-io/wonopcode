@@ -760,3 +760,114 @@ pub async fn serve(config: AgentConfig) {
     let (agent, incoming_rx) = Agent::new(config);
     agent.run(incoming_rx).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === AgentConfig tests ===
+
+    #[test]
+    fn test_agent_config_default() {
+        let config = AgentConfig::default();
+        assert_eq!(config.name, "Wonopcode");
+        assert!(!config.version.is_empty());
+        assert!(config.default_model.is_none());
+    }
+
+    #[test]
+    fn test_agent_config_custom() {
+        let config = AgentConfig {
+            name: "Custom Agent".to_string(),
+            version: "1.0.0".to_string(),
+            default_model: ModelRef::parse("anthropic/claude-sonnet-4-5"),
+        };
+        assert_eq!(config.name, "Custom Agent");
+        assert_eq!(config.version, "1.0.0");
+        assert!(config.default_model.is_some());
+    }
+
+    #[test]
+    fn test_agent_config_clone() {
+        let config = AgentConfig {
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            default_model: None,
+        };
+        let cloned = config.clone();
+        assert_eq!(cloned.name, "Test");
+        assert_eq!(cloned.version, "1.0.0");
+    }
+
+    #[test]
+    fn test_agent_config_debug() {
+        let config = AgentConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("AgentConfig"));
+        assert!(debug.contains("Wonopcode"));
+    }
+
+    // === capitalize_provider tests ===
+
+    #[test]
+    fn test_capitalize_provider_lowercase() {
+        assert_eq!(capitalize_provider("anthropic"), "Anthropic");
+        assert_eq!(capitalize_provider("openai"), "Openai");
+        assert_eq!(capitalize_provider("google"), "Google");
+    }
+
+    #[test]
+    fn test_capitalize_provider_already_capitalized() {
+        assert_eq!(capitalize_provider("Anthropic"), "Anthropic");
+    }
+
+    #[test]
+    fn test_capitalize_provider_empty() {
+        assert_eq!(capitalize_provider(""), "");
+    }
+
+    #[test]
+    fn test_capitalize_provider_single_char() {
+        assert_eq!(capitalize_provider("a"), "A");
+        assert_eq!(capitalize_provider("Z"), "Z");
+    }
+
+    #[test]
+    fn test_capitalize_provider_with_numbers() {
+        assert_eq!(capitalize_provider("gpt4"), "Gpt4");
+    }
+
+    // === ModelRef tests ===
+
+    #[test]
+    fn test_model_ref_as_string() {
+        let model = ModelRef::parse("anthropic/claude-sonnet-4-5").unwrap();
+        assert_eq!(model.as_string(), "anthropic/claude-sonnet-4-5");
+    }
+
+    #[test]
+    fn test_model_ref_parse_valid() {
+        let model = ModelRef::parse("openai/gpt-4o");
+        assert!(model.is_some());
+        let model = model.unwrap();
+        assert_eq!(model.provider_id, "openai");
+        assert_eq!(model.model_id, "gpt-4o");
+    }
+
+    #[test]
+    fn test_model_ref_parse_no_slash() {
+        let model = ModelRef::parse("claude-sonnet-4-5");
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn test_model_ref_parse_empty_parts() {
+        // Note: ModelRef::parse doesn't check for empty parts after split
+        // This documents the actual behavior
+        let result = ModelRef::parse("/model");
+        assert!(result.is_some()); // Actually returns Some with empty provider
+        
+        let result = ModelRef::parse("provider/");
+        assert!(result.is_some()); // Actually returns Some with empty model
+    }
+}

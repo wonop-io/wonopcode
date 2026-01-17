@@ -141,3 +141,180 @@ pub fn is_enter(key: &KeyEvent) -> bool {
 pub fn is_backspace(key: &KeyEvent) -> bool {
     key.code == KeyCode::Backspace
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn make_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn make_key_with_ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    // === Event enum tests ===
+
+    #[test]
+    fn test_event_key_debug() {
+        let event = Event::Key(make_key(KeyCode::Enter));
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Key"));
+    }
+
+    #[test]
+    fn test_event_tick_debug() {
+        let event = Event::Tick;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Tick"));
+    }
+
+    #[test]
+    fn test_event_resize_debug() {
+        let event = Event::Resize(80, 24);
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Resize"));
+    }
+
+    #[test]
+    fn test_event_paste_debug() {
+        let event = Event::Paste("hello".to_string());
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Paste"));
+    }
+
+    #[test]
+    fn test_event_message_debug() {
+        let event = Event::Message("msg".to_string());
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Message"));
+    }
+
+    #[test]
+    fn test_event_status_debug() {
+        let event = Event::Status("thinking".to_string());
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Status"));
+    }
+
+    #[test]
+    fn test_event_error_debug() {
+        let event = Event::Error("error".to_string());
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Error"));
+    }
+
+    #[test]
+    fn test_event_clone() {
+        let event = Event::Tick;
+        let cloned = event.clone();
+        assert!(matches!(cloned, Event::Tick));
+    }
+
+    // === is_quit tests ===
+
+    #[test]
+    fn test_is_quit_ctrl_c() {
+        let key = make_key_with_ctrl(KeyCode::Char('c'));
+        assert!(is_quit(&key));
+    }
+
+    #[test]
+    fn test_is_quit_just_c() {
+        let key = make_key(KeyCode::Char('c'));
+        assert!(!is_quit(&key));
+    }
+
+    #[test]
+    fn test_is_quit_ctrl_other() {
+        let key = make_key_with_ctrl(KeyCode::Char('a'));
+        assert!(!is_quit(&key));
+    }
+
+    // === is_escape tests ===
+
+    #[test]
+    fn test_is_escape_esc_key() {
+        let key = make_key(KeyCode::Esc);
+        assert!(is_escape(&key));
+    }
+
+    #[test]
+    fn test_is_escape_other_key() {
+        let key = make_key(KeyCode::Enter);
+        assert!(!is_escape(&key));
+    }
+
+    // === is_enter tests ===
+
+    #[test]
+    fn test_is_enter_enter_key() {
+        let key = make_key(KeyCode::Enter);
+        assert!(is_enter(&key));
+    }
+
+    #[test]
+    fn test_is_enter_other_key() {
+        let key = make_key(KeyCode::Esc);
+        assert!(!is_enter(&key));
+    }
+
+    // === is_backspace tests ===
+
+    #[test]
+    fn test_is_backspace_backspace_key() {
+        let key = make_key(KeyCode::Backspace);
+        assert!(is_backspace(&key));
+    }
+
+    #[test]
+    fn test_is_backspace_other_key() {
+        let key = make_key(KeyCode::Delete);
+        assert!(!is_backspace(&key));
+    }
+
+    // === EventHandler tests ===
+
+    #[test]
+    fn test_event_handler_new() {
+        let handler = EventHandler::new();
+        let _sender = handler.sender();
+        // Test passes if no panic
+    }
+
+    #[test]
+    fn test_event_handler_default() {
+        let handler = EventHandler::default();
+        let _sender = handler.sender();
+        // Test passes if no panic
+    }
+
+    #[tokio::test]
+    async fn test_event_handler_send_receive() {
+        let mut handler = EventHandler::new();
+        let sender = handler.sender();
+
+        sender.send(Event::Tick).unwrap();
+
+        let event = handler.next().await;
+        assert!(matches!(event, Some(Event::Tick)));
+    }
+
+    #[tokio::test]
+    async fn test_event_handler_multiple_events() {
+        let mut handler = EventHandler::new();
+        let sender = handler.sender();
+
+        sender.send(Event::Tick).unwrap();
+        sender.send(Event::Message("test".to_string())).unwrap();
+
+        let event1 = handler.next().await;
+        assert!(matches!(event1, Some(Event::Tick)));
+
+        let event2 = handler.next().await;
+        assert!(matches!(event2, Some(Event::Message(_))));
+    }
+}

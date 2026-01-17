@@ -854,3 +854,314 @@ impl RenderSettings {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === AgentMode tests ===
+
+    #[test]
+    fn test_agent_mode_default() {
+        let mode = AgentMode::default();
+        assert_eq!(mode, AgentMode::Build);
+    }
+
+    #[test]
+    fn test_agent_mode_name() {
+        assert_eq!(AgentMode::Build.name(), "Build");
+        assert_eq!(AgentMode::Plan.name(), "Plan");
+    }
+
+    #[test]
+    fn test_agent_mode_parse() {
+        assert_eq!(AgentMode::parse("build"), AgentMode::Build);
+        assert_eq!(AgentMode::parse("Build"), AgentMode::Build);
+        assert_eq!(AgentMode::parse("BUILD"), AgentMode::Build);
+        assert_eq!(AgentMode::parse("plan"), AgentMode::Plan);
+        assert_eq!(AgentMode::parse("Plan"), AgentMode::Plan);
+        assert_eq!(AgentMode::parse("PLAN"), AgentMode::Plan);
+    }
+
+    #[test]
+    fn test_agent_mode_parse_unknown() {
+        // Unknown values default to Build
+        assert_eq!(AgentMode::parse("unknown"), AgentMode::Build);
+        assert_eq!(AgentMode::parse("default"), AgentMode::Build);
+        assert_eq!(AgentMode::parse(""), AgentMode::Build);
+    }
+
+    #[test]
+    fn test_agent_mode_next() {
+        assert_eq!(AgentMode::Build.next(), AgentMode::Plan);
+        assert_eq!(AgentMode::Plan.next(), AgentMode::Build);
+    }
+
+    #[test]
+    fn test_agent_mode_prev() {
+        assert_eq!(AgentMode::Build.prev(), AgentMode::Plan);
+        assert_eq!(AgentMode::Plan.prev(), AgentMode::Build);
+    }
+
+    #[test]
+    fn test_agent_mode_id() {
+        assert_eq!(AgentMode::Build.id(), "build");
+        assert_eq!(AgentMode::Plan.id(), "plan");
+    }
+
+    #[test]
+    fn test_agent_mode_clone() {
+        let mode = AgentMode::Build;
+        let cloned = mode;
+        assert_eq!(cloned, AgentMode::Build);
+    }
+
+    #[test]
+    fn test_agent_mode_debug() {
+        let debug = format!("{:?}", AgentMode::Build);
+        assert!(debug.contains("Build"));
+    }
+
+    // === Theme tests ===
+
+    #[test]
+    fn test_theme_default() {
+        let theme = Theme::default();
+        assert!(!theme.name.is_empty());
+    }
+
+    #[test]
+    fn test_theme_clone() {
+        let theme = Theme::default();
+        let cloned = theme.clone();
+        assert_eq!(cloned.name, theme.name);
+    }
+
+    #[test]
+    fn test_theme_colors_are_set() {
+        let theme = Theme::default();
+        // Just verify colors are not black (uninitialized)
+        assert_ne!(theme.text, Color::Black);
+        assert_ne!(theme.background, Color::Black);
+    }
+
+    // === RenderSettings tests ===
+
+    #[test]
+    fn test_render_settings_default() {
+        let settings = RenderSettings::default();
+        assert!(settings.markdown_enabled);
+        assert!(settings.syntax_highlighting_enabled);
+        assert!(settings.code_backgrounds_enabled);
+        assert!(settings.tables_enabled);
+        assert_eq!(settings.streaming_fps, 20);
+        assert_eq!(settings.max_messages, 200);
+        assert!(!settings.low_memory_mode);
+    }
+
+    #[test]
+    fn test_render_settings_low_memory() {
+        let settings = RenderSettings::low_memory();
+        assert!(!settings.syntax_highlighting_enabled);
+        assert!(!settings.code_backgrounds_enabled);
+        assert!(!settings.tables_enabled);
+        assert_eq!(settings.streaming_fps, 10);
+        assert_eq!(settings.max_messages, 50);
+        assert!(settings.low_memory_mode);
+    }
+
+    #[test]
+    fn test_render_settings_low_cpu() {
+        let settings = RenderSettings::low_cpu();
+        assert!(!settings.markdown_enabled);
+        assert!(!settings.syntax_highlighting_enabled);
+        assert_eq!(settings.streaming_fps, 5);
+        assert_eq!(settings.max_messages, 100);
+    }
+
+    #[test]
+    fn test_streaming_interval_ms() {
+        let settings = RenderSettings::default();
+        assert_eq!(settings.streaming_interval_ms(), 50); // 1000/20 = 50ms
+
+        let low_cpu = RenderSettings::low_cpu();
+        assert_eq!(low_cpu.streaming_interval_ms(), 200); // 1000/5 = 200ms
+    }
+
+    #[test]
+    fn test_streaming_interval_ms_zero_fps() {
+        let mut settings = RenderSettings::default();
+        settings.streaming_fps = 0;
+        assert_eq!(settings.streaming_interval_ms(), 1000); // Minimum 1 FPS
+    }
+
+    // === Theme helper tests ===
+
+    #[test]
+    fn test_theme_accent_style() {
+        let theme = Theme::default();
+        let style = theme.accent_style();
+        // Verify style is created without panic
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_text_style() {
+        let theme = Theme::default();
+        let style = theme.text_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_error_style() {
+        let theme = Theme::default();
+        let style = theme.error_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_success_style() {
+        let theme = Theme::default();
+        let style = theme.success_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_warning_style() {
+        let theme = Theme::default();
+        let style = theme.warning_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_muted_style() {
+        let theme = Theme::default();
+        let style = theme.muted_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_info_style() {
+        let theme = Theme::default();
+        let style = theme.info_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_primary_style() {
+        let theme = Theme::default();
+        let style = theme.primary_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_secondary_style() {
+        let theme = Theme::default();
+        let style = theme.secondary_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_agent_color() {
+        let theme = Theme::default();
+        let _build_color = theme.agent_color(AgentMode::Build);
+        let _plan_color = theme.agent_color(AgentMode::Plan);
+        // Test passes if no panic
+    }
+
+    #[test]
+    fn test_theme_agent_color_by_name() {
+        let theme = Theme::default();
+        let _color = theme.agent_color_by_name("build");
+        let _color2 = theme.agent_color_by_name("plan");
+        let _color3 = theme.agent_color_by_name("unknown");
+        // Test passes if no panic
+    }
+
+    #[test]
+    fn test_theme_agent_color_by_index() {
+        let theme = Theme::default();
+        let _color0 = theme.agent_color_by_index(0);
+        let _color1 = theme.agent_color_by_index(1);
+        let _color2 = theme.agent_color_by_index(2);
+        // Test passes if no panic
+    }
+
+    #[test]
+    fn test_theme_border_style() {
+        let theme = Theme::default();
+        let style = theme.border_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_border_active_style() {
+        let theme = Theme::default();
+        let style = theme.border_active_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_panel_style() {
+        let theme = Theme::default();
+        let style = theme.panel_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_element_style() {
+        let theme = Theme::default();
+        let style = theme.element_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_highlight_style() {
+        let theme = Theme::default();
+        let style = theme.highlight_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_user_style() {
+        let theme = Theme::default();
+        let style = theme.user_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_assistant_style() {
+        let theme = Theme::default();
+        let style = theme.assistant_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_tool_style() {
+        let theme = Theme::default();
+        let style = theme.tool_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_diff_added_style() {
+        let theme = Theme::default();
+        let style = theme.diff_added_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_diff_removed_style() {
+        let theme = Theme::default();
+        let style = theme.diff_removed_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+
+    #[test]
+    fn test_theme_code_style() {
+        let theme = Theme::default();
+        let style = theme.code_style();
+        assert!(format!("{:?}", style).contains("Style"));
+    }
+}
