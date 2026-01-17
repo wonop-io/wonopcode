@@ -174,4 +174,53 @@ mod tests {
         let result = Advertiser::new();
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_advertiser_initial_state() {
+        let advertiser = Advertiser::new().unwrap();
+        assert!(!advertiser.is_advertising());
+        assert!(advertiser.service_fullname().is_none());
+    }
+
+    #[test]
+    fn test_advertiser_stop_when_not_advertising() {
+        let mut advertiser = Advertiser::new().unwrap();
+        // Should not error when stopping while not advertising
+        let result = advertiser.stop();
+        assert!(result.is_ok());
+        assert!(!advertiser.is_advertising());
+    }
+
+    #[test]
+    fn test_advertiser_poll_when_not_advertising() {
+        let advertiser = Advertiser::new().unwrap();
+        // Should not error when polling while not advertising
+        let result = advertiser.poll();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_advertiser_drop_when_not_advertising() {
+        // Just verify drop doesn't panic when not advertising
+        let advertiser = Advertiser::new().unwrap();
+        drop(advertiser);
+    }
+
+    #[test]
+    fn test_advertise_config_for_advertiser() {
+        // Test that AdvertiseConfig can be created for use with Advertiser
+        let config = AdvertiseConfig::new("TestService", 8080, "1.0.0")
+            .with_model("claude")
+            .with_project("test-project")
+            .with_cwd("/home/user")
+            .with_auth(true);
+
+        assert_eq!(config.name, "TestService");
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.version, "1.0.0");
+        assert_eq!(config.model, Some("claude".to_string()));
+        assert_eq!(config.project, Some("test-project".to_string()));
+        assert_eq!(config.cwd, Some("/home/user".to_string()));
+        assert!(config.auth_required);
+    }
 }

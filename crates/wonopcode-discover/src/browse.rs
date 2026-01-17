@@ -227,10 +227,166 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_browser_creation() {
         let result = Browser::new();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_server_info_fields() {
+        // Test that ServerInfo can be created with all fields
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 8080);
+        let info = ServerInfo {
+            name: "TestServer".to_string(),
+            address: addr,
+            hostname: Some("test.local".to_string()),
+            version: Some("1.0.0".to_string()),
+            model: Some("claude-3".to_string()),
+            project: Some("test-project".to_string()),
+            cwd: Some("/home/user/project".to_string()),
+            auth_required: true,
+        };
+
+        assert_eq!(info.name, "TestServer");
+        assert_eq!(info.address.port(), 8080);
+        assert_eq!(info.hostname, Some("test.local".to_string()));
+        assert_eq!(info.version, Some("1.0.0".to_string()));
+        assert_eq!(info.model, Some("claude-3".to_string()));
+        assert_eq!(info.project, Some("test-project".to_string()));
+        assert_eq!(info.cwd, Some("/home/user/project".to_string()));
+        assert!(info.auth_required);
+    }
+
+    #[test]
+    fn test_server_info_minimal() {
+        // Test ServerInfo with minimal fields
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3000);
+        let info = ServerInfo {
+            name: "MinimalServer".to_string(),
+            address: addr,
+            hostname: None,
+            version: None,
+            model: None,
+            project: None,
+            cwd: None,
+            auth_required: false,
+        };
+
+        assert_eq!(info.name, "MinimalServer");
+        assert!(!info.auth_required);
+        assert!(info.hostname.is_none());
+        assert!(info.version.is_none());
+    }
+
+    #[test]
+    fn test_server_info_clone_preserves_all_fields() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 9999);
+        let original = ServerInfo {
+            name: "CloneTest".to_string(),
+            address: addr,
+            hostname: Some("clone.local".to_string()),
+            version: Some("2.0.0".to_string()),
+            model: Some("gpt-4".to_string()),
+            project: Some("clone-project".to_string()),
+            cwd: Some("/var/clone".to_string()),
+            auth_required: true,
+        };
+
+        let cloned = original.clone();
+
+        assert_eq!(cloned.name, original.name);
+        assert_eq!(cloned.address, original.address);
+        assert_eq!(cloned.hostname, original.hostname);
+        assert_eq!(cloned.version, original.version);
+        assert_eq!(cloned.model, original.model);
+        assert_eq!(cloned.project, original.project);
+        assert_eq!(cloned.cwd, original.cwd);
+        assert_eq!(cloned.auth_required, original.auth_required);
+    }
+
+    #[test]
+    fn test_server_info_hashmap_key() {
+        // Test that ServerInfo can be stored in a HashMap by name (like the browse function does)
+        let mut servers: HashMap<String, ServerInfo> = HashMap::new();
+
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
+        let info1 = ServerInfo {
+            name: "Server1".to_string(),
+            address: addr1,
+            hostname: None,
+            version: None,
+            model: None,
+            project: None,
+            cwd: None,
+            auth_required: false,
+        };
+
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)), 8081);
+        let info2 = ServerInfo {
+            name: "Server2".to_string(),
+            address: addr2,
+            hostname: None,
+            version: None,
+            model: None,
+            project: None,
+            cwd: None,
+            auth_required: true,
+        };
+
+        servers.insert(info1.name.clone(), info1);
+        servers.insert(info2.name.clone(), info2);
+
+        assert_eq!(servers.len(), 2);
+        assert!(servers.contains_key("Server1"));
+        assert!(servers.contains_key("Server2"));
+    }
+
+    #[test]
+    fn test_server_info_remove_from_hashmap() {
+        // Test the removal pattern used in on_service_event
+        let mut servers: HashMap<String, ServerInfo> = HashMap::new();
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
+        let info = ServerInfo {
+            name: "ToRemove".to_string(),
+            address: addr,
+            hostname: None,
+            version: None,
+            model: None,
+            project: None,
+            cwd: None,
+            auth_required: false,
+        };
+
+        servers.insert("ToRemove".to_string(), info);
+        assert_eq!(servers.len(), 1);
+
+        servers.remove("ToRemove");
+        assert_eq!(servers.len(), 0);
+    }
+
+    #[test]
+    fn test_ipv6_address() {
+        // Test that ServerInfo works with IPv6 addresses
+        let addr = SocketAddr::new(
+            IpAddr::V6(std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+            8080,
+        );
+        let info = ServerInfo {
+            name: "IPv6Server".to_string(),
+            address: addr,
+            hostname: None,
+            version: None,
+            model: None,
+            project: None,
+            cwd: None,
+            auth_required: false,
+        };
+
+        assert!(info.address.is_ipv6());
+        assert_eq!(info.address.port(), 8080);
     }
 }
