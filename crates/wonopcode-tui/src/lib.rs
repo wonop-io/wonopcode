@@ -8,17 +8,34 @@ pub mod widgets;
 
 // Re-export from wonop-tui-core
 pub use wonopcode_tui_core::{
-    event, keybind, metrics, model_state, theme,
+    event,
     // Event types
-    is_backspace, is_enter, is_escape, is_quit, Event, EventHandler, EventLoopHandle,
+    is_backspace,
+    is_enter,
+    is_escape,
+    is_quit,
+    keybind,
+    metrics,
+    model_state,
+    theme,
+    // Theme
+    AgentMode,
+    Event,
+    EventHandler,
+    EventLoopHandle,
     // Keybind types
-    KeyAction, Keybind, KeybindConfig, KeybindManager,
+    KeyAction,
+    Keybind,
+    KeybindConfig,
+    KeybindManager,
     // Metrics
-    MetricsSummary, TuiMetrics, WidgetSummary,
+    MetricsSummary,
     // Model state
     ModelState,
-    // Theme
-    AgentMode, RenderSettings, Theme,
+    RenderSettings,
+    Theme,
+    TuiMetrics,
+    WidgetSummary,
 };
 
 pub use app::{

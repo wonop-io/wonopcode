@@ -1169,7 +1169,10 @@ mod tests {
     #[test]
     fn test_extract_api_key_non_bearer_auth() {
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", HeaderValue::from_static("Basic dXNlcjpwYXNz"));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Basic dXNlcjpwYXNz"),
+        );
 
         let key = extract_api_key(&headers);
         assert!(key.is_none());
@@ -1181,7 +1184,10 @@ mod tests {
     fn test_constant_time_eq_equal() {
         assert!(constant_time_eq(b"test", b"test"));
         assert!(constant_time_eq(b"", b""));
-        assert!(constant_time_eq(b"longer string here", b"longer string here"));
+        assert!(constant_time_eq(
+            b"longer string here",
+            b"longer string here"
+        ));
     }
 
     #[test]
@@ -1293,7 +1299,7 @@ mod tests {
         let state = AuthState {
             api_key: Some("secret".to_string()),
         };
-        let cloned = state.clone();
+        let cloned = state;
         assert_eq!(cloned.api_key, Some("secret".to_string()));
     }
 
@@ -1386,7 +1392,10 @@ mod tests {
     fn test_settings_request_deserialize() {
         let json = r#"{"scope": "project", "config": {"key": "value"}}"#;
         let req: SettingsRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.config.get("key").and_then(|v| v.as_str()), Some("value"));
+        assert_eq!(
+            req.config.get("key").and_then(|v| v.as_str()),
+            Some("value")
+        );
     }
 
     #[test]
@@ -1575,9 +1584,13 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let state = HeadlessState::new(tx);
 
-        state.update_state(|s| s.project = "/first".to_string()).await;
-        state.update_state(|s| s.project = "/second".to_string()).await;
-        
+        state
+            .update_state(|s| s.project = "/first".to_string())
+            .await;
+        state
+            .update_state(|s| s.project = "/second".to_string())
+            .await;
+
         let current = state.current_state.read().await;
         assert_eq!(current.project, "/second");
     }
@@ -1600,7 +1613,7 @@ mod tests {
 
         let current = state.current_state.read().await;
         // Default state should have empty values
-        assert!(current.project.is_empty() || current.project == "");
+        assert!(current.project.is_empty() || current.project.is_empty());
     }
 
     #[tokio::test]

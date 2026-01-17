@@ -387,9 +387,7 @@ mod tests {
 
     #[test]
     fn test_conversation_builder_with_message() {
-        let custom_msg = MessageBuilder::assistant()
-            .text("Custom message")
-            .build();
+        let custom_msg = MessageBuilder::assistant().text("Custom message").build();
 
         let history = ConversationBuilder::new()
             .user("Hi")

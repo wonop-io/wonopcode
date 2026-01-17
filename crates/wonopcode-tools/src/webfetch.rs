@@ -595,8 +595,14 @@ mod tests {
         let tool = WebFetchTool;
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
-        assert!(schema["required"].as_array().unwrap().contains(&json!("url")));
-        assert!(schema["required"].as_array().unwrap().contains(&json!("format")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("url")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("format")));
         assert!(schema["properties"]["url"].is_object());
         assert!(schema["properties"]["format"].is_object());
         assert!(schema["properties"]["timeout"].is_object());

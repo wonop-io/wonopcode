@@ -135,8 +135,8 @@ mod tests {
 
     #[test]
     fn snapshot_with_trigger() {
-        let snapshot = Snapshot::new("session-1", "message-1", "desc", vec![])
-            .with_trigger("edit_tool");
+        let snapshot =
+            Snapshot::new("session-1", "message-1", "desc", vec![]).with_trigger("edit_tool");
         assert_eq!(snapshot.trigger, Some("edit_tool".to_string()));
     }
 

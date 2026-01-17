@@ -546,11 +546,7 @@ mod tests {
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "content").unwrap();
 
-        let result = resolve_path(
-            file_path.to_str().unwrap(),
-            dir.path(),
-            dir.path(),
-        );
+        let result = resolve_path(file_path.to_str().unwrap(), dir.path(), dir.path());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), file_path);
     }
@@ -626,9 +622,7 @@ mod tests {
     async fn test_invalid_args() {
         let (_, ctx) = setup_test().await;
         let tool = MultiEditTool;
-        let result = tool
-            .execute(json!({ "not_edits": [] }), &ctx)
-            .await;
+        let result = tool.execute(json!({ "not_edits": [] }), &ctx).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Invalid arguments"));

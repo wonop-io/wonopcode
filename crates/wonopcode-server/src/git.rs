@@ -666,7 +666,7 @@ mod tests {
         // User views history - all commits should be present
         let history = ops.history(10).unwrap();
         assert_eq!(history.len(), 3);
-        
+
         // All commits should be in the history
         let messages: Vec<&str> = history.iter().map(|c| c.message.as_str()).collect();
         assert!(messages.contains(&"First commit"));
@@ -689,7 +689,7 @@ mod tests {
         // User requests only 2 commits - should get exactly 2
         let history = ops.history(2).unwrap();
         assert_eq!(history.len(), 2);
-        
+
         // Request all 5
         let history_all = ops.history(10).unwrap();
         assert_eq!(history_all.len(), 5);
@@ -919,7 +919,7 @@ mod tests {
             status: GitFileState::Added,
             staged: false,
         };
-        let cloned = status.clone();
+        let cloned = status;
         assert_eq!(cloned.path, "file.rs");
         assert_eq!(cloned.status, GitFileState::Added);
         assert!(!cloned.staged);
@@ -981,15 +981,13 @@ mod tests {
             upstream: Some("origin/feature".to_string()),
             ahead: 2,
             behind: 1,
-            files: vec![
-                GitFileStatus {
-                    path: "a.txt".to_string(),
-                    status: GitFileState::Modified,
-                    staged: true,
-                },
-            ],
+            files: vec![GitFileStatus {
+                path: "a.txt".to_string(),
+                status: GitFileState::Modified,
+                staged: true,
+            }],
         };
-        let cloned = status.clone();
+        let cloned = status;
         assert_eq!(cloned.branch, "feature");
         assert_eq!(cloned.ahead, 2);
         assert_eq!(cloned.files.len(), 1);
@@ -1033,7 +1031,7 @@ mod tests {
             email: "a@b.com".to_string(),
             timestamp: "2024".to_string(),
         };
-        let cloned = info.clone();
+        let cloned = info;
         assert_eq!(cloned.id, "xyz");
         assert_eq!(cloned.message, "Msg");
     }

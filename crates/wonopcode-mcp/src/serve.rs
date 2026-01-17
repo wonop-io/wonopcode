@@ -324,8 +324,7 @@ mod tests {
 
     #[test]
     fn test_mcp_server_tool_builder_description() {
-        let builder = McpServerToolBuilder::new("my-tool")
-            .description("This is my tool");
+        let builder = McpServerToolBuilder::new("my-tool").description("This is my tool");
         assert_eq!(builder.description, "This is my tool");
     }
 
@@ -338,8 +337,7 @@ mod tests {
             }
         });
 
-        let builder = McpServerToolBuilder::new("param-tool")
-            .parameters(params.clone());
+        let builder = McpServerToolBuilder::new("param-tool").parameters(params.clone());
         assert_eq!(builder.parameters, params);
     }
 
@@ -378,9 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_closure_executor_error() {
-        let executor = ClosureExecutor::new(|_, _| {
-            Err("Something went wrong".to_string())
-        });
+        let executor = ClosureExecutor::new(|_, _| Err("Something went wrong".to_string()));
 
         let ctx = McpToolContext::default();
         let result = executor.execute(serde_json::json!({}), &ctx).await;
@@ -391,9 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_closure_executor_uses_context() {
-        let executor = ClosureExecutor::new(|_, ctx| {
-            Ok(ctx.session_id.clone())
-        });
+        let executor = ClosureExecutor::new(|_, ctx| Ok(ctx.session_id.clone()));
 
         let ctx = McpToolContext {
             session_id: "custom-session".to_string(),

@@ -671,7 +671,7 @@ mod tests {
             method: "initialize".to_string(),
             params: None,
         };
-        
+
         let response = state.handle_request(request).await;
         assert!(response.is_some());
         let response = response.unwrap();
@@ -688,7 +688,7 @@ mod tests {
             method: "tools/list".to_string(),
             params: None,
         };
-        
+
         let response = state.handle_request(request).await;
         assert!(response.is_some());
         let response = response.unwrap();
@@ -708,7 +708,7 @@ mod tests {
                 "arguments": { "message": "test" }
             })),
         };
-        
+
         let response = state.handle_request(request).await;
         assert!(response.is_some());
         let response = response.unwrap();
@@ -725,7 +725,7 @@ mod tests {
             method: "unknown/method".to_string(),
             params: None,
         };
-        
+
         let response = state.handle_request(request).await;
         assert!(response.is_some());
         let response = response.unwrap();
@@ -743,7 +743,7 @@ mod tests {
             method: "notifications/initialized".to_string(),
             params: None,
         };
-        
+
         // Notifications should not return a response
         let response = state.handle_request(request).await;
         assert!(response.is_none());
@@ -758,7 +758,7 @@ mod tests {
             method: "notifications/unknown".to_string(),
             params: None,
         };
-        
+
         // Unknown notifications should still not return a response
         let response = state.handle_request(request).await;
         assert!(response.is_none());
@@ -768,7 +768,7 @@ mod tests {
     async fn test_call_tool_missing_params() {
         let state = create_test_state();
         let response = state.handle_call_tool(5, None).await;
-        
+
         assert_eq!(response.id, 5);
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32602);
@@ -779,7 +779,7 @@ mod tests {
         let state = create_test_state();
         let params = serde_json::json!("invalid-not-object");
         let response = state.handle_call_tool(6, Some(params)).await;
-        
+
         assert_eq!(response.id, 6);
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32602);
@@ -792,7 +792,7 @@ mod tests {
             "name": "echo"
             // no arguments field
         });
-        
+
         let response = state.handle_call_tool(7, Some(params)).await;
         assert_eq!(response.id, 7);
         // Should work with default args
@@ -803,11 +803,11 @@ mod tests {
     fn test_error_response() {
         let state = create_test_state();
         let response = state.error_response(10, -32700, "Parse error");
-        
+
         assert_eq!(response.id, 10);
         assert!(response.result.is_none());
         assert!(response.error.is_some());
-        
+
         let error = response.error.unwrap();
         assert_eq!(error.code, -32700);
         assert_eq!(error.message, "Parse error");
@@ -817,10 +817,10 @@ mod tests {
     async fn test_register_and_unregister_session() {
         let state = create_test_state();
         let (tx, _rx) = mpsc::unbounded_channel::<JsonRpcResponse>();
-        
+
         // Register
         state.register_session("test-session".to_string(), tx).await;
-        
+
         // Verify session exists by trying to send a response
         let response = JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -829,10 +829,10 @@ mod tests {
             error: None,
         };
         assert!(state.send_response("test-session", response).await.is_ok());
-        
+
         // Unregister
         state.unregister_session("test-session").await;
-        
+
         // Now sending should fail
         let response = JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -852,7 +852,7 @@ mod tests {
             result: None,
             error: None,
         };
-        
+
         assert!(state.send_response("nonexistent", response).await.is_err());
     }
 
@@ -866,7 +866,7 @@ mod tests {
             "/message",
         )
         .with_api_key("secret-key");
-        
+
         assert!(state.has_auth());
     }
 
@@ -919,7 +919,7 @@ mod tests {
         let response = state.handle_call_tool(100, Some(params)).await;
         assert_eq!(response.id, 100);
         assert!(response.error.is_none());
-        
+
         let result: ToolCallResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert!(result.is_error);
         match &result.content[0] {
@@ -937,7 +937,7 @@ mod tests {
             McpToolContext::default(),
             "http://localhost:8080/mcp/message",
         );
-        
+
         assert_eq!(state.message_url, "http://localhost:8080/mcp/message");
     }
 
@@ -946,11 +946,11 @@ mod tests {
         let state = create_test_state();
         let (tx1, _rx1) = mpsc::unbounded_channel::<JsonRpcResponse>();
         let (tx2, _rx2) = mpsc::unbounded_channel::<JsonRpcResponse>();
-        
+
         // Register multiple sessions
         state.register_session("session-1".to_string(), tx1).await;
         state.register_session("session-2".to_string(), tx2).await;
-        
+
         // Both should be able to receive responses
         let response = JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -958,13 +958,16 @@ mod tests {
             result: None,
             error: None,
         };
-        
-        assert!(state.send_response("session-1", response.clone()).await.is_ok());
+
+        assert!(state
+            .send_response("session-1", response.clone())
+            .await
+            .is_ok());
         assert!(state.send_response("session-2", response).await.is_ok());
-        
+
         // Unregister one
         state.unregister_session("session-1").await;
-        
+
         // Only session-2 should work
         let response = JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -972,8 +975,11 @@ mod tests {
             result: None,
             error: None,
         };
-        
-        assert!(state.send_response("session-1", response.clone()).await.is_err());
+
+        assert!(state
+            .send_response("session-1", response.clone())
+            .await
+            .is_err());
         assert!(state.send_response("session-2", response).await.is_ok());
     }
 

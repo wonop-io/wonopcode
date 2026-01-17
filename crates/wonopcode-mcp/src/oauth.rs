@@ -704,9 +704,7 @@ mod tests {
         assert!(result.is_err());
 
         // Save code verifier
-        provider
-            .save_code_verifier("verifier123".to_string())
-            .await;
+        provider.save_code_verifier("verifier123".to_string()).await;
 
         // Now should be available
         let result = provider.code_verifier().await;
@@ -744,9 +742,7 @@ mod tests {
         );
 
         // Save temp state
-        provider
-            .save_code_verifier("verifier123".to_string())
-            .await;
+        provider.save_code_verifier("verifier123".to_string()).await;
         provider.save_oauth_state("state123".to_string()).await;
 
         // Clear temp state
@@ -1050,7 +1046,7 @@ mod tests {
 
         let json = serde_json::to_string(&state).unwrap();
         let parsed: OAuthState = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.server_url, Some("https://example.com".to_string()));
         assert_eq!(parsed.client_info.unwrap().client_id, "client123");
     }

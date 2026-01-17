@@ -1711,7 +1711,7 @@ async fn config_providers() -> impl IntoResponse {
 // =============================================================================
 
 #[derive(Debug, Serialize)]
-struct ProviderInfo {
+pub struct ProviderInfo {
     id: String,
     name: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -3085,9 +3085,18 @@ mod tests {
     fn test_config_update_request_deserialize_multiple() {
         let json = r#"{"model": "gpt-4o", "temperature": 0.7, "enabled": true}"#;
         let req: ConfigUpdateRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.updates.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
-        assert_eq!(req.updates.get("temperature").and_then(|v| v.as_f64()), Some(0.7));
-        assert_eq!(req.updates.get("enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            req.updates.get("model").and_then(|v| v.as_str()),
+            Some("gpt-4o")
+        );
+        assert_eq!(
+            req.updates.get("temperature").and_then(|v| v.as_f64()),
+            Some(0.7)
+        );
+        assert_eq!(
+            req.updates.get("enabled").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     // === ProviderInfo tests ===
@@ -3200,7 +3209,10 @@ mod tests {
         assert_eq!(req.name, "test-server");
         assert_eq!(req.url, "http://localhost:8080");
         let headers = req.headers.unwrap();
-        assert_eq!(headers.get("Authorization"), Some(&"Bearer token".to_string()));
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer token".to_string())
+        );
     }
 
     // === EventReplayQuery tests ===
@@ -3329,7 +3341,10 @@ mod tests {
         assert_eq!(req.name, "mcp-server");
         assert_eq!(req.url, "http://localhost:9000");
         let headers = req.headers.unwrap();
-        assert_eq!(headers.get("Authorization"), Some(&"Bearer token".to_string()));
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer token".to_string())
+        );
         assert_eq!(headers.get("X-Custom"), Some(&"value".to_string()));
     }
 
@@ -3898,7 +3913,10 @@ mod tests {
         let result = parse_command("/model claude-sonnet-4-5 some extra args");
         assert_eq!(
             result,
-            Some(("model".to_string(), "claude-sonnet-4-5 some extra args".to_string()))
+            Some((
+                "model".to_string(),
+                "claude-sonnet-4-5 some extra args".to_string()
+            ))
         );
     }
 
@@ -4053,7 +4071,10 @@ mod tests {
         let anthropic = providers.iter().find(|p| p.id == "anthropic");
         assert!(anthropic.is_some());
         assert_eq!(anthropic.unwrap().name, "Anthropic");
-        assert!(anthropic.unwrap().env.contains(&"ANTHROPIC_API_KEY".to_string()));
+        assert!(anthropic
+            .unwrap()
+            .env
+            .contains(&"ANTHROPIC_API_KEY".to_string()));
     }
 
     #[test]

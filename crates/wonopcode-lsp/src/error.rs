@@ -77,15 +77,39 @@ mod tests {
     #[test]
     fn test_error_display() {
         let errors = vec![
-            (LspError::ServerNotFound("rust".to_string()), "Server not found for language: rust"),
-            (LspError::NoServerForFile("test.rs".to_string()), "No server configured for file: test.rs"),
-            (LspError::ConnectionFailed("timeout".to_string()), "Connection failed: timeout"),
-            (LspError::ProcessError("exit 1".to_string()), "Server process error: exit 1"),
-            (LspError::ProtocolError("invalid".to_string()), "Protocol error: invalid"),
-            (LspError::RequestFailed("not found".to_string()), "Request failed: not found"),
+            (
+                LspError::ServerNotFound("rust".to_string()),
+                "Server not found for language: rust",
+            ),
+            (
+                LspError::NoServerForFile("test.rs".to_string()),
+                "No server configured for file: test.rs",
+            ),
+            (
+                LspError::ConnectionFailed("timeout".to_string()),
+                "Connection failed: timeout",
+            ),
+            (
+                LspError::ProcessError("exit 1".to_string()),
+                "Server process error: exit 1",
+            ),
+            (
+                LspError::ProtocolError("invalid".to_string()),
+                "Protocol error: invalid",
+            ),
+            (
+                LspError::RequestFailed("not found".to_string()),
+                "Request failed: not found",
+            ),
             (LspError::Timeout, "Server timeout"),
-            (LspError::InitializationFailed("init".to_string()), "Server initialization failed: init"),
-            (LspError::InvalidUri("bad://uri".to_string()), "Invalid URI: bad://uri"),
+            (
+                LspError::InitializationFailed("init".to_string()),
+                "Server initialization failed: init",
+            ),
+            (
+                LspError::InvalidUri("bad://uri".to_string()),
+                "Invalid URI: bad://uri",
+            ),
         ];
 
         for (error, expected) in errors {

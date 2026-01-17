@@ -356,9 +356,7 @@ mod tests {
     async fn test_set_mode_session_not_found() {
         let manager = SessionManager::new();
 
-        let result = manager
-            .set_mode("nonexistent", "default".to_string())
-            .await;
+        let result = manager.set_mode("nonexistent", "default".to_string()).await;
 
         assert!(result.is_err());
     }

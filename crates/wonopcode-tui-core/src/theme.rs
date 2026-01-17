@@ -855,7 +855,6 @@ impl RenderSettings {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -991,8 +990,10 @@ mod tests {
 
     #[test]
     fn test_streaming_interval_ms_zero_fps() {
-        let mut settings = RenderSettings::default();
-        settings.streaming_fps = 0;
+        let settings = RenderSettings {
+            streaming_fps: 0,
+            ..Default::default()
+        };
         assert_eq!(settings.streaming_interval_ms(), 1000); // Minimum 1 FPS
     }
 
@@ -1003,63 +1004,63 @@ mod tests {
         let theme = Theme::default();
         let style = theme.accent_style();
         // Verify style is created without panic
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_text_style() {
         let theme = Theme::default();
         let style = theme.text_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_error_style() {
         let theme = Theme::default();
         let style = theme.error_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_success_style() {
         let theme = Theme::default();
         let style = theme.success_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_warning_style() {
         let theme = Theme::default();
         let style = theme.warning_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_muted_style() {
         let theme = Theme::default();
         let style = theme.muted_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_info_style() {
         let theme = Theme::default();
         let style = theme.info_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_primary_style() {
         let theme = Theme::default();
         let style = theme.primary_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_secondary_style() {
         let theme = Theme::default();
         let style = theme.secondary_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
@@ -1092,76 +1093,76 @@ mod tests {
     fn test_theme_border_style() {
         let theme = Theme::default();
         let style = theme.border_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_border_active_style() {
         let theme = Theme::default();
         let style = theme.border_active_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_panel_style() {
         let theme = Theme::default();
         let style = theme.panel_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_element_style() {
         let theme = Theme::default();
         let style = theme.element_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_highlight_style() {
         let theme = Theme::default();
         let style = theme.highlight_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_user_style() {
         let theme = Theme::default();
         let style = theme.user_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_assistant_style() {
         let theme = Theme::default();
         let style = theme.assistant_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_tool_style() {
         let theme = Theme::default();
         let style = theme.tool_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_diff_added_style() {
         let theme = Theme::default();
         let style = theme.diff_added_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_diff_removed_style() {
         let theme = Theme::default();
         let style = theme.diff_removed_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 
     #[test]
     fn test_theme_code_style() {
         let theme = Theme::default();
         let style = theme.code_style();
-        assert!(format!("{:?}", style).contains("Style"));
+        assert!(format!("{style:?}").contains("Style"));
     }
 }

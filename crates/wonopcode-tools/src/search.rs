@@ -442,7 +442,8 @@ data: [DONE]"#;
 
     #[test]
     fn test_parse_direct_json_error() {
-        let json_data = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Direct error"}}"#;
+        let json_data =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Direct error"}}"#;
 
         let result = parse_sse_response(json_data);
         assert!(result.is_err());
@@ -478,8 +479,7 @@ data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Valid 
 
     #[test]
     fn test_parse_sse_non_text_content_type() {
-        let sse_data =
-            r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"image","data":"base64"}]}}"#;
+        let sse_data = r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"image","data":"base64"}]}}"#;
 
         let result = parse_sse_response(sse_data).unwrap();
         assert_eq!(result, "No results found");
@@ -487,8 +487,7 @@ data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Valid 
 
     #[test]
     fn test_parse_sse_text_without_text_field() {
-        let sse_data =
-            r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text"}]}}"#;
+        let sse_data = r#"data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text"}]}}"#;
 
         let result = parse_sse_response(sse_data).unwrap();
         assert_eq!(result, "No results found");

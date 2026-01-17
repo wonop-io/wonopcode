@@ -417,7 +417,9 @@ This skill provides step-by-step instructions...
         let content = "# No frontmatter here";
         let result = parse_frontmatter(content);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing frontmatter delimiter"));
+        assert!(result
+            .unwrap_err()
+            .contains("Missing frontmatter delimiter"));
     }
 
     #[test]
@@ -634,9 +636,7 @@ This skill provides step-by-step instructions...
         let tool = SkillTool::new(registry);
         let ctx = create_test_context();
 
-        let result = tool
-            .execute(json!({"name": "nonexistent"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"name": "nonexistent"}), &ctx).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

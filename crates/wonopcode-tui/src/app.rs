@@ -1,34 +1,29 @@
 //! Main application for the TUI.
 
 use crate::widgets::{
-        autocomplete::{AutocompleteAction, FileAutocomplete},
-        dialog::{
-            AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
-            GitFileDisplay, HelpDialog, InputDialog, InputDialogResult, McpDialog, McpServerInfo,
-            McpStatus as DialogMcpStatus, ModelDialog, PerfDialog, PermissionDialog,
-            PermissionResult, SandboxAction, SandboxDialog, SandboxState as DialogSandboxState,
-            SessionDialog, SettingsDialog, SettingsResult, StatusDialog, ThemeDialog,
-            TimelineDialog, TimelineItem,
-        },
-        footer::{FooterStatus, FooterWidget},
-        help_overlay::{HelpContext, HelpOverlay},
-        input::{InputAction, InputWidget},
-        logo::LogoWidget,
-        messages::{DisplayMessage, DisplayToolCall, MessageSegment, MessagesWidget, ToolStatus},
-        mode_indicator::{DisplayMode, ModeIndicator},
-        onboarding::OnboardingOverlay,
-        search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget},
-        sidebar::{LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarWidget, TodoItem},
-        slash_commands::{SlashCommandAction, SlashCommandAutocomplete},
-        toast::{Toast, ToastManager},
-        topbar::TopBarWidget,
-        which_key::WhichKeyOverlay,
+    autocomplete::{AutocompleteAction, FileAutocomplete},
+    dialog::{
+        AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
+        GitFileDisplay, HelpDialog, InputDialog, InputDialogResult, McpDialog, McpServerInfo,
+        McpStatus as DialogMcpStatus, ModelDialog, PerfDialog, PermissionDialog, PermissionResult,
+        SandboxAction, SandboxDialog, SandboxState as DialogSandboxState, SessionDialog,
+        SettingsDialog, SettingsResult, StatusDialog, ThemeDialog, TimelineDialog, TimelineItem,
+    },
+    footer::{FooterStatus, FooterWidget},
+    help_overlay::{HelpContext, HelpOverlay},
+    input::{InputAction, InputWidget},
+    logo::LogoWidget,
+    messages::{DisplayMessage, DisplayToolCall, MessageSegment, MessagesWidget, ToolStatus},
+    mode_indicator::{DisplayMode, ModeIndicator},
+    onboarding::OnboardingOverlay,
+    search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget},
+    sidebar::{LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarWidget, TodoItem},
+    slash_commands::{SlashCommandAction, SlashCommandAutocomplete},
+    toast::{Toast, ToastManager},
+    topbar::TopBarWidget,
+    which_key::WhichKeyOverlay,
 };
 use arboard::Clipboard;
-use wonopcode_tui_core::{
-    is_escape, metrics, Event, EventHandler,
-    EventType, ModelState, AgentMode, RenderSettings, Theme,
-};
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -47,6 +42,10 @@ use ratatui::{
 use std::io::{self, Write};
 use std::process::Command;
 use tokio::sync::mpsc;
+use wonopcode_tui_core::{
+    is_escape, metrics, AgentMode, Event, EventHandler, EventType, ModelState, RenderSettings,
+    Theme,
+};
 
 // Re-export SaveScope for use in runner
 pub use crate::widgets::dialog::SaveScope;

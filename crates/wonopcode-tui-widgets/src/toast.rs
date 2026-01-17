@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn test_toast_type_clone() {
         let t = ToastType::Success;
-        let cloned = t.clone();
+        let cloned = t;
         assert_eq!(cloned, ToastType::Success);
     }
 
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn test_toast_debug() {
         let toast = Toast::new(ToastType::Info, "Test");
-        let debug = format!("{:?}", toast);
+        let debug = format!("{toast:?}");
         assert!(debug.contains("Toast"));
     }
 
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn test_toast_manager_debug() {
         let manager = ToastManager::new();
-        let debug = format!("{:?}", manager);
+        let debug = format!("{manager:?}");
         assert!(debug.contains("ToastManager"));
     }
 }

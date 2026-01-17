@@ -329,7 +329,7 @@ impl Runner {
             snapshot_store: None, // Will be initialized async in new_with_features
             mcp_client: None,     // Will be initialized async if configured
             external_mcp_server_names: Vec::new(), // Will be populated by initialize_mcp
-            unsupported_mcp_servers: Vec::new(),   // Will be populated by initialize_mcp
+            unsupported_mcp_servers: Vec::new(), // Will be populated by initialize_mcp
             doom_loop_detector: RwLock::new(DoomLoopDetector::new()),
             permission_manager,
             bus,
@@ -2267,9 +2267,11 @@ impl Runner {
                                 // Sync todos if todowrite was executed (by MCP server)
                                 if base_tool_name == "todowrite" {
                                     // Read todos from the shared file store
-                                    let phased = todo::get_phased_todos(self.todo_store.as_ref(), cwd);
+                                    let phased =
+                                        todo::get_phased_todos(self.todo_store.as_ref(), cwd);
                                     if !phased.is_empty() {
-                                        let (phases, todos) = convert_phased_todos_to_updates(&phased);
+                                        let (phases, todos) =
+                                            convert_phased_todos_to_updates(&phased);
                                         send_update(
                                             &update_tx,
                                             AppUpdate::TodosUpdated { phases, todos },
@@ -3684,7 +3686,8 @@ fn create_provider(
                                             args: args.to_vec(),
                                             env: env.clone(),
                                         };
-                                    mcp_config = mcp_config.with_external_server(name, external_server);
+                                    mcp_config =
+                                        mcp_config.with_external_server(name, external_server);
                                     info!(server = %name, "Added external MCP server");
                                 }
                             }

@@ -571,7 +571,12 @@ mod tests {
             .await
             .unwrap();
         store
-            .take(&[PathBuf::from("test.txt")], "s1", "msg_1", "Second same msg")
+            .take(
+                &[PathBuf::from("test.txt")],
+                "s1",
+                "msg_1",
+                "Second same msg",
+            )
             .await
             .unwrap();
         store
@@ -611,10 +616,7 @@ mod tests {
             .await
             .unwrap();
 
-        let latest = store
-            .latest_for_file(Path::new("test.txt"))
-            .await
-            .unwrap();
+        let latest = store.latest_for_file(Path::new("test.txt")).await.unwrap();
         assert!(latest.is_some());
         assert_eq!(latest.unwrap().id, second.id);
     }
@@ -642,8 +644,10 @@ mod tests {
     async fn take_fails_when_snapshots_disabled() {
         let dir = TempDir::new().unwrap();
         let snapshot_dir = dir.path().join(".wonopcode/snapshots");
-        let mut config = SnapshotConfig::default();
-        config.enabled = false;
+        let config = SnapshotConfig {
+            enabled: false,
+            ..Default::default()
+        };
 
         let store = SnapshotStore::new(snapshot_dir, dir.path().to_path_buf(), config)
             .await
@@ -748,9 +752,11 @@ mod tests {
     async fn cleanup_deletes_excess_per_session_snapshots() {
         let dir = TempDir::new().unwrap();
         let snapshot_dir = dir.path().join(".wonopcode/snapshots");
-        let mut config = SnapshotConfig::default();
-        config.max_per_session = 2;
-        config.auto_cleanup = false; // Manual cleanup
+        let config = SnapshotConfig {
+            max_per_session: 2,
+            auto_cleanup: false, // Manual cleanup
+            ..Default::default()
+        };
 
         let store = SnapshotStore::new(snapshot_dir, dir.path().to_path_buf(), config)
             .await

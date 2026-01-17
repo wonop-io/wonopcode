@@ -1420,13 +1420,17 @@ async fn run_headless(
                             id: p.id.clone(),
                             name: p.name.clone(),
                             status: p.status.clone(),
-                            todos: p.todos.iter().map(|t| wonopcode_protocol::TodoInfo {
-                                id: t.id.clone(),
-                                content: t.content.clone(),
-                                status: t.status.clone(),
-                                priority: t.priority.clone(),
-                                phase_id: t.phase_id.clone(),
-                            }).collect(),
+                            todos: p
+                                .todos
+                                .iter()
+                                .map(|t| wonopcode_protocol::TodoInfo {
+                                    id: t.id.clone(),
+                                    content: t.content.clone(),
+                                    status: t.status.clone(),
+                                    priority: t.priority.clone(),
+                                    phase_id: t.phase_id.clone(),
+                                })
+                                .collect(),
                         })
                         .collect();
                     state.todos = todos
@@ -1542,13 +1546,17 @@ async fn run_headless(
                             id: p.id,
                             name: p.name,
                             status: p.status,
-                            todos: p.todos.into_iter().map(|t| wonopcode_protocol::TodoInfo {
-                                id: t.id,
-                                content: t.content,
-                                status: t.status,
-                                priority: t.priority,
-                                phase_id: t.phase_id,
-                            }).collect(),
+                            todos: p
+                                .todos
+                                .into_iter()
+                                .map(|t| wonopcode_protocol::TodoInfo {
+                                    id: t.id,
+                                    content: t.content,
+                                    status: t.status,
+                                    priority: t.priority,
+                                    phase_id: t.phase_id,
+                                })
+                                .collect(),
                         })
                         .collect(),
                     todos: todos
@@ -1859,13 +1867,17 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 id: p.id,
                 name: p.name,
                 status: p.status,
-                todos: p.todos.into_iter().map(|t| wonopcode_tui::TodoUpdate {
-                    id: t.id,
-                    content: t.content,
-                    status: t.status,
-                    priority: t.priority,
-                    phase_id: t.phase_id,
-                }).collect(),
+                todos: p
+                    .todos
+                    .into_iter()
+                    .map(|t| wonopcode_tui::TodoUpdate {
+                        id: t.id,
+                        content: t.content,
+                        status: t.status,
+                        priority: t.priority,
+                        phase_id: t.phase_id,
+                    })
+                    .collect(),
             })
             .collect();
         let todos: Vec<wonopcode_tui::TodoUpdate> = state

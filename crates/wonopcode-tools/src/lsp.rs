@@ -359,7 +359,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tokio_util::sync::CancellationToken;
-    use wonopcode_lsp::{Range, Position};
+    use wonopcode_lsp::{Position, Range};
 
     fn create_test_context(dir: &TempDir) -> ToolContext {
         ToolContext {
@@ -507,8 +507,14 @@ mod tests {
                 name: "main".to_string(),
                 kind: SymbolKind::FUNCTION,
                 range: Range {
-                    start: Position { line: 0, character: 0 },
-                    end: Position { line: 5, character: 1 },
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 5,
+                        character: 1,
+                    },
                 },
                 children: vec![],
             },
@@ -516,20 +522,30 @@ mod tests {
                 name: "MyStruct".to_string(),
                 kind: SymbolKind::STRUCT,
                 range: Range {
-                    start: Position { line: 7, character: 0 },
-                    end: Position { line: 10, character: 1 },
-                },
-                children: vec![
-                    DocumentSymbolInfo {
-                        name: "field".to_string(),
-                        kind: SymbolKind::FIELD,
-                        range: Range {
-                            start: Position { line: 8, character: 4 },
-                            end: Position { line: 8, character: 14 },
-                        },
-                        children: vec![],
+                    start: Position {
+                        line: 7,
+                        character: 0,
                     },
-                ],
+                    end: Position {
+                        line: 10,
+                        character: 1,
+                    },
+                },
+                children: vec![DocumentSymbolInfo {
+                    name: "field".to_string(),
+                    kind: SymbolKind::FIELD,
+                    range: Range {
+                        start: Position {
+                            line: 8,
+                            character: 4,
+                        },
+                        end: Position {
+                            line: 8,
+                            character: 14,
+                        },
+                    },
+                    children: vec![],
+                }],
             },
         ];
 
@@ -551,8 +567,14 @@ mod tests {
                 name: "main".to_string(),
                 kind: SymbolKind::FUNCTION,
                 range: Range {
-                    start: Position { line: 0, character: 0 },
-                    end: Position { line: 5, character: 1 },
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 5,
+                        character: 1,
+                    },
                 },
                 children: vec![],
             },
@@ -560,8 +582,14 @@ mod tests {
                 name: "MyStruct".to_string(),
                 kind: SymbolKind::STRUCT,
                 range: Range {
-                    start: Position { line: 7, character: 0 },
-                    end: Position { line: 10, character: 1 },
+                    start: Position {
+                        line: 7,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 10,
+                        character: 1,
+                    },
                 },
                 children: vec![
                     DocumentSymbolInfo {

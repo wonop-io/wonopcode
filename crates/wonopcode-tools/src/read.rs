@@ -540,7 +540,9 @@ mod tests {
 
     #[test]
     fn test_is_sensitive_file_env_variants() {
-        assert!(is_sensitive_file(std::path::Path::new("/project/.env.local")));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/.env.local"
+        )));
         assert!(is_sensitive_file(std::path::Path::new(
             "/project/.env.development"
         )));
@@ -550,7 +552,9 @@ mod tests {
         assert!(is_sensitive_file(std::path::Path::new(
             "/project/.env.staging"
         )));
-        assert!(is_sensitive_file(std::path::Path::new("/project/.env.test")));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/project/.env.test"
+        )));
     }
 
     #[test]
@@ -569,7 +573,9 @@ mod tests {
     #[test]
     fn test_is_sensitive_file_rc_files() {
         assert!(is_sensitive_file(std::path::Path::new("/home/user/.npmrc")));
-        assert!(is_sensitive_file(std::path::Path::new("/home/user/.pypirc")));
+        assert!(is_sensitive_file(std::path::Path::new(
+            "/home/user/.pypirc"
+        )));
         assert!(is_sensitive_file(std::path::Path::new("/home/user/.netrc")));
     }
 

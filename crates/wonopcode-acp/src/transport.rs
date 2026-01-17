@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_transport_error_io() {
-        let err: TransportError = std::io::Error::new(std::io::ErrorKind::Other, "test").into();
+        let err: TransportError = std::io::Error::other("test").into();
         assert!(err.to_string().contains("IO error"));
     }
 

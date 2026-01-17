@@ -1207,7 +1207,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded global MCP servers from .mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(global_mcp_path);
                         }
                     }
@@ -1252,7 +1254,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded project MCP servers from .mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(project_mcp_path);
                         }
                     }
@@ -1278,7 +1282,9 @@ impl Config {
                                 servers = mcp_configs.len(),
                                 "Loaded VS Code MCP servers from .vscode/mcp.json"
                             );
-                            config.mcp = Some(merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default());
+                            config.mcp = Some(
+                                merge_hashmap(config.mcp, Some(mcp_configs)).unwrap_or_default(),
+                            );
                             sources.push(vscode_mcp_path);
                         }
                     }
@@ -1420,8 +1426,6 @@ impl Config {
         })
     }
 
-
-
     /// Merge another config into this one (other takes precedence).
     pub fn merge(mut self, other: Self) -> Self {
         // Simple fields - other overwrites if Some
@@ -1534,7 +1538,8 @@ mod tests {
         // If this fails, their provider configurations won't work
         std::env::set_var("TEST_API_KEY_12345", "secret-key-value");
 
-        let content = r#"{"provider": {"openai": {"options": {"api_key": "{env:TEST_API_KEY_12345}"}}}}"#;
+        let content =
+            r#"{"provider": {"openai": {"options": {"api_key": "{env:TEST_API_KEY_12345}"}}}}"#;
         let result = substitute_variables(content, Path::new("/tmp/config.json")).unwrap();
 
         assert!(
@@ -2034,9 +2039,9 @@ mod tests {
         let (config, sources) = Config::load(Some(dir.path())).await.unwrap();
 
         // Verify .vscode/mcp.json was loaded
-        assert!(sources.iter().any(|s| s
-            .to_string_lossy()
-            .contains(".vscode/mcp.json")));
+        assert!(sources
+            .iter()
+            .any(|s| s.to_string_lossy().contains(".vscode/mcp.json")));
 
         // Verify MCP servers were loaded
         let mcp = config.mcp.expect("MCP config should be present");
@@ -2811,7 +2816,10 @@ mod tests {
 
         let review = commands.get("review").unwrap();
         assert!(review.template.contains("$ARGUMENTS"));
-        assert_eq!(review.description, Some("Review code for issues".to_string()));
+        assert_eq!(
+            review.description,
+            Some("Review code for issues".to_string())
+        );
         assert_eq!(review.agent, Some("code-review".to_string()));
 
         let test = commands.get("test").unwrap();
@@ -2819,7 +2827,7 @@ mod tests {
     }
 
     // =========================================================================
-    // UX-Critical: Provider Configuration Tests  
+    // UX-Critical: Provider Configuration Tests
     // If these fail, AI providers won't be configured correctly
     // =========================================================================
 

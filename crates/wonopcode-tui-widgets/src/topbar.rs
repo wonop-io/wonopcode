@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn test_top_bar_widget_debug() {
         let widget = TopBarWidget::new();
-        let debug = format!("{:?}", widget);
+        let debug = format!("{widget:?}");
         assert!(debug.contains("TopBarWidget"));
     }
 }

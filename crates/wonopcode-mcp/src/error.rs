@@ -85,16 +85,40 @@ mod tests {
     #[test]
     fn test_error_display() {
         let errors = vec![
-            (McpError::ServerNotFound("test".to_string()), "Server not found: test"),
-            (McpError::ToolNotFound("tool".to_string()), "Tool not found: tool"),
-            (McpError::ConnectionFailed("timeout".to_string()), "Connection failed: timeout"),
-            (McpError::ProcessError("exit 1".to_string()), "Server process error: exit 1"),
-            (McpError::ProtocolError("invalid".to_string()), "Protocol error: invalid"),
-            (McpError::ToolError("failed".to_string()), "Tool execution failed: failed"),
+            (
+                McpError::ServerNotFound("test".to_string()),
+                "Server not found: test",
+            ),
+            (
+                McpError::ToolNotFound("tool".to_string()),
+                "Tool not found: tool",
+            ),
+            (
+                McpError::ConnectionFailed("timeout".to_string()),
+                "Connection failed: timeout",
+            ),
+            (
+                McpError::ProcessError("exit 1".to_string()),
+                "Server process error: exit 1",
+            ),
+            (
+                McpError::ProtocolError("invalid".to_string()),
+                "Protocol error: invalid",
+            ),
+            (
+                McpError::ToolError("failed".to_string()),
+                "Tool execution failed: failed",
+            ),
             (McpError::Timeout, "Server timeout"),
-            (McpError::InitializationFailed("init".to_string()), "Server initialization failed: init"),
+            (
+                McpError::InitializationFailed("init".to_string()),
+                "Server initialization failed: init",
+            ),
             (McpError::AuthRequired, "Authentication required"),
-            (McpError::AuthFailed("bad token".to_string()), "Authentication failed: bad token"),
+            (
+                McpError::AuthFailed("bad token".to_string()),
+                "Authentication failed: bad token",
+            ),
         ];
 
         for (error, expected) in errors {

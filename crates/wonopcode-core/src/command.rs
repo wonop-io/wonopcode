@@ -694,7 +694,9 @@ No closing delimiter"#;
 
         let result = parse_frontmatter(content);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing closing frontmatter delimiter"));
+        assert!(result
+            .unwrap_err()
+            .contains("Missing closing frontmatter delimiter"));
     }
 
     #[test]

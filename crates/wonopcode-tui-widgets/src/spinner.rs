@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn test_spinner_debug() {
         let spinner = Spinner::new();
-        let debug = format!("{:?}", spinner);
+        let debug = format!("{spinner:?}");
         assert!(debug.contains("Spinner"));
     }
 

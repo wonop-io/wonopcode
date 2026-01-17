@@ -316,7 +316,7 @@ mod tests {
             payload: serde_json::json!({"data": 123}),
             timestamp: 1000,
         };
-        let cloned = event.clone();
+        let cloned = event;
         assert_eq!(cloned.seq, 42);
         assert_eq!(cloned.event_type, "test");
     }

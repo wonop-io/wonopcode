@@ -194,7 +194,7 @@ mod tests {
             key: "N",
             description: "New session",
         };
-        let debug = format!("{:?}", binding);
+        let debug = format!("{binding:?}");
         assert!(debug.contains("KeyBinding"));
         assert!(debug.contains("N"));
     }
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn test_which_key_overlay_debug() {
         let overlay = WhichKeyOverlay::new();
-        let debug = format!("{:?}", overlay);
+        let debug = format!("{overlay:?}");
         assert!(debug.contains("WhichKeyOverlay"));
     }
 }

@@ -886,9 +886,7 @@ mod tests {
     #[test]
     fn test_diff_widget_set_diffs() {
         let mut widget = DiffWidget::new();
-        let diffs = vec![
-            FileDiff::new("test.rs"),
-        ];
+        let diffs = vec![FileDiff::new("test.rs")];
         widget.set_diffs(diffs);
         assert!(!widget.is_empty());
     }
@@ -1052,14 +1050,14 @@ mod tests {
     #[test]
     fn test_diff_style_clone() {
         let style = DiffStyle::SideBySide;
-        let cloned = style.clone();
+        let cloned = style;
         assert_eq!(cloned, DiffStyle::SideBySide);
     }
 
     #[test]
     fn test_diff_style_debug() {
         let style = DiffStyle::Unified;
-        let debug = format!("{:?}", style);
+        let debug = format!("{style:?}");
         assert!(debug.contains("Unified"));
     }
 
@@ -1068,14 +1066,14 @@ mod tests {
     #[test]
     fn test_diff_nav_action_debug() {
         let action = DiffNavAction::NextHunk;
-        let debug = format!("{:?}", action);
+        let debug = format!("{action:?}");
         assert!(debug.contains("NextHunk"));
     }
 
     #[test]
     fn test_diff_nav_action_clone() {
         let action = DiffNavAction::ScrollDown(10);
-        let cloned = action.clone();
+        let cloned = action;
         assert!(matches!(cloned, DiffNavAction::ScrollDown(10)));
     }
 
@@ -1084,7 +1082,7 @@ mod tests {
     #[test]
     fn test_diff_line_debug() {
         let line = DiffLine::Context("test".to_string());
-        let debug = format!("{:?}", line);
+        let debug = format!("{line:?}");
         assert!(debug.contains("Context"));
     }
 
@@ -1111,7 +1109,7 @@ mod tests {
             new_count: 6,
             lines: vec![],
         };
-        let debug = format!("{:?}", hunk);
+        let debug = format!("{hunk:?}");
         assert!(debug.contains("DiffHunk"));
     }
 

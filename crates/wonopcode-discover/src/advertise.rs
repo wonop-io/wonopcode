@@ -170,6 +170,7 @@ fn on_service_registered(
 // Helper functions for building TXT records (public for testing)
 // ============================================================================
 
+#[allow(dead_code)]
 /// Build TXT record entries from an AdvertiseConfig.
 /// Returns a HashMap of key-value pairs that would go into the TXT record.
 pub fn build_txt_entries(config: &AdvertiseConfig) -> HashMap<String, String> {
@@ -191,11 +192,13 @@ pub fn build_txt_entries(config: &AdvertiseConfig) -> HashMap<String, String> {
     entries
 }
 
+#[allow(dead_code)]
 /// Build the full service name from a service name.
 pub fn build_fullname(name: &str) -> String {
-    format!("{}._wonopcode._tcp.local.", name)
+    format!("{name}._wonopcode._tcp.local.")
 }
 
+#[allow(dead_code)]
 /// Validate a service name.
 /// Returns true if the name is valid for mDNS registration.
 pub fn validate_service_name(name: &str) -> bool {
@@ -214,6 +217,7 @@ pub fn validate_service_name(name: &str) -> bool {
     true
 }
 
+#[allow(dead_code)]
 /// Validate a port number.
 /// Returns true if the port is valid.
 pub fn validate_port(port: u16) -> bool {
@@ -222,11 +226,13 @@ pub fn validate_port(port: u16) -> bool {
     port > 0
 }
 
+#[allow(dead_code)]
 /// Format the auth_required field as a string for TXT record.
 pub fn format_auth_required(auth_required: bool) -> String {
     auth_required.to_string()
 }
 
+#[allow(dead_code)]
 /// Count the number of entries that would be in a TXT record.
 pub fn count_txt_entries(config: &AdvertiseConfig) -> usize {
     let mut count = 2; // version and auth are always present
@@ -242,6 +248,7 @@ pub fn count_txt_entries(config: &AdvertiseConfig) -> usize {
     count
 }
 
+#[allow(dead_code)]
 /// Validate an AdvertiseConfig for common issues.
 pub fn validate_config(config: &AdvertiseConfig) -> Result<(), String> {
     if !validate_service_name(&config.name) {
@@ -256,56 +263,67 @@ pub fn validate_config(config: &AdvertiseConfig) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Create a minimal AdvertiseConfig for testing.
 pub fn create_minimal_config(name: &str, port: u16) -> AdvertiseConfig {
     AdvertiseConfig::new(name, port, "0.0.0")
 }
 
+#[allow(dead_code)]
 /// Parse auth string from TXT record format.
 pub fn parse_auth_string(s: &str) -> bool {
     s == "true"
 }
 
+#[allow(dead_code)]
 /// Build a complete TXT entry for the version field.
 pub fn build_version_entry(version: &str) -> (String, String) {
     ("version".to_string(), version.to_string())
 }
 
+#[allow(dead_code)]
 /// Build a complete TXT entry for the auth field.
 pub fn build_auth_entry(auth_required: bool) -> (String, String) {
     ("auth".to_string(), auth_required.to_string())
 }
 
+#[allow(dead_code)]
 /// Build optional TXT entry for model field.
 pub fn build_model_entry(model: &Option<String>) -> Option<(String, String)> {
     model.as_ref().map(|m| ("model".to_string(), m.clone()))
 }
 
+#[allow(dead_code)]
 /// Build optional TXT entry for project field.
 pub fn build_project_entry(project: &Option<String>) -> Option<(String, String)> {
     project.as_ref().map(|p| ("project".to_string(), p.clone()))
 }
 
+#[allow(dead_code)]
 /// Build optional TXT entry for cwd field.
 pub fn build_cwd_entry(cwd: &Option<String>) -> Option<(String, String)> {
     cwd.as_ref().map(|c| ("cwd".to_string(), c.clone()))
 }
 
+#[allow(dead_code)]
 /// Check if a config has optional model field.
 pub fn has_model(config: &AdvertiseConfig) -> bool {
     config.model.is_some()
 }
 
+#[allow(dead_code)]
 /// Check if a config has optional project field.
 pub fn has_project(config: &AdvertiseConfig) -> bool {
     config.project.is_some()
 }
 
+#[allow(dead_code)]
 /// Check if a config has optional cwd field.
 pub fn has_cwd(config: &AdvertiseConfig) -> bool {
     config.cwd.is_some()
 }
 
+#[allow(dead_code)]
 /// Get all optional fields that are set in a config.
 pub fn get_optional_fields(config: &AdvertiseConfig) -> Vec<&'static str> {
     let mut fields = Vec::new();
@@ -321,6 +339,7 @@ pub fn get_optional_fields(config: &AdvertiseConfig) -> Vec<&'static str> {
     fields
 }
 
+#[allow(dead_code)]
 /// Describe a config for logging/debugging.
 pub fn describe_config(config: &AdvertiseConfig) -> String {
     let optional_count = count_txt_entries(config) - 2;
@@ -400,9 +419,9 @@ mod tests {
 
         assert_eq!(entries.get("version"), Some(&"1.0.0".to_string()));
         assert_eq!(entries.get("auth"), Some(&"false".to_string()));
-        assert!(entries.get("model").is_none());
-        assert!(entries.get("project").is_none());
-        assert!(entries.get("cwd").is_none());
+        assert!(!entries.contains_key("model"));
+        assert!(!entries.contains_key("project"));
+        assert!(!entries.contains_key("cwd"));
     }
 
     #[test]
@@ -423,14 +442,13 @@ mod tests {
 
     #[test]
     fn test_build_txt_entries_partial() {
-        let config = AdvertiseConfig::new("Server", 3000, "1.5.0")
-            .with_model("gpt-4");
+        let config = AdvertiseConfig::new("Server", 3000, "1.5.0").with_model("gpt-4");
         let entries = build_txt_entries(&config);
 
         assert_eq!(entries.get("version"), Some(&"1.5.0".to_string()));
         assert_eq!(entries.get("model"), Some(&"gpt-4".to_string()));
-        assert!(entries.get("project").is_none());
-        assert!(entries.get("cwd").is_none());
+        assert!(!entries.contains_key("project"));
+        assert!(!entries.contains_key("cwd"));
     }
 
     #[test]
@@ -805,7 +823,7 @@ mod tests {
     fn test_advertiser_state_after_stop() {
         let mut advertiser = Advertiser::new().unwrap();
         advertiser.stop().unwrap();
-        
+
         assert!(!advertiser.is_advertising());
         assert!(advertiser.service_fullname().is_none());
     }
@@ -814,7 +832,7 @@ mod tests {
     fn test_advertiser_poll_after_stop() {
         let mut advertiser = Advertiser::new().unwrap();
         advertiser.stop().unwrap();
-        
+
         // Polling after stop should still work
         assert!(advertiser.poll().is_ok());
     }
@@ -918,8 +936,7 @@ mod tests {
 
     #[test]
     fn test_has_model_true() {
-        let config = AdvertiseConfig::new("test", 8080, "1.0")
-            .with_model("claude-3");
+        let config = AdvertiseConfig::new("test", 8080, "1.0").with_model("claude-3");
         assert!(has_model(&config));
     }
 
@@ -931,8 +948,7 @@ mod tests {
 
     #[test]
     fn test_has_project_true() {
-        let config = AdvertiseConfig::new("test", 8080, "1.0")
-            .with_project("my-project");
+        let config = AdvertiseConfig::new("test", 8080, "1.0").with_project("my-project");
         assert!(has_project(&config));
     }
 
@@ -944,8 +960,7 @@ mod tests {
 
     #[test]
     fn test_has_cwd_true() {
-        let config = AdvertiseConfig::new("test", 8080, "1.0")
-            .with_cwd("/home/user");
+        let config = AdvertiseConfig::new("test", 8080, "1.0").with_cwd("/home/user");
         assert!(has_cwd(&config));
     }
 
@@ -968,8 +983,7 @@ mod tests {
 
     #[test]
     fn test_get_optional_fields_model_only() {
-        let config = AdvertiseConfig::new("test", 8080, "1.0")
-            .with_model("claude-3");
+        let config = AdvertiseConfig::new("test", 8080, "1.0").with_model("claude-3");
         let fields = get_optional_fields(&config);
         assert_eq!(fields, vec!["model"]);
     }

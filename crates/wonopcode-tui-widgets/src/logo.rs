@@ -124,13 +124,14 @@ mod tests {
     #[test]
     fn test_logo_widget_debug() {
         let widget = LogoWidget::new();
-        let debug = format!("{:?}", widget);
+        let debug = format!("{widget:?}");
         assert!(debug.contains("LogoWidget"));
     }
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_logo_constants() {
-        // Verify the logo constants exist and have content
+        // Verify the logo constants have expected content
         assert!(!LOGO.is_empty());
         assert!(!LOGO_SMALL.is_empty());
         assert!(LOGO.contains("$$"));

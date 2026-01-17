@@ -1,8 +1,5 @@
 //! Messages widget for displaying conversation history.
 
-use wonopcode_tui_core::metrics;
-use wonopcode_tui_core::{AgentMode, RenderSettings, Theme};
-use wonopcode_tui_render::markdown::{render_markdown_with_settings, wrap_line};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -11,6 +8,9 @@ use ratatui::{
     Frame,
 };
 use std::cell::RefCell;
+use wonopcode_tui_core::metrics;
+use wonopcode_tui_core::{AgentMode, RenderSettings, Theme};
+use wonopcode_tui_render::markdown::{render_markdown_with_settings, wrap_line};
 
 /// Maximum length for stored tool outputs (10KB).
 const MAX_TOOL_OUTPUT_LEN: usize = 10_000;
@@ -2934,7 +2934,7 @@ mod tests {
     #[test]
     fn test_message_role_clone_eq() {
         let role = MessageRole::User;
-        let cloned = role.clone();
+        let cloned = role;
         assert_eq!(role, cloned);
         assert_ne!(MessageRole::User, MessageRole::Assistant);
     }
@@ -2952,7 +2952,7 @@ mod tests {
     #[test]
     fn test_tool_status_clone_eq() {
         let status = ToolStatus::Running;
-        let cloned = status.clone();
+        let cloned = status;
         assert_eq!(status, cloned);
         assert_ne!(ToolStatus::Pending, ToolStatus::Success);
     }
@@ -2988,7 +2988,7 @@ mod tests {
     #[test]
     fn test_display_tool_call_debug() {
         let tool = DisplayToolCall::new("id-1", "bash");
-        let debug = format!("{:?}", tool);
+        let debug = format!("{tool:?}");
         assert!(debug.contains("DisplayToolCall"));
         assert!(debug.contains("bash"));
     }
@@ -3020,7 +3020,7 @@ mod tests {
     fn test_message_segment_clone_debug() {
         let segment = MessageSegment::Text("Test".to_string());
         let cloned = segment.clone();
-        assert!(format!("{:?}", cloned).contains("Text"));
+        assert!(format!("{cloned:?}").contains("Text"));
     }
 
     // === DisplayMessage tests ===
@@ -3073,10 +3073,10 @@ mod tests {
     fn test_display_message_cache_operations() {
         let msg = DisplayMessage::user("Test");
         assert!(!msg.has_cache());
-        
+
         msg.clear_cache();
         assert!(!msg.has_cache());
-        
+
         let size = msg.cache_size();
         assert_eq!(size, 0);
     }

@@ -604,17 +604,9 @@ mod tests {
 
     #[test]
     fn test_substitute_variables_multiple() {
-        let context = HookContext::new()
-            .with_env("A", "1")
-            .with_env("B", "2");
+        let context = HookContext::new().with_env("A", "1").with_env("B", "2");
 
-        assert_eq!(
-            substitute_variables("$A and $B", &context),
-            "1 and 2"
-        );
-        assert_eq!(
-            substitute_variables("${A}${B}", &context),
-            "12"
-        );
+        assert_eq!(substitute_variables("$A and $B", &context), "1 and 2");
+        assert_eq!(substitute_variables("${A}${B}", &context), "12");
     }
 }

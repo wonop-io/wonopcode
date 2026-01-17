@@ -346,7 +346,7 @@ mod tests {
             tool_index: None,
             preview: "test".to_string(),
         };
-        let debug = format!("{:?}", m);
+        let debug = format!("{m:?}");
         assert!(debug.contains("SearchMatch"));
     }
 
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn test_search_widget_debug() {
         let widget = SearchWidget::new();
-        let debug = format!("{:?}", widget);
+        let debug = format!("{widget:?}");
         assert!(debug.contains("SearchWidget"));
     }
 

@@ -794,7 +794,7 @@ mod tests {
             version: "1.0.0".to_string(),
             default_model: None,
         };
-        let cloned = config.clone();
+        let cloned = config;
         assert_eq!(cloned.name, "Test");
         assert_eq!(cloned.version, "1.0.0");
     }
@@ -866,7 +866,7 @@ mod tests {
         // This documents the actual behavior
         let result = ModelRef::parse("/model");
         assert!(result.is_some()); // Actually returns Some with empty provider
-        
+
         let result = ModelRef::parse("provider/");
         assert!(result.is_some()); // Actually returns Some with empty model
     }

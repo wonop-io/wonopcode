@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn test_sandbox_display_state_clone() {
         let state = SandboxDisplayState::Running;
-        let cloned = state.clone();
+        let cloned = state;
         assert_eq!(cloned, SandboxDisplayState::Running);
     }
 
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn test_footer_mode_clone() {
         let mode = FooterMode::Search;
-        let cloned = mode.clone();
+        let cloned = mode;
         assert_eq!(cloned, FooterMode::Search);
     }
 
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn test_footer_widget_debug() {
         let widget = FooterWidget::new();
-        let debug = format!("{:?}", widget);
+        let debug = format!("{widget:?}");
         assert!(debug.contains("FooterWidget"));
     }
 }

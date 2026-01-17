@@ -237,8 +237,7 @@ mod tests {
 
     #[test]
     fn test_tool_output_with_metadata() {
-        let output = ToolOutput::new("Title", "Content")
-            .with_metadata(json!({"key": "value"}));
+        let output = ToolOutput::new("Title", "Content").with_metadata(json!({"key": "value"}));
         assert_eq!(output.title, "Title");
         assert_eq!(output.output, "Content");
         assert_eq!(output.metadata["key"], "value");
@@ -259,7 +258,7 @@ mod tests {
         let event = ToolEvent::TodosUpdated(phased);
 
         // Test that we can clone the event
-        let cloned = event.clone();
+        let cloned = event;
         let ToolEvent::TodosUpdated(phased_todos) = cloned;
         assert_eq!(phased_todos.phases.len(), 1);
         assert_eq!(phased_todos.phases[0].todos.len(), 1);

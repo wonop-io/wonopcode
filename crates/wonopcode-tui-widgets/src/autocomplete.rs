@@ -2,7 +2,6 @@
 //!
 //! Provides autocomplete suggestions for file paths when typing '@'.
 
-use wonopcode_tui_core::Theme;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
@@ -12,6 +11,7 @@ use ratatui::{
     Frame,
 };
 use std::path::PathBuf;
+use wonopcode_tui_core::Theme;
 
 /// Maximum number of suggestions to show.
 const MAX_SUGGESTIONS: usize = 10;
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn test_autocomplete_action_debug() {
         let action = AutocompleteAction::None;
-        let debug = format!("{:?}", action);
+        let debug = format!("{action:?}");
         assert!(debug.contains("None"));
     }
 
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn test_file_autocomplete_debug() {
         let ac = FileAutocomplete::new();
-        let debug = format!("{:?}", ac);
+        let debug = format!("{ac:?}");
         assert!(debug.contains("FileAutocomplete"));
     }
 }

@@ -1039,7 +1039,9 @@ mod tests {
         let rules = PermissionManager::rules_from_config(&config);
         assert_eq!(rules.len(), 3); // read, edit, write with "external" action
         assert!(rules.iter().all(|r| r.decision == Decision::Ask));
-        assert!(rules.iter().all(|r| r.action == Some("external".to_string())));
+        assert!(rules
+            .iter()
+            .all(|r| r.action == Some("external".to_string())));
     }
 
     #[tokio::test]
@@ -1084,7 +1086,9 @@ mod tests {
         // Should have default rules + config rules, but not the old "everything" deny rule
         assert!(!rules.iter().any(|r| r.tool == "everything"));
         assert!(rules.iter().any(|r| r.tool == "read")); // From default rules
-        assert!(rules.iter().any(|r| r.tool == "edit" && r.decision == Decision::Allow));
+        assert!(rules
+            .iter()
+            .any(|r| r.tool == "edit" && r.decision == Decision::Allow));
     }
 
     #[tokio::test]
@@ -1262,7 +1266,7 @@ mod tests {
             details: serde_json::json!({"key": "value"}),
         };
 
-        let cloned = check.clone();
+        let cloned = check;
         assert_eq!(cloned.id, "1");
         assert_eq!(cloned.tool, "bash");
         assert_eq!(cloned.path, Some("/tmp".to_string()));
@@ -1278,7 +1282,7 @@ mod tests {
     #[test]
     fn test_permission_rule_clone() {
         let rule = PermissionRule::allow("bash").with_path("/tmp/*");
-        let cloned = rule.clone();
+        let cloned = rule;
         assert_eq!(cloned.tool, "bash");
         assert_eq!(cloned.path, Some("/tmp/*".to_string()));
         assert_eq!(cloned.decision, Decision::Allow);

@@ -1074,7 +1074,7 @@ mod tests {
         let target = vec!["line1", "line2", "line3"];
         // 2 out of 3 match exactly
         let sim = calculate_block_similarity(&content, &target);
-        assert!(sim >= 0.6 && sim <= 0.7);
+        assert!((0.6..=0.7).contains(&sim));
     }
 
     #[test]

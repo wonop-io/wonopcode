@@ -261,8 +261,14 @@ mod tests {
         let json = serde_json::to_string(&project).unwrap();
         let parsed: Project = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.icon.as_ref().unwrap().url.as_deref(), Some("https://example.com/icon.png"));
-        assert_eq!(parsed.icon.as_ref().unwrap().color.as_deref(), Some("#FF0000"));
+        assert_eq!(
+            parsed.icon.as_ref().unwrap().url.as_deref(),
+            Some("https://example.com/icon.png")
+        );
+        assert_eq!(
+            parsed.icon.as_ref().unwrap().color.as_deref(),
+            Some("#FF0000")
+        );
         assert_eq!(parsed.time.initialized, Some(150));
     }
 
@@ -498,7 +504,7 @@ mod tests {
             updated: 200,
             initialized: Some(150),
         };
-        let cloned = time.clone();
+        let cloned = time;
         assert_eq!(cloned.created, 100);
         assert_eq!(cloned.updated, 200);
         assert_eq!(cloned.initialized, Some(150));

@@ -1,7 +1,5 @@
 //! Input widget for the TUI with multi-line support and history.
 
-use wonopcode_tui_core::metrics;
-use wonopcode_tui_core::{AgentMode, Theme};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -11,6 +9,8 @@ use ratatui::{
     Frame,
 };
 use tui_textarea::TextArea;
+use wonopcode_tui_core::metrics;
+use wonopcode_tui_core::{AgentMode, Theme};
 
 /// Prompt history manager with optional file persistence.
 #[derive(Debug, Clone, Default)]

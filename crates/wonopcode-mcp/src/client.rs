@@ -421,11 +421,11 @@ mod tests {
     async fn test_add_disabled_server() {
         let client = McpClient::new();
         let config = ServerConfig::sse("test-server", "http://localhost:8080").disabled();
-        
+
         // Adding a disabled server should succeed but not connect
         let result = client.add_server(config).await;
         assert!(result.is_ok());
-        
+
         // Should not be in the connected servers
         let servers = client.server_names().await;
         assert!(servers.is_empty());
@@ -503,11 +503,11 @@ mod tests {
     async fn test_add_server_connection_failed() {
         let client = McpClient::new();
         let config = ServerConfig::sse("test-server", "http://127.0.0.1:1");
-        
+
         // Should fail to connect to invalid port
         let result = client.add_server(config).await;
         assert!(result.is_err());
-        
+
         // Server should not be in the list
         let servers = client.server_names().await;
         assert!(servers.is_empty());
@@ -516,7 +516,7 @@ mod tests {
     #[tokio::test]
     async fn test_close_all_multiple_times() {
         let client = McpClient::new();
-        
+
         // Should be safe to call multiple times
         assert!(client.close_all().await.is_ok());
         assert!(client.close_all().await.is_ok());
@@ -530,10 +530,10 @@ mod tests {
             .with_header("Authorization", "Bearer test-token")
             .with_header("X-Custom", "value")
             .disabled();
-        
+
         let result = client.add_server(config).await;
         assert!(result.is_ok());
-        
+
         // Should not be connected
         assert!(client.server_names().await.is_empty());
     }
@@ -541,12 +541,14 @@ mod tests {
     #[tokio::test]
     async fn test_list_tools_from_server_error_types() {
         let client = McpClient::new();
-        
+
         // Test different server name patterns
         let result = client.list_tools_from_server("").await;
         assert!(result.is_err());
-        
-        let result = client.list_tools_from_server("server-with-special-chars-!@#").await;
+
+        let result = client
+            .list_tools_from_server("server-with-special-chars-!@#")
+            .await;
         assert!(result.is_err());
     }
 
@@ -554,7 +556,7 @@ mod tests {
     async fn test_toggle_server_error_message() {
         let client = McpClient::new();
         let result = client.toggle_server("test-server").await;
-        
+
         match result {
             Err(McpError::ServerNotFound(name)) => {
                 assert_eq!(name, "test-server");
@@ -567,7 +569,7 @@ mod tests {
     async fn test_reconnect_server_error_message() {
         let client = McpClient::new();
         let result = client.reconnect_server("test-server").await;
-        
+
         match result {
             Err(McpError::ServerNotFound(name)) => {
                 assert_eq!(name, "test-server");
@@ -587,19 +589,17 @@ mod tests {
     #[test]
     fn test_request_id_concurrent() {
         use std::thread;
-        
+
         let client = Arc::new(McpClient::new());
         let mut handles = vec![];
-        
+
         for _ in 0..10 {
             let client = client.clone();
-            handles.push(thread::spawn(move || {
-                client.next_request_id()
-            }));
+            handles.push(thread::spawn(move || client.next_request_id()));
         }
-        
+
         let ids: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        
+
         // All IDs should be unique
         let mut sorted_ids = ids.clone();
         sorted_ids.sort();
@@ -613,7 +613,9 @@ mod tests {
         let _capabilities_with_tools = InitializeResult {
             protocol_version: "2024-11-05".to_string(),
             capabilities: crate::protocol::ServerCapabilities {
-                tools: Some(crate::protocol::ToolsCapability { list_changed: false }),
+                tools: Some(crate::protocol::ToolsCapability {
+                    list_changed: false,
+                }),
                 ..Default::default()
             },
             server_info: crate::protocol::ServerInfo {
@@ -638,7 +640,7 @@ mod tests {
             "boolean": true,
             "number": 42.5
         });
-        
+
         let result = client.call_tool("complex_tool", args).await;
         assert!(matches!(result, Err(McpError::ToolNotFound(_))));
     }

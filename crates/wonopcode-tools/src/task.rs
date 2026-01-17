@@ -352,9 +352,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_tool_with_executor() {
-        let executor: SubagentExecutor = Arc::new(|_args, _ctx| {
-            Box::pin(async { Ok(SubagentResult::success("executed")) })
-        });
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("executed")) }));
         let tool = TaskTool::with_executor(executor);
         assert!(tool.has_executor().await);
     }
@@ -364,9 +363,8 @@ mod tests {
         let tool = TaskTool::new();
         assert!(!tool.has_executor().await);
 
-        let executor: SubagentExecutor = Arc::new(|_args, _ctx| {
-            Box::pin(async { Ok(SubagentResult::success("done")) })
-        });
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("done")) }));
         tool.set_executor(executor).await;
 
         assert!(tool.has_executor().await);
@@ -415,9 +413,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_tool_execute_invalid_agent_type() {
-        let executor: SubagentExecutor = Arc::new(|_args, _ctx| {
-            Box::pin(async { Ok(SubagentResult::success("done")) })
-        });
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::success("done")) }));
         let tool = TaskTool::with_executor(executor);
         let ctx = create_test_context();
 
@@ -469,9 +466,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_tool_execute_failure() {
-        let executor: SubagentExecutor = Arc::new(|_args, _ctx| {
-            Box::pin(async { Ok(SubagentResult::failure("task failed")) })
-        });
+        let executor: SubagentExecutor =
+            Arc::new(|_args, _ctx| Box::pin(async { Ok(SubagentResult::failure("task failed")) }));
         let tool = TaskTool::with_executor(executor);
         let ctx = create_test_context();
 

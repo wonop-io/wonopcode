@@ -810,7 +810,7 @@ impl SidebarWidget {
         ];
         if total_todos > 0 {
             header_spans.push(Span::styled(
-                format!(" ({}/{})", total_completed, total_todos),
+                format!(" ({total_completed}/{total_todos})"),
                 theme.muted_style(),
             ));
         }

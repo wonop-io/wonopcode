@@ -362,7 +362,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_notification() {
-        let notif = JsonRpcNotification::new("notify/update", Some(serde_json::json!({"data": "test"})));
+        let notif =
+            JsonRpcNotification::new("notify/update", Some(serde_json::json!({"data": "test"})));
         assert_eq!(notif.jsonrpc, "2.0");
         assert_eq!(notif.method, "notify/update");
         assert!(notif.params.is_some());
@@ -439,13 +440,11 @@ mod tests {
     #[test]
     fn test_list_tools_result() {
         let result = ListToolsResult {
-            tools: vec![
-                McpTool {
-                    name: "tool1".to_string(),
-                    description: None,
-                    input_schema: None,
-                },
-            ],
+            tools: vec![McpTool {
+                name: "tool1".to_string(),
+                description: None,
+                input_schema: None,
+            }],
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"tools\""));
@@ -464,7 +463,9 @@ mod tests {
     #[test]
     fn test_tool_call_result() {
         let result = ToolCallResult {
-            content: vec![ToolContent::Text { text: "output".to_string() }],
+            content: vec![ToolContent::Text {
+                text: "output".to_string(),
+            }],
             is_error: false,
         };
         let json = serde_json::to_string(&result).unwrap();

@@ -56,10 +56,14 @@ impl Phase {
             .todos
             .iter()
             .all(|t| t.status == TodoStatus::Completed || t.status == TodoStatus::Cancelled);
-        let any_in_progress = self.todos.iter().any(|t| t.status == TodoStatus::InProgress);
-        let any_started = self.todos.iter().any(|t| {
-            t.status == TodoStatus::InProgress || t.status == TodoStatus::Completed
-        });
+        let any_in_progress = self
+            .todos
+            .iter()
+            .any(|t| t.status == TodoStatus::InProgress);
+        let any_started = self
+            .todos
+            .iter()
+            .any(|t| t.status == TodoStatus::InProgress || t.status == TodoStatus::Completed);
 
         if all_completed {
             PhaseStatus::Finished
@@ -239,8 +243,8 @@ impl TodoStatus {
         }
     }
 
-    /// Parse from string.
-    pub fn from_str(s: &str) -> Self {
+    /// Parse from string, defaulting to Pending for unknown values.
+    pub fn parse(s: &str) -> Self {
         match s {
             "pending" => TodoStatus::Pending,
             "in_progress" => TodoStatus::InProgress,
@@ -270,8 +274,8 @@ impl TodoPriority {
         }
     }
 
-    /// Parse from string.
-    pub fn from_str(s: &str) -> Self {
+    /// Parse from string, defaulting to Medium for unknown values.
+    pub fn parse(s: &str) -> Self {
         match s {
             "high" => TodoPriority::High,
             "medium" => TodoPriority::Medium,
@@ -295,11 +299,7 @@ pub trait TodoStore: Send + Sync {
     fn get_phased(&self, project_root: &Path) -> PhasedTodos;
 
     /// Set phased todos for a project (replaces existing).
-    fn set_phased(
-        &self,
-        project_root: &Path,
-        todos: PhasedTodos,
-    ) -> Result<(), TodoStoreError>;
+    fn set_phased(&self, project_root: &Path, todos: PhasedTodos) -> Result<(), TodoStoreError>;
 
     /// Clear all todos for a project.
     fn clear(&self, project_root: &Path);
@@ -370,11 +370,7 @@ impl TodoStore for InMemoryTodoStore {
             .unwrap_or_default()
     }
 
-    fn set_phased(
-        &self,
-        project_root: &Path,
-        todos: PhasedTodos,
-    ) -> Result<(), TodoStoreError> {
+    fn set_phased(&self, project_root: &Path, todos: PhasedTodos) -> Result<(), TodoStoreError> {
         self.todos
             .write()
             .unwrap_or_else(|e| e.into_inner())
@@ -489,11 +485,7 @@ impl TodoStore for SharedFileTodoStore {
         }
     }
 
-    fn set_phased(
-        &self,
-        _project_root: &Path,
-        todos: PhasedTodos,
-    ) -> Result<(), TodoStoreError> {
+    fn set_phased(&self, _project_root: &Path, todos: PhasedTodos) -> Result<(), TodoStoreError> {
         let content = serde_json::to_string_pretty(&todos)?;
         std::fs::write(&self.path, content)?;
         Ok(())
@@ -557,11 +549,7 @@ impl TodoStore for FileTodoStore {
         }
     }
 
-    fn set_phased(
-        &self,
-        project_root: &Path,
-        todos: PhasedTodos,
-    ) -> Result<(), TodoStoreError> {
+    fn set_phased(&self, project_root: &Path, todos: PhasedTodos) -> Result<(), TodoStoreError> {
         let path = Self::todos_file_path(project_root);
 
         // Ensure the directory exists
@@ -630,12 +618,12 @@ struct TodoWriteArgs {
 }
 
 impl TodoItemInput {
-    fn to_todo_item(self) -> TodoItem {
+    fn into_todo_item(self) -> TodoItem {
         TodoItem {
             id: self.id,
             content: self.content,
-            status: TodoStatus::from_str(&self.status),
-            priority: TodoPriority::from_str(&self.priority),
+            status: TodoStatus::parse(&self.status),
+            priority: TodoPriority::parse(&self.priority),
         }
     }
 }
@@ -760,7 +748,7 @@ Todo States:
             for phase_input in args.phases {
                 let mut phase = Phase::new(phase_input.id, phase_input.name);
                 for todo_input in phase_input.todos {
-                    phase.add_todo(todo_input.to_todo_item());
+                    phase.add_todo(todo_input.into_todo_item());
                 }
                 phased_todos.add_phase(phase);
             }
@@ -768,7 +756,7 @@ Todo States:
             // Legacy flat format - put all in a default phase
             let mut phase = Phase::new("default", "Tasks");
             for todo_input in args.todos {
-                phase.add_todo(todo_input.to_todo_item());
+                phase.add_todo(todo_input.into_todo_item());
             }
             phased_todos.add_phase(phase);
         }
@@ -1129,7 +1117,7 @@ mod tests {
 
     #[test]
     fn test_file_store_default() {
-        let store = FileTodoStore::default();
+        let store = FileTodoStore;
         assert!(store.get(&PathBuf::from("/nonexistent")).is_empty());
     }
 
@@ -1372,7 +1360,7 @@ mod tests {
         // In phased format, tasks show status icons and are under phase headers
         assert!(result.output.contains("[x]")); // Completed icon for Task A
         assert!(result.output.contains("[ ]")); // Pending icon for Task B
-        // Metadata should reflect counts
+                                                // Metadata should reflect counts
         assert_eq!(result.metadata["total"], 2);
         assert_eq!(result.metadata["completed"], 1);
         assert_eq!(result.metadata["pending"], 1);

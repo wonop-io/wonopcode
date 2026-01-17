@@ -148,8 +148,8 @@ mod tests {
 
     #[test]
     fn test_server_config_clone() {
-        let config = ServerConfig::sse("original", "http://example.com")
-            .with_header("Key", "Value");
+        let config =
+            ServerConfig::sse("original", "http://example.com").with_header("Key", "Value");
 
         let cloned = config.clone();
         assert_eq!(cloned.name, config.name);

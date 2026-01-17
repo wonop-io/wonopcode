@@ -265,7 +265,7 @@ mod tests {
             input_schema: None,
         };
 
-        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def.clone(), None);
+        let wrapper = McpToolWrapper::new(Arc::new(McpClient::new()), tool_def, None);
         assert_eq!(wrapper.tool_def().name, "test_tool");
     }
 

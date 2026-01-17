@@ -919,7 +919,10 @@ mod tests {
 
         let explore = registry.get("explore").unwrap();
         assert!(explore.sandbox.is_some());
-        assert_eq!(explore.sandbox.as_ref().unwrap().workspace_writable, Some(false));
+        assert_eq!(
+            explore.sandbox.as_ref().unwrap().workspace_writable,
+            Some(false)
+        );
     }
 
     #[test]
@@ -963,38 +966,41 @@ mod tests {
 
     #[test]
     fn test_agent_with_custom_config() {
+        use crate::config::{AgentConfig, AgentMode as ConfigAgentMode, AgentPermissionConfig};
         use std::collections::HashMap;
-        use crate::config::{AgentConfig, AgentPermissionConfig, AgentMode as ConfigAgentMode};
 
         let mut config = Config::default();
         let mut agents = HashMap::new();
 
         // Configure a custom agent
-        agents.insert("custom".to_string(), AgentConfig {
-            model: Some("custom-model".to_string()),
-            temperature: Some(0.5),
-            top_p: Some(0.9),
-            prompt: Some("Custom prompt".to_string()),
-            description: Some("Custom description".to_string()),
-            mode: Some(ConfigAgentMode::All),
-            color: Some("#FF0000".to_string()),
-            max_steps: Some(10),
-            tools: Some({
-                let mut t = HashMap::new();
-                t.insert("bash".to_string(), false);
-                t
-            }),
-            permission: Some(AgentPermissionConfig {
-                edit: Some(Permission::Deny),
-                bash: None,
-                skill: None,
-                webfetch: Some(Permission::Deny),
-                doom_loop: Some(Permission::Deny),
-                external_directory: Some(Permission::Deny),
-            }),
-            sandbox: None,
-            disable: None,
-        });
+        agents.insert(
+            "custom".to_string(),
+            AgentConfig {
+                model: Some("custom-model".to_string()),
+                temperature: Some(0.5),
+                top_p: Some(0.9),
+                prompt: Some("Custom prompt".to_string()),
+                description: Some("Custom description".to_string()),
+                mode: Some(ConfigAgentMode::All),
+                color: Some("#FF0000".to_string()),
+                max_steps: Some(10),
+                tools: Some({
+                    let mut t = HashMap::new();
+                    t.insert("bash".to_string(), false);
+                    t
+                }),
+                permission: Some(AgentPermissionConfig {
+                    edit: Some(Permission::Deny),
+                    bash: None,
+                    skill: None,
+                    webfetch: Some(Permission::Deny),
+                    doom_loop: Some(Permission::Deny),
+                    external_directory: Some(Permission::Deny),
+                }),
+                sandbox: None,
+                disable: None,
+            },
+        );
 
         config.agent = Some(agents);
         let registry = AgentRegistry::new(&config);
@@ -1012,16 +1018,19 @@ mod tests {
 
     #[test]
     fn test_disable_agent() {
-        use std::collections::HashMap;
         use crate::config::AgentConfig;
+        use std::collections::HashMap;
 
         let mut config = Config::default();
         let mut agents = HashMap::new();
 
-        agents.insert("build".to_string(), AgentConfig {
-            disable: Some(true),
-            ..Default::default()
-        });
+        agents.insert(
+            "build".to_string(),
+            AgentConfig {
+                disable: Some(true),
+                ..Default::default()
+            },
+        );
 
         config.agent = Some(agents);
         let registry = AgentRegistry::new(&config);
@@ -1032,8 +1041,10 @@ mod tests {
 
     #[test]
     fn test_custom_default_agent() {
-        let mut config = Config::default();
-        config.default_agent = Some("plan".to_string());
+        let config = Config {
+            default_agent: Some("plan".to_string()),
+            ..Default::default()
+        };
 
         let registry = AgentRegistry::new(&config);
         assert_eq!(registry.default_agent(), "plan");
@@ -1044,8 +1055,10 @@ mod tests {
 
     #[test]
     fn test_invalid_default_agent_fallback() {
-        let mut config = Config::default();
-        config.default_agent = Some("nonexistent".to_string());
+        let config = Config {
+            default_agent: Some("nonexistent".to_string()),
+            ..Default::default()
+        };
 
         let registry = AgentRegistry::new(&config);
         // Should fallback to build
@@ -1073,7 +1086,11 @@ mod tests {
 
         // Create a custom agent file
         let agent_file = dir.path().join("my-agent.md");
-        std::fs::write(&agent_file, "# Custom Agent\n\nThis is a custom agent prompt.").unwrap();
+        std::fs::write(
+            &agent_file,
+            "# Custom Agent\n\nThis is a custom agent prompt.",
+        )
+        .unwrap();
 
         let config = Config::default();
         let mut registry = AgentRegistry::new(&config);
@@ -1128,14 +1145,16 @@ mod tests {
     fn test_build_default_permission_with_config() {
         use crate::config::PermissionConfig;
 
-        let mut config = Config::default();
-        config.permission = Some(PermissionConfig {
-            edit: Some(Permission::Deny),
-            bash: Some(PermissionOrMap::Single(Permission::Ask)),
-            webfetch: Some(Permission::Deny),
-            external_directory: Some(Permission::Deny),
-            allow_all_in_sandbox: None,
-        });
+        let config = Config {
+            permission: Some(PermissionConfig {
+                edit: Some(Permission::Deny),
+                bash: Some(PermissionOrMap::Single(Permission::Ask)),
+                webfetch: Some(Permission::Deny),
+                external_directory: Some(Permission::Deny),
+                allow_all_in_sandbox: None,
+            }),
+            ..Default::default()
+        };
 
         let perm = AgentRegistry::build_default_permission(&config);
         assert_eq!(perm.edit, Permission::Deny);
@@ -1146,23 +1165,26 @@ mod tests {
 
     #[test]
     fn test_sandbox_config_merge() {
-        use std::collections::HashMap;
         use crate::config::{AgentConfig, AgentSandboxConfig as ConfigSandbox};
+        use std::collections::HashMap;
 
         let mut config = Config::default();
         let mut agents = HashMap::new();
 
         // Configure explore with sandbox override
-        agents.insert("explore".to_string(), AgentConfig {
-            sandbox: Some(ConfigSandbox {
-                enabled: Some(false),
-                workspace_writable: None,  // Keep existing
-                network: Some("none".to_string()),
-                bypass_tools: None,
-                resources: None,
-            }),
-            ..Default::default()
-        });
+        agents.insert(
+            "explore".to_string(),
+            AgentConfig {
+                sandbox: Some(ConfigSandbox {
+                    enabled: Some(false),
+                    workspace_writable: None, // Keep existing
+                    network: Some("none".to_string()),
+                    bypass_tools: None,
+                    resources: None,
+                }),
+                ..Default::default()
+            },
+        );
 
         config.agent = Some(agents);
         let registry = AgentRegistry::new(&config);

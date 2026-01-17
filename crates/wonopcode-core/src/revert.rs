@@ -399,7 +399,15 @@ mod tests {
         let part = MessagePart::Text(TextPart::new(&session.id, msg1.id(), "Hello"));
         session_repo.save_part(&part).await.unwrap();
 
-        let msg2 = Message::Assistant(AssistantMessage::new(&session.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        let msg2 = Message::Assistant(AssistantMessage::new(
+            &session.id,
+            msg1.id(),
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         session_repo.save_message(&msg2).await.unwrap();
 
         let revert_handler = SessionRevert::new(session_repo.clone(), bus);
@@ -430,7 +438,10 @@ mod tests {
         let revert_handler = SessionRevert::new(session_repo, bus);
 
         // Try to unrevert when there's no revert
-        let result = revert_handler.unrevert("proj_1", &session.id).await.unwrap();
+        let result = revert_handler
+            .unrevert("proj_1", &session.id)
+            .await
+            .unwrap();
         assert!(result.revert.is_none());
     }
 
@@ -453,7 +464,10 @@ mod tests {
         let revert_handler = SessionRevert::new(session_repo, bus);
 
         // Unrevert
-        let result = revert_handler.unrevert("proj_1", &session.id).await.unwrap();
+        let result = revert_handler
+            .unrevert("proj_1", &session.id)
+            .await
+            .unwrap();
         assert!(result.revert.is_none());
     }
 
@@ -495,7 +509,15 @@ mod tests {
         ));
         session_repo.save_message(&msg1).await.unwrap();
 
-        let msg2 = Message::Assistant(AssistantMessage::new(&session.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        let msg2 = Message::Assistant(AssistantMessage::new(
+            &session.id,
+            msg1.id(),
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         session_repo.save_message(&msg2).await.unwrap();
 
         let msg3 = Message::User(UserMessage::new(
@@ -612,11 +634,20 @@ mod tests {
         session_repo.save_part(&part).await.unwrap();
 
         // Create assistant message with a part
-        let assistant_msg = Message::Assistant(AssistantMessage::new(&session.id, user_msg.id(), "default", "test", "model-1", "/path", "/path"));
+        let assistant_msg = Message::Assistant(AssistantMessage::new(
+            &session.id,
+            user_msg.id(),
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         session_repo.save_message(&assistant_msg).await.unwrap();
-        
+
         // Assistant needs a part too
-        let assistant_part = MessagePart::Text(TextPart::new(&session.id, assistant_msg.id(), "Response"));
+        let assistant_part =
+            MessagePart::Text(TextPart::new(&session.id, assistant_msg.id(), "Response"));
         session_repo.save_part(&assistant_part).await.unwrap();
 
         let revert_handler = SessionRevert::new(session_repo.clone(), bus);

@@ -1059,7 +1059,7 @@ mod tests {
             max_steps: Some(20),
         };
 
-        let cloned = config.clone();
+        let cloned = config;
         assert_eq!(cloned.name, Some("coder".to_string()));
         assert_eq!(cloned.prompt, Some("Custom instructions".to_string()));
         assert_eq!(cloned.temperature, Some(0.7));
@@ -1228,8 +1228,10 @@ mod tests {
 
     #[test]
     fn prompt_event_clone() {
-        let event = PromptEvent::TextDelta { delta: "text".to_string() };
-        let cloned = event.clone();
+        let event = PromptEvent::TextDelta {
+            delta: "text".to_string(),
+        };
+        let cloned = event;
         if let PromptEvent::TextDelta { delta } = cloned {
             assert_eq!(delta, "text");
         } else {

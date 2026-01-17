@@ -28,7 +28,7 @@ mod tests {
             cwd: None,
             auth_required: false,
         };
-        let display = format!("{}", info);
+        let display = format!("{info}");
         assert_eq!(display, "TestServer (192.168.1.100:8080)");
     }
 
@@ -45,7 +45,7 @@ mod tests {
             cwd: None,
             auth_required: false,
         };
-        let display = format!("{}", info);
+        let display = format!("{info}");
         assert_eq!(display, "TestServer (192.168.1.100:8080) [my-project]");
     }
 
@@ -62,7 +62,7 @@ mod tests {
             cwd: None,
             auth_required: true,
         };
-        let display = format!("{}", info);
+        let display = format!("{info}");
         assert_eq!(display, "TestServer (192.168.1.100:8080) 🔒");
     }
 
@@ -79,7 +79,7 @@ mod tests {
             cwd: None,
             auth_required: true,
         };
-        let display = format!("{}", info);
+        let display = format!("{info}");
         assert_eq!(display, "TestServer (192.168.1.100:8080) [my-project] 🔒");
     }
 
@@ -120,7 +120,7 @@ mod tests {
             cwd: None,
             auth_required: false,
         };
-        let debug_str = format!("{:?}", info);
+        let debug_str = format!("{info:?}");
         assert!(debug_str.contains("ServerInfo"));
         assert!(debug_str.contains("Test"));
     }
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn test_advertise_config_debug() {
         let config = AdvertiseConfig::new("Server", 8080, "1.0");
-        let debug_str = format!("{:?}", config);
+        let debug_str = format!("{config:?}");
         assert!(debug_str.contains("AdvertiseConfig"));
         assert!(debug_str.contains("Server"));
     }

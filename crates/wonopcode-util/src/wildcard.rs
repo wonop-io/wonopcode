@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn test_find_matching_pattern_returns_first_match() {
         let patterns = &["echo *", "cat *", "ls *"];
-        assert_eq!(find_matching_pattern(patterns, "echo hello"), Some("echo *"));
+        assert_eq!(
+            find_matching_pattern(patterns, "echo hello"),
+            Some("echo *")
+        );
         assert_eq!(find_matching_pattern(patterns, "cat file"), Some("cat *"));
         assert_eq!(find_matching_pattern(patterns, "unknown"), None);
     }

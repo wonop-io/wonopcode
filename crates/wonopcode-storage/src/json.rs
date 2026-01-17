@@ -309,9 +309,14 @@ mod tests {
         };
 
         storage.write(&["test", "item"], &data).await.unwrap();
-        
+
         // Verify file was created in correct location
-        let expected_path = dir.path().join(".wonopcode").join("data").join("test").join("item.json");
+        let expected_path = dir
+            .path()
+            .join(".wonopcode")
+            .join("data")
+            .join("test")
+            .join("item.json");
         assert!(expected_path.exists());
     }
 

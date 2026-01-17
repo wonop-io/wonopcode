@@ -359,7 +359,10 @@ mod tests {
 
     #[test]
     fn test_extract_path_args_mkdir() {
-        assert_eq!(extract_path_args("mkdir -p /tmp/new/dir"), vec!["/tmp/new/dir"]);
+        assert_eq!(
+            extract_path_args("mkdir -p /tmp/new/dir"),
+            vec!["/tmp/new/dir"]
+        );
     }
 
     #[test]
@@ -403,7 +406,10 @@ mod tests {
         let config = BashPermissionConfig::Single(BashPermission::Deny);
         let json = serde_json::to_string(&config).unwrap();
         let parsed: BashPermissionConfig = serde_json::from_str(&json).unwrap();
-        assert!(matches!(parsed, BashPermissionConfig::Single(BashPermission::Deny)));
+        assert!(matches!(
+            parsed,
+            BashPermissionConfig::Single(BashPermission::Deny)
+        ));
     }
 
     #[test]

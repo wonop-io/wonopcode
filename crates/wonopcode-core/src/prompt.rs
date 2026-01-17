@@ -504,7 +504,10 @@ mod tests {
         };
         assert_eq!(config.max_tokens, Some(4096));
         assert_eq!(config.temperature, Some(0.5));
-        assert_eq!(config.system, Some("You are a helpful assistant".to_string()));
+        assert_eq!(
+            config.system,
+            Some("You are a helpful assistant".to_string())
+        );
         assert_eq!(config.max_steps, 50);
     }
 

@@ -476,7 +476,8 @@ mod tests {
         let rc = Version::with_pre_release(1, 0, 0, PreRelease::Rc(1));
         assert_eq!(rc.channel(), ReleaseChannel::Beta);
 
-        let nightly = Version::with_pre_release(0, 0, 0, PreRelease::Nightly("nightly-2024".into()));
+        let nightly =
+            Version::with_pre_release(0, 0, 0, PreRelease::Nightly("nightly-2024".into()));
         assert_eq!(nightly.channel(), ReleaseChannel::Nightly);
     }
 
@@ -513,9 +514,7 @@ mod tests {
         assert!(PreRelease::Alpha(1) < PreRelease::Alpha(2));
         assert!(PreRelease::Beta(1) < PreRelease::Beta(2));
         assert!(PreRelease::Rc(1) < PreRelease::Rc(2));
-        assert!(
-            PreRelease::Nightly("a".into()) < PreRelease::Nightly("b".into())
-        );
+        assert!(PreRelease::Nightly("a".into()) < PreRelease::Nightly("b".into()));
 
         // Different type comparisons: alpha < beta < rc < nightly
         assert!(PreRelease::Alpha(1) < PreRelease::Beta(1));

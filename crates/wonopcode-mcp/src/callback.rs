@@ -466,10 +466,10 @@ mod tests {
     #[tokio::test]
     async fn test_callback_server_stop_when_not_running() {
         let server = OAuthCallbackServer::new();
-        
+
         // Stop the server when not started should be safe
         server.stop().await;
-        
+
         // Should not be running
         assert!(!server.is_running().await);
     }
@@ -477,11 +477,11 @@ mod tests {
     #[tokio::test]
     async fn test_callback_server_multiple_stops() {
         let server = OAuthCallbackServer::new();
-        
+
         // Multiple stops should be safe
         server.stop().await;
         server.stop().await;
-        
+
         assert!(!server.is_running().await);
     }
 
@@ -529,17 +529,19 @@ mod tests {
     #[tokio::test]
     async fn test_cancel_pending_with_pending_auth() {
         let server = OAuthCallbackServer::new();
-        
+
         // Add a pending auth
         let (tx, rx) = oneshot::channel();
         {
             let mut state = server.state.write().await;
-            state.pending.insert("test-state".to_string(), PendingAuth { sender: tx });
+            state
+                .pending
+                .insert("test-state".to_string(), PendingAuth { sender: tx });
         }
-        
+
         // Cancel it
         server.cancel_pending("test-state").await;
-        
+
         // The receiver should get an error
         let result = rx.await;
         assert!(result.is_ok());
@@ -549,17 +551,19 @@ mod tests {
     #[tokio::test]
     async fn test_stop_cancels_pending_auths() {
         let server = OAuthCallbackServer::new();
-        
+
         // Add a pending auth
         let (tx, rx) = oneshot::channel();
         {
             let mut state = server.state.write().await;
-            state.pending.insert("test-state".to_string(), PendingAuth { sender: tx });
+            state
+                .pending
+                .insert("test-state".to_string(), PendingAuth { sender: tx });
         }
-        
+
         // Stop the server
         server.stop().await;
-        
+
         // The receiver should get an error
         let result = rx.await;
         assert!(result.is_ok());
@@ -596,14 +600,16 @@ mod tests {
     async fn test_callback_server_state_isolation() {
         let server1 = OAuthCallbackServer::new();
         let server2 = OAuthCallbackServer::new();
-        
+
         // Add pending auth to server1
         {
             let mut state = server1.state.write().await;
             let (tx, _rx) = oneshot::channel();
-            state.pending.insert("state1".to_string(), PendingAuth { sender: tx });
+            state
+                .pending
+                .insert("state1".to_string(), PendingAuth { sender: tx });
         }
-        
+
         // server2 should not have the pending auth
         {
             let state = server2.state.read().await;
@@ -626,11 +632,11 @@ mod tests {
     #[tokio::test]
     async fn test_callback_server_initial_state() {
         let server = OAuthCallbackServer::new();
-        
+
         // Check initial state
         let state = server.state.read().await;
         assert!(state.pending.is_empty());
-        
+
         // Check shutdown_tx is None
         let tx = server.shutdown_tx.lock().await;
         assert!(tx.is_none());

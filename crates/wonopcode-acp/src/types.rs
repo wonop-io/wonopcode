@@ -806,18 +806,36 @@ mod tests {
 
     #[test]
     fn tool_kind_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&ToolKind::Execute).unwrap(), "\"execute\"");
-        assert_eq!(serde_json::to_string(&ToolKind::Other).unwrap(), "\"other\"");
+        assert_eq!(
+            serde_json::to_string(&ToolKind::Execute).unwrap(),
+            "\"execute\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolKind::Other).unwrap(),
+            "\"other\""
+        );
     }
 
     // === ToolStatus tests ===
 
     #[test]
     fn tool_status_serializes_correctly() {
-        assert_eq!(serde_json::to_string(&ToolStatus::Pending).unwrap(), "\"pending\"");
-        assert_eq!(serde_json::to_string(&ToolStatus::InProgress).unwrap(), "\"in_progress\"");
-        assert_eq!(serde_json::to_string(&ToolStatus::Completed).unwrap(), "\"completed\"");
-        assert_eq!(serde_json::to_string(&ToolStatus::Failed).unwrap(), "\"failed\"");
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::InProgress).unwrap(),
+            "\"in_progress\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::Completed).unwrap(),
+            "\"completed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolStatus::Failed).unwrap(),
+            "\"failed\""
+        );
     }
 
     // === Location tests ===
@@ -832,7 +850,8 @@ mod tests {
 
     #[test]
     fn location_from_edit_tool() {
-        let input = serde_json::json!({"filePath": "/tmp/file.rs", "oldString": "a", "newString": "b"});
+        let input =
+            serde_json::json!({"filePath": "/tmp/file.rs", "oldString": "a", "newString": "b"});
         let locations = Location::from_tool_input("edit", &input);
         assert_eq!(locations.len(), 1);
         assert_eq!(locations[0].path, "/tmp/file.rs");
@@ -889,7 +908,9 @@ mod tests {
 
     #[test]
     fn prompt_part_text_serializes_correctly() {
-        let part = PromptPart::Text { text: "Hello, AI!".to_string() };
+        let part = PromptPart::Text {
+            text: "Hello, AI!".to_string(),
+        };
         let json = serde_json::to_string(&part).unwrap();
         assert!(json.contains("\"type\":\"text\""));
         assert!(json.contains("\"text\":\"Hello, AI!\""));
@@ -909,7 +930,9 @@ mod tests {
 
     #[test]
     fn prompt_part_resource_link_serializes_correctly() {
-        let part = PromptPart::ResourceLink { uri: "file:///tmp/test.txt".to_string() };
+        let part = PromptPart::ResourceLink {
+            uri: "file:///tmp/test.txt".to_string(),
+        };
         let json = serde_json::to_string(&part).unwrap();
         assert!(json.contains("\"type\":\"resource_link\""));
         assert!(json.contains("file:///tmp/test.txt"));
@@ -919,28 +942,58 @@ mod tests {
 
     #[test]
     fn stop_reason_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&StopReason::EndTurn).unwrap(), "\"end_turn\"");
-        assert_eq!(serde_json::to_string(&StopReason::MaxTokens).unwrap(), "\"max_tokens\"");
-        assert_eq!(serde_json::to_string(&StopReason::Error).unwrap(), "\"error\"");
-        assert_eq!(serde_json::to_string(&StopReason::Cancelled).unwrap(), "\"cancelled\"");
+        assert_eq!(
+            serde_json::to_string(&StopReason::EndTurn).unwrap(),
+            "\"end_turn\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopReason::MaxTokens).unwrap(),
+            "\"max_tokens\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopReason::Error).unwrap(),
+            "\"error\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopReason::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
     }
 
     // === PlanStatus tests ===
 
     #[test]
     fn plan_status_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&PlanStatus::Pending).unwrap(), "\"pending\"");
-        assert_eq!(serde_json::to_string(&PlanStatus::InProgress).unwrap(), "\"in_progress\"");
-        assert_eq!(serde_json::to_string(&PlanStatus::Completed).unwrap(), "\"completed\"");
+        assert_eq!(
+            serde_json::to_string(&PlanStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PlanStatus::InProgress).unwrap(),
+            "\"in_progress\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PlanStatus::Completed).unwrap(),
+            "\"completed\""
+        );
     }
 
     // === PermissionKind tests ===
 
     #[test]
     fn permission_kind_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&PermissionKind::AllowOnce).unwrap(), "\"allow_once\"");
-        assert_eq!(serde_json::to_string(&PermissionKind::AllowAlways).unwrap(), "\"allow_always\"");
-        assert_eq!(serde_json::to_string(&PermissionKind::RejectOnce).unwrap(), "\"reject_once\"");
+        assert_eq!(
+            serde_json::to_string(&PermissionKind::AllowOnce).unwrap(),
+            "\"allow_once\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionKind::AllowAlways).unwrap(),
+            "\"allow_always\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionKind::RejectOnce).unwrap(),
+            "\"reject_once\""
+        );
     }
 
     // === SessionUpdate variants ===
@@ -971,7 +1024,9 @@ mod tests {
             title: "Reading file".to_string(),
             kind: ToolKind::Read,
             status: ToolStatus::InProgress,
-            locations: vec![Location { path: "/tmp/test.txt".to_string() }],
+            locations: vec![Location {
+                path: "/tmp/test.txt".to_string(),
+            }],
             raw_input: serde_json::json!({"filePath": "/tmp/test.txt"}),
         };
         let json = serde_json::to_string(&update).unwrap();
@@ -983,13 +1038,11 @@ mod tests {
     #[test]
     fn session_update_plan_serializes() {
         let update = SessionUpdate::Plan {
-            entries: vec![
-                PlanEntry {
-                    content: "Task 1".to_string(),
-                    status: PlanStatus::Completed,
-                    priority: "high".to_string(),
-                },
-            ],
+            entries: vec![PlanEntry {
+                content: "Task 1".to_string(),
+                status: PlanStatus::Completed,
+                priority: "high".to_string(),
+            }],
         };
         let json = serde_json::to_string(&update).unwrap();
         assert!(json.contains("\"plan\""));

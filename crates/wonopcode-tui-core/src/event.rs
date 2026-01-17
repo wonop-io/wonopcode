@@ -142,7 +142,6 @@ pub fn is_backspace(key: &KeyEvent) -> bool {
     key.code == KeyCode::Backspace
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,49 +160,49 @@ mod tests {
     #[test]
     fn test_event_key_debug() {
         let event = Event::Key(make_key(KeyCode::Enter));
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Key"));
     }
 
     #[test]
     fn test_event_tick_debug() {
         let event = Event::Tick;
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Tick"));
     }
 
     #[test]
     fn test_event_resize_debug() {
         let event = Event::Resize(80, 24);
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Resize"));
     }
 
     #[test]
     fn test_event_paste_debug() {
         let event = Event::Paste("hello".to_string());
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Paste"));
     }
 
     #[test]
     fn test_event_message_debug() {
         let event = Event::Message("msg".to_string());
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Message"));
     }
 
     #[test]
     fn test_event_status_debug() {
         let event = Event::Status("thinking".to_string());
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Status"));
     }
 
     #[test]
     fn test_event_error_debug() {
         let event = Event::Error("error".to_string());
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Error"));
     }
 

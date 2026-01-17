@@ -234,7 +234,7 @@ mod tests {
             auth_token: Some("token".to_string()),
             timeout_secs: 30,
         };
-        let cloned = config.clone();
+        let cloned = config;
         assert_eq!(cloned.url, "https://example.com");
         assert_eq!(cloned.auth_token, Some("token".to_string()));
         assert_eq!(cloned.timeout_secs, 30);

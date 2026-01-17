@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_display_mode_clone() {
         let mode = DisplayMode::Search;
-        let cloned = mode.clone();
+        let cloned = mode;
         assert_eq!(cloned, DisplayMode::Search);
     }
 
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn test_mode_indicator_debug() {
         let indicator = ModeIndicator::new();
-        let debug = format!("{:?}", indicator);
+        let debug = format!("{indicator:?}");
         assert!(debug.contains("ModeIndicator"));
     }
 }

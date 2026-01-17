@@ -2,7 +2,6 @@
 //!
 //! Provides autocomplete suggestions for slash commands when typing '/'.
 
-use wonopcode_tui_core::Theme;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Rect,
@@ -11,6 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem},
     Frame,
 };
+use wonopcode_tui_core::Theme;
 
 /// Maximum number of suggestions to show.
 const MAX_SUGGESTIONS: usize = 15;

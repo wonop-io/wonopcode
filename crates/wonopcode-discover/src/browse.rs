@@ -228,6 +228,7 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
 // Helper functions for building ServerInfo (public for testing)
 // ============================================================================
 
+#[allow(dead_code)]
 /// Build a ServerInfo from raw discovery data.
 /// This is a testable helper function.
 pub fn build_server_info(
@@ -236,15 +237,9 @@ pub fn build_server_info(
     hostname: Option<String>,
     txt_records: Option<HashMap<String, String>>,
 ) -> ServerInfo {
-    let version = txt_records
-        .as_ref()
-        .and_then(|t| t.get("version"))
-        .cloned();
+    let version = txt_records.as_ref().and_then(|t| t.get("version")).cloned();
     let model = txt_records.as_ref().and_then(|t| t.get("model")).cloned();
-    let project = txt_records
-        .as_ref()
-        .and_then(|t| t.get("project"))
-        .cloned();
+    let project = txt_records.as_ref().and_then(|t| t.get("project")).cloned();
     let cwd = txt_records.as_ref().and_then(|t| t.get("cwd")).cloned();
     let auth_required = txt_records
         .as_ref()
@@ -264,6 +259,7 @@ pub fn build_server_info(
     }
 }
 
+#[allow(dead_code)]
 /// Normalize an IP address - converts 0.0.0.0 to 127.0.0.1.
 pub fn normalize_ip(ip: IpAddr) -> IpAddr {
     if ip.is_unspecified() {
@@ -273,6 +269,7 @@ pub fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
+#[allow(dead_code)]
 /// Parse a hostname, trimming trailing dots and returning None for empty strings.
 pub fn parse_hostname(hostname: &str) -> Option<String> {
     let h = hostname.trim_end_matches('.');
@@ -283,6 +280,7 @@ pub fn parse_hostname(hostname: &str) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 /// Handle a service add event by inserting into the servers map.
 pub fn handle_service_add(
     servers: &Mutex<HashMap<String, ServerInfo>>,
@@ -292,11 +290,13 @@ pub fn handle_service_add(
     servers.lock().unwrap().insert(name, server_info);
 }
 
+#[allow(dead_code)]
 /// Handle a service remove event by removing from the servers map.
 pub fn handle_service_remove(servers: &Mutex<HashMap<String, ServerInfo>>, name: &str) {
     servers.lock().unwrap().remove(name);
 }
 
+#[allow(dead_code)]
 /// Parse an IP address string and normalize it.
 /// Returns None if the address is invalid.
 pub fn parse_and_normalize_address(address_str: &str, port: u16) -> Option<SocketAddr> {
@@ -305,26 +305,31 @@ pub fn parse_and_normalize_address(address_str: &str, port: u16) -> Option<Socke
     Some(SocketAddr::new(normalized, port))
 }
 
+#[allow(dead_code)]
 /// Extract version from TXT records.
 pub fn extract_version(txt: &Option<HashMap<String, String>>) -> Option<String> {
     txt.as_ref().and_then(|t| t.get("version")).cloned()
 }
 
+#[allow(dead_code)]
 /// Extract model from TXT records.
 pub fn extract_model(txt: &Option<HashMap<String, String>>) -> Option<String> {
     txt.as_ref().and_then(|t| t.get("model")).cloned()
 }
 
+#[allow(dead_code)]
 /// Extract project from TXT records.
 pub fn extract_project(txt: &Option<HashMap<String, String>>) -> Option<String> {
     txt.as_ref().and_then(|t| t.get("project")).cloned()
 }
 
+#[allow(dead_code)]
 /// Extract cwd from TXT records.
 pub fn extract_cwd(txt: &Option<HashMap<String, String>>) -> Option<String> {
     txt.as_ref().and_then(|t| t.get("cwd")).cloned()
 }
 
+#[allow(dead_code)]
 /// Extract auth_required from TXT records.
 pub fn extract_auth_required(txt: &Option<HashMap<String, String>>) -> bool {
     txt.as_ref()
@@ -333,6 +338,7 @@ pub fn extract_auth_required(txt: &Option<HashMap<String, String>>) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(dead_code)]
 /// Build a complete ServerInfo from all parts.
 /// This is the full builder function that combines all extraction helpers.
 pub fn build_complete_server_info(
@@ -362,16 +368,19 @@ pub fn build_complete_server_info(
     })
 }
 
+#[allow(dead_code)]
 /// Check if a hostname is valid (non-empty after trimming dots).
 pub fn is_valid_hostname(hostname: &str) -> bool {
     !hostname.trim_end_matches('.').is_empty()
 }
 
+#[allow(dead_code)]
 /// Parse an auth value from a TXT record string.
 pub fn parse_auth_value(value: &str) -> bool {
     value == "true"
 }
 
+#[allow(dead_code)]
 /// Extract all known fields from TXT records into a struct-like format.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TxtFields {
@@ -382,6 +391,7 @@ pub struct TxtFields {
     pub auth_required: bool,
 }
 
+#[allow(dead_code)]
 /// Extract all fields from TXT records at once.
 pub fn extract_all_txt_fields(txt: &Option<HashMap<String, String>>) -> TxtFields {
     TxtFields {
@@ -822,7 +832,7 @@ mod tests {
         for i in 0..5 {
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, i as u8)), 8080);
             let info = ServerInfo {
-                name: format!("Server{}", i),
+                name: format!("Server{i}"),
                 address: addr,
                 hostname: None,
                 version: None,
@@ -831,13 +841,13 @@ mod tests {
                 cwd: None,
                 auth_required: false,
             };
-            handle_service_add(&servers, format!("Server{}", i), info);
+            handle_service_add(&servers, format!("Server{i}"), info);
         }
 
         let guard = servers.lock().unwrap();
         assert_eq!(guard.len(), 5);
         for i in 0..5 {
-            assert!(guard.contains_key(&format!("Server{}", i)));
+            assert!(guard.contains_key(&format!("Server{i}")));
         }
     }
 
@@ -1067,8 +1077,7 @@ mod tests {
     #[test]
     fn test_mutex_concurrent_access() {
         use std::thread;
-        let servers: Arc<Mutex<HashMap<String, ServerInfo>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let servers: Arc<Mutex<HashMap<String, ServerInfo>>> = Arc::new(Mutex::new(HashMap::new()));
 
         let handles: Vec<_> = (0..10)
             .map(|i| {
@@ -1077,7 +1086,7 @@ mod tests {
                     let addr =
                         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, i as u8)), 8080);
                     let info = ServerInfo {
-                        name: format!("Server{}", i),
+                        name: format!("Server{i}"),
                         address: addr,
                         hostname: None,
                         version: None,
@@ -1086,7 +1095,7 @@ mod tests {
                         cwd: None,
                         auth_required: false,
                     };
-                    handle_service_add(&servers, format!("Server{}", i), info);
+                    handle_service_add(&servers, format!("Server{i}"), info);
                 })
             })
             .collect();
@@ -1133,25 +1142,14 @@ mod tests {
 
     #[test]
     fn test_build_complete_server_info_invalid_address() {
-        let result = build_complete_server_info(
-            "Test".to_string(),
-            "not-an-ip",
-            8080,
-            "test.local",
-            None,
-        );
+        let result =
+            build_complete_server_info("Test".to_string(), "not-an-ip", 8080, "test.local", None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_build_complete_server_info_minimal() {
-        let result = build_complete_server_info(
-            "Minimal".to_string(),
-            "127.0.0.1",
-            3000,
-            "",
-            None,
-        );
+        let result = build_complete_server_info("Minimal".to_string(), "127.0.0.1", 3000, "", None);
 
         assert!(result.is_some());
         let info = result.unwrap();
@@ -1238,7 +1236,7 @@ mod tests {
             cwd: None,
             auth_required: true,
         };
-        let debug = format!("{:?}", fields);
+        let debug = format!("{fields:?}");
         assert!(debug.contains("TxtFields"));
         assert!(debug.contains("1.0"));
     }

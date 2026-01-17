@@ -1,12 +1,12 @@
 //! Status bar widget with integrated mode indicator.
 
-use wonopcode_tui_core::Theme;
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
+use wonopcode_tui_core::Theme;
 
 /// Status to display in the status bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn test_status_mode_clone() {
         let mode = StatusMode::Search;
-        let cloned = mode.clone();
+        let cloned = mode;
         assert_eq!(cloned, StatusMode::Search);
     }
 
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_status_widget_debug() {
         let widget = StatusWidget::new();
-        let debug = format!("{:?}", widget);
+        let debug = format!("{widget:?}");
         assert!(debug.contains("StatusWidget"));
     }
 }

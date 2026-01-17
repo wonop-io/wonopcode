@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn test_mock_command_executor_was_executed() {
         let executor = MockCommandExecutor::new();
-        executor.execute("test command");
+        let _ = executor.execute("test command");
         assert!(executor.was_executed("test"));
         assert!(!executor.was_executed("other"));
     }
@@ -395,8 +395,8 @@ mod tests {
     #[test]
     fn test_mock_command_executor_last_execution() {
         let executor = MockCommandExecutor::new();
-        executor.execute("first");
-        executor.execute("second");
+        let _ = executor.execute("first");
+        let _ = executor.execute("second");
 
         let last = executor.last_execution().unwrap();
         assert_eq!(last.command, "second");
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn test_mock_command_executor_clear_executions() {
         let executor = MockCommandExecutor::new();
-        executor.execute("test");
+        let _ = executor.execute("test");
         assert_eq!(executor.execution_count(), 1);
 
         executor.clear_executions();
@@ -415,8 +415,8 @@ mod tests {
     #[test]
     fn test_mock_command_executor_executions() {
         let executor = MockCommandExecutor::new();
-        executor.execute("cmd1");
-        executor.execute("cmd2");
+        let _ = executor.execute("cmd1");
+        let _ = executor.execute("cmd2");
 
         let executions = executor.executions();
         assert_eq!(executions.len(), 2);
@@ -426,8 +426,7 @@ mod tests {
 
     #[test]
     fn test_mock_command_executor_with_options() {
-        let executor = MockCommandExecutor::new()
-            .with_response("test", Ok("output".to_string()));
+        let executor = MockCommandExecutor::new().with_response("test", Ok("output".to_string()));
 
         let mut env = HashMap::new();
         env.insert("KEY".to_string(), "VALUE".to_string());
@@ -515,9 +514,7 @@ mod tests {
 
     #[test]
     fn test_mock_filesystem_all_directories() {
-        let fs = MockFileSystem::new()
-            .with_dir("/dir1")
-            .with_dir("/dir2");
+        let fs = MockFileSystem::new().with_dir("/dir1").with_dir("/dir2");
 
         let dirs = fs.all_directories();
         assert_eq!(dirs.len(), 2);
@@ -542,8 +539,10 @@ mod tests {
 
     #[test]
     fn test_mock_http_client_post() {
-        let client = MockHttpClient::new()
-            .with_response("/api/create", MockHttpResponse::json(r#"{"created": true}"#));
+        let client = MockHttpClient::new().with_response(
+            "/api/create",
+            MockHttpResponse::json(r#"{"created": true}"#),
+        );
 
         let response = client.post("/api/create", r#"{"name": "test"}"#).unwrap();
         assert_eq!(response.status, 200);

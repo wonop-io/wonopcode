@@ -864,10 +864,7 @@ mod tests {
 
     #[test]
     fn test_status_serialization() {
-        assert_eq!(
-            serde_json::to_string(&Status::Idle).unwrap(),
-            "\"idle\""
-        );
+        assert_eq!(serde_json::to_string(&Status::Idle).unwrap(), "\"idle\"");
         assert_eq!(
             serde_json::to_string(&Status::Running).unwrap(),
             "\"running\""

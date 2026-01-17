@@ -531,7 +531,9 @@ impl SessionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{AssistantMessage, ModelRef, TextPart, ToolPart, ToolState, ToolTime, UserMessage};
+    use crate::message::{
+        AssistantMessage, ModelRef, TextPart, ToolPart, ToolState, ToolTime, UserMessage,
+    };
 
     fn create_test_storage() -> JsonStorage {
         let dir = tempfile::tempdir().unwrap();
@@ -605,7 +607,7 @@ mod tests {
         let child = Session::child(&parent);
         assert_eq!(child.project_id, parent.project_id);
         assert_eq!(child.directory, parent.directory);
-        assert_eq!(child.parent_id, Some(parent.id.clone()));
+        assert_eq!(child.parent_id, Some(parent.id));
         assert!(child.title.contains("Subtask of"));
     }
 
@@ -786,11 +788,10 @@ mod tests {
                 model_id: "model-1".to_string(),
             },
         ));
-        let parts = vec![MessagePart::Text(TextPart::new("ses_123", "msg_1", "Hello"))];
-        let msg_with_parts = MessageWithParts {
-            message: message.clone(),
-            parts: parts.clone(),
-        };
+        let parts = vec![MessagePart::Text(TextPart::new(
+            "ses_123", "msg_1", "Hello",
+        ))];
+        let msg_with_parts = MessageWithParts { message, parts };
         assert_eq!(msg_with_parts.parts.len(), 1);
     }
 
@@ -805,18 +806,9 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create multiple sessions
-        let session1 = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
-        let session2 = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
-        let _session3 = repo
-            .create(Session::new("proj_2", "/other"))
-            .await
-            .unwrap();
+        let session1 = repo.create(Session::new("proj_1", "/path")).await.unwrap();
+        let session2 = repo.create(Session::new("proj_1", "/path")).await.unwrap();
+        let _session3 = repo.create(Session::new("proj_2", "/other")).await.unwrap();
 
         // List sessions for proj_1
         let sessions = repo.list("proj_1").await.unwrap();
@@ -838,10 +830,7 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create parent session
-        let parent = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let parent = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Create child sessions
         let child1 = Session::child(&parent);
@@ -851,10 +840,7 @@ mod tests {
         let child2 = repo.create(child2).await.unwrap();
 
         // Create unrelated session
-        let _unrelated = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let _unrelated = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Get children
         let children = repo.children("proj_1", &parent.id).await.unwrap();
@@ -881,9 +867,7 @@ mod tests {
         let bus = Bus::new();
         let repo = SessionRepository::new(storage, bus);
 
-        let result = repo
-            .update("proj_1", "nonexistent", |_s| {})
-            .await;
+        let result = repo.update("proj_1", "nonexistent", |_s| {}).await;
         assert!(result.is_err());
     }
 
@@ -951,10 +935,7 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create session
-        let session = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let session = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Create a user message
         let user_msg = Message::User(UserMessage::new(
@@ -988,10 +969,7 @@ mod tests {
         let bus = Bus::new();
         let repo = SessionRepository::new(storage, bus);
 
-        let session = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let session = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Create multiple messages
         for _ in 0..5 {
@@ -1090,10 +1068,7 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create original session
-        let original = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let original = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Add messages to original
         let msg1 = Message::User(UserMessage::new(
@@ -1106,14 +1081,19 @@ mod tests {
         ));
         repo.save_message(&msg1).await.unwrap();
 
-        let msg2 = Message::Assistant(AssistantMessage::new(&original.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        let msg2 = Message::Assistant(AssistantMessage::new(
+            &original.id,
+            msg1.id(),
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         repo.save_message(&msg2).await.unwrap();
 
         // Fork the session (all messages)
-        let forked = repo
-            .fork("proj_1", &original.id, None)
-            .await
-            .unwrap();
+        let forked = repo.fork("proj_1", &original.id, None).await.unwrap();
 
         assert_ne!(forked.id, original.id);
         assert!(forked.title.contains("Fork of"));
@@ -1130,10 +1110,7 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create original session
-        let original = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let original = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         // Add messages - fork compares by message ID (ascending sort by created_at)
         let msg1 = Message::User(UserMessage::new(
@@ -1147,7 +1124,15 @@ mod tests {
         repo.save_message(&msg1).await.unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
 
-        let msg2 = Message::Assistant(AssistantMessage::new(&original.id, msg1.id(), "default", "test", "model-1", "/path", "/path"));
+        let msg2 = Message::Assistant(AssistantMessage::new(
+            &original.id,
+            msg1.id(),
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         repo.save_message(&msg2).await.unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
 
@@ -1179,10 +1164,7 @@ mod tests {
         let repo = SessionRepository::new(storage, bus);
 
         // Create original session with message and parts
-        let original = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let original = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
         let msg = Message::User(UserMessage::new(
             &original.id,
@@ -1212,12 +1194,17 @@ mod tests {
         let bus = Bus::new();
         let repo = SessionRepository::new(storage, bus);
 
-        let original = repo
-            .create(Session::new("proj_1", "/path"))
-            .await
-            .unwrap();
+        let original = repo.create(Session::new("proj_1", "/path")).await.unwrap();
 
-        let msg = Message::Assistant(AssistantMessage::new(&original.id, "parent", "default", "test", "model-1", "/path", "/path"));
+        let msg = Message::Assistant(AssistantMessage::new(
+            &original.id,
+            "parent",
+            "default",
+            "test",
+            "model-1",
+            "/path",
+            "/path",
+        ));
         repo.save_message(&msg).await.unwrap();
 
         let tool_part = MessagePart::Tool(ToolPart {
@@ -1231,7 +1218,11 @@ mod tests {
                 output: "file contents".to_string(),
                 title: "Read file".to_string(),
                 metadata: serde_json::json!({}),
-                time: ToolTime { start: 0, end: Some(100), compacted: None },
+                time: ToolTime {
+                    start: 0,
+                    end: Some(100),
+                    compacted: None,
+                },
                 attachments: None,
             },
             metadata: None,

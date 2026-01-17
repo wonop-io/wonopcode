@@ -43,7 +43,6 @@ chrono.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-axum-test = "16"
 
 [lints]
 workspace = true

@@ -416,11 +416,7 @@ mod tests {
 
     #[test]
     fn test_formatter_handles_case_insensitive() {
-        let formatter = Formatter::new(
-            "test",
-            vec!["test".into()],
-            vec![".RS".into()],
-        );
+        let formatter = Formatter::new("test", vec!["test".into()], vec![".RS".into()]);
 
         assert!(formatter.handles("rs"));
         assert!(formatter.handles("RS"));
@@ -472,7 +468,9 @@ mod tests {
     fn test_find_formatter_prettier_extensions() {
         let registry = FormatterRegistry::with_builtins();
 
-        let extensions = [".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".html", ".md", ".yaml", ".yml"];
+        let extensions = [
+            ".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".html", ".md", ".yaml", ".yml",
+        ];
 
         for ext in extensions {
             let file = PathBuf::from(format!("file{}", ext));
@@ -510,11 +508,7 @@ mod tests {
 
     #[test]
     fn test_formatter_disabled() {
-        let mut formatter = Formatter::new(
-            "test",
-            vec!["echo".into()],
-            vec![".test".into()],
-        );
+        let mut formatter = Formatter::new("test", vec!["echo".into()], vec![".test".into()]);
         formatter.enabled = false;
 
         let mut registry = FormatterRegistry::new();
@@ -547,11 +541,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_disabled_formatter() {
-        let mut formatter = Formatter::new(
-            "test",
-            vec!["echo".into()],
-            vec![".test".into()],
-        );
+        let mut formatter = Formatter::new("test", vec!["echo".into()], vec![".test".into()]);
         formatter.enabled = false;
 
         let file = PathBuf::from("/tmp/test.file");
@@ -561,11 +551,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_empty_command() {
-        let formatter = Formatter::new(
-            "empty",
-            vec![],
-            vec![".test".into()],
-        );
+        let formatter = Formatter::new("empty", vec![], vec![".test".into()]);
 
         let file = PathBuf::from("/tmp/test.file");
         let result = formatter.format(&file).await;
@@ -628,7 +614,10 @@ mod tests {
 
         assert_eq!(deserialized.name, "test");
         assert_eq!(deserialized.command.len(), 2);
-        assert_eq!(deserialized.environment.get("KEY"), Some(&"VALUE".to_string()));
+        assert_eq!(
+            deserialized.environment.get("KEY"),
+            Some(&"VALUE".to_string())
+        );
         assert!(deserialized.enabled);
     }
 

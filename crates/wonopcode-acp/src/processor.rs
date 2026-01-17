@@ -789,7 +789,6 @@ pub fn load_api_key(provider: &str) -> Option<String> {
     None
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
