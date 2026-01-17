@@ -296,4 +296,180 @@ mod tests {
         assert!(!fuzzy_match("src/main.rs", "xyz"));
         assert!(fuzzy_match("anything", ""));
     }
+
+    // AutocompleteAction tests
+
+    #[test]
+    fn test_autocomplete_action_debug() {
+        let action = AutocompleteAction::None;
+        let debug = format!("{:?}", action);
+        assert!(debug.contains("None"));
+    }
+
+    #[test]
+    fn test_autocomplete_action_clone() {
+        let action = AutocompleteAction::Select("test.rs".to_string());
+        let cloned = action.clone();
+        assert_eq!(cloned, AutocompleteAction::Select("test.rs".to_string()));
+    }
+
+    #[test]
+    fn test_autocomplete_action_eq() {
+        assert_eq!(AutocompleteAction::None, AutocompleteAction::None);
+        assert_eq!(AutocompleteAction::Handled, AutocompleteAction::Handled);
+        assert_ne!(AutocompleteAction::None, AutocompleteAction::Handled);
+        assert_eq!(
+            AutocompleteAction::Select("a".to_string()),
+            AutocompleteAction::Select("a".to_string())
+        );
+    }
+
+    // FileAutocomplete tests
+
+    #[test]
+    fn test_file_autocomplete_new() {
+        let ac = FileAutocomplete::new();
+        assert!(!ac.is_visible());
+        assert!(ac.filter().is_empty());
+        assert!(ac.selected_suggestion().is_none());
+    }
+
+    #[test]
+    fn test_file_autocomplete_default() {
+        let ac = FileAutocomplete::default();
+        assert!(!ac.is_visible());
+    }
+
+    #[test]
+    fn test_file_autocomplete_set_cwd() {
+        let mut ac = FileAutocomplete::new();
+        ac.set_cwd(PathBuf::from("/home/user"));
+        assert_eq!(ac.cwd, PathBuf::from("/home/user"));
+    }
+
+    #[test]
+    fn test_file_autocomplete_show_hide() {
+        let mut ac = FileAutocomplete::new();
+        assert!(!ac.is_visible());
+
+        ac.show(5, "test");
+        assert!(ac.is_visible());
+        assert_eq!(ac.trigger_pos(), 5);
+        assert_eq!(ac.filter(), "test");
+
+        ac.hide();
+        assert!(!ac.is_visible());
+        assert!(ac.filter().is_empty());
+    }
+
+    #[test]
+    fn test_file_autocomplete_set_filter() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(0, "initial");
+        ac.set_filter("new_filter");
+        assert_eq!(ac.filter(), "new_filter");
+    }
+
+    #[test]
+    fn test_file_autocomplete_handle_key_escape() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(0, "");
+        assert!(ac.is_visible());
+
+        let key = KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE);
+        let action = ac.handle_key(key);
+        assert_eq!(action, AutocompleteAction::Handled);
+        assert!(!ac.is_visible());
+    }
+
+    #[test]
+    fn test_file_autocomplete_handle_key_when_hidden() {
+        let mut ac = FileAutocomplete::new();
+        let key = KeyEvent::new(KeyCode::Down, crossterm::event::KeyModifiers::NONE);
+        let action = ac.handle_key(key);
+        assert_eq!(action, AutocompleteAction::None);
+    }
+
+    #[test]
+    fn test_file_autocomplete_handle_key_navigation() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(0, "");
+        // Manually set some suggestions for testing
+        ac.suggestions = vec!["file1.rs".to_string(), "file2.rs".to_string()];
+
+        // Test down navigation
+        let down = KeyEvent::new(KeyCode::Down, crossterm::event::KeyModifiers::NONE);
+        ac.handle_key(down);
+        assert_eq!(ac.selected, 1);
+
+        // Test up navigation
+        let up = KeyEvent::new(KeyCode::Up, crossterm::event::KeyModifiers::NONE);
+        ac.handle_key(up);
+        assert_eq!(ac.selected, 0);
+
+        // Test wrap around up
+        ac.handle_key(up);
+        assert_eq!(ac.selected, 1); // Should wrap to last
+
+        // Test wrap around down
+        ac.selected = 1;
+        ac.handle_key(down);
+        assert_eq!(ac.selected, 0); // Should wrap to first
+    }
+
+    #[test]
+    fn test_file_autocomplete_handle_key_select() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(0, "");
+        ac.suggestions = vec!["test.rs".to_string()];
+
+        let enter = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+        let action = ac.handle_key(enter);
+        assert_eq!(action, AutocompleteAction::Select("test.rs".to_string()));
+        assert!(!ac.is_visible());
+    }
+
+    #[test]
+    fn test_file_autocomplete_handle_key_tab() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(0, "");
+        ac.suggestions = vec!["main.rs".to_string()];
+
+        let tab = KeyEvent::new(KeyCode::Tab, crossterm::event::KeyModifiers::NONE);
+        let action = ac.handle_key(tab);
+        assert_eq!(action, AutocompleteAction::Select("main.rs".to_string()));
+    }
+
+    #[test]
+    fn test_file_autocomplete_selected_suggestion() {
+        let mut ac = FileAutocomplete::new();
+        ac.suggestions = vec!["a.rs".to_string(), "b.rs".to_string()];
+        ac.selected = 0;
+        assert_eq!(ac.selected_suggestion(), Some("a.rs"));
+
+        ac.selected = 1;
+        assert_eq!(ac.selected_suggestion(), Some("b.rs"));
+
+        ac.selected = 99;
+        assert_eq!(ac.selected_suggestion(), None);
+    }
+
+    #[test]
+    fn test_file_autocomplete_clone() {
+        let mut ac = FileAutocomplete::new();
+        ac.show(5, "filter");
+        ac.suggestions = vec!["test.rs".to_string()];
+
+        let cloned = ac.clone();
+        assert!(cloned.is_visible());
+        assert_eq!(cloned.trigger_pos(), 5);
+        assert_eq!(cloned.filter(), "filter");
+    }
+
+    #[test]
+    fn test_file_autocomplete_debug() {
+        let ac = FileAutocomplete::new();
+        let debug = format!("{:?}", ac);
+        assert!(debug.contains("FileAutocomplete"));
+    }
 }
