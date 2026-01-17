@@ -172,3 +172,84 @@ impl WhichKeyOverlay {
         frame.render_widget(para, overlay_area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_binding_clone() {
+        let binding = KeyBinding {
+            key: "N",
+            description: "New session",
+        };
+        let cloned = binding.clone();
+        assert_eq!(cloned.key, "N");
+        assert_eq!(cloned.description, "New session");
+    }
+
+    #[test]
+    fn test_key_binding_debug() {
+        let binding = KeyBinding {
+            key: "N",
+            description: "New session",
+        };
+        let debug = format!("{:?}", binding);
+        assert!(debug.contains("KeyBinding"));
+        assert!(debug.contains("N"));
+    }
+
+    #[test]
+    fn test_which_key_overlay_new() {
+        let overlay = WhichKeyOverlay::new();
+        assert!(!overlay.visible);
+        assert_eq!(overlay.title, "Ctrl+X");
+        assert!(!overlay.bindings.is_empty());
+    }
+
+    #[test]
+    fn test_which_key_overlay_default() {
+        let overlay = WhichKeyOverlay::default();
+        assert!(!overlay.visible);
+        assert!(overlay.bindings.is_empty()); // default has no bindings
+    }
+
+    #[test]
+    fn test_which_key_overlay_show_hide() {
+        let mut overlay = WhichKeyOverlay::new();
+        assert!(!overlay.is_visible());
+
+        overlay.show();
+        assert!(overlay.is_visible());
+
+        overlay.hide();
+        assert!(!overlay.is_visible());
+    }
+
+    #[test]
+    fn test_which_key_overlay_default_bindings() {
+        let bindings = WhichKeyOverlay::default_bindings();
+        assert!(!bindings.is_empty());
+
+        // Check some expected bindings
+        assert!(bindings.iter().any(|b| b.key == "N"));
+        assert!(bindings.iter().any(|b| b.key == "M"));
+        assert!(bindings.iter().any(|b| b.key == "L"));
+    }
+
+    #[test]
+    fn test_which_key_overlay_clone() {
+        let mut overlay = WhichKeyOverlay::new();
+        overlay.show();
+        let cloned = overlay.clone();
+        assert!(cloned.is_visible());
+        assert_eq!(cloned.title, "Ctrl+X");
+    }
+
+    #[test]
+    fn test_which_key_overlay_debug() {
+        let overlay = WhichKeyOverlay::new();
+        let debug = format!("{:?}", overlay);
+        assert!(debug.contains("WhichKeyOverlay"));
+    }
+}

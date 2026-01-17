@@ -316,3 +316,280 @@ pub fn extract_preview(text: &str, query: &str, max_len: usize) -> String {
         text.chars().take(max_len).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SearchMatch tests
+
+    #[test]
+    fn test_search_match_clone() {
+        let m = SearchMatch {
+            message_index: 5,
+            in_tool: true,
+            tool_index: Some(2),
+            preview: "test preview".to_string(),
+        };
+        let cloned = m.clone();
+        assert_eq!(cloned.message_index, 5);
+        assert!(cloned.in_tool);
+        assert_eq!(cloned.tool_index, Some(2));
+        assert_eq!(cloned.preview, "test preview");
+    }
+
+    #[test]
+    fn test_search_match_debug() {
+        let m = SearchMatch {
+            message_index: 0,
+            in_tool: false,
+            tool_index: None,
+            preview: "test".to_string(),
+        };
+        let debug = format!("{:?}", m);
+        assert!(debug.contains("SearchMatch"));
+    }
+
+    // SearchWidget tests
+
+    #[test]
+    fn test_search_widget_new() {
+        let widget = SearchWidget::new();
+        assert!(!widget.is_active());
+        assert!(widget.query().is_empty());
+        assert_eq!(widget.match_count(), 0);
+    }
+
+    #[test]
+    fn test_search_widget_default() {
+        let widget = SearchWidget::default();
+        assert!(!widget.is_active());
+    }
+
+    #[test]
+    fn test_search_widget_activate_deactivate() {
+        let mut widget = SearchWidget::new();
+        widget.insert_char('t');
+        widget.insert_char('e');
+
+        widget.activate();
+        assert!(widget.is_active());
+        assert!(widget.query().is_empty()); // Activation clears query
+        assert_eq!(widget.cursor, 0);
+
+        widget.deactivate();
+        assert!(!widget.is_active());
+    }
+
+    #[test]
+    fn test_search_widget_insert_char() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('h');
+        widget.insert_char('e');
+        widget.insert_char('l');
+        widget.insert_char('l');
+        widget.insert_char('o');
+        assert_eq!(widget.query(), "hello");
+        assert_eq!(widget.cursor, 5);
+    }
+
+    #[test]
+    fn test_search_widget_delete_char() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('a');
+        widget.insert_char('b');
+        widget.insert_char('c');
+        assert_eq!(widget.query(), "abc");
+
+        widget.delete_char();
+        assert_eq!(widget.query(), "ab");
+        assert_eq!(widget.cursor, 2);
+    }
+
+    #[test]
+    fn test_search_widget_delete_char_forward() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('a');
+        widget.insert_char('b');
+        widget.insert_char('c');
+        widget.cursor_start();
+        widget.delete_char_forward();
+        assert_eq!(widget.query(), "bc");
+    }
+
+    #[test]
+    fn test_search_widget_cursor_movement() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('a');
+        widget.insert_char('b');
+        widget.insert_char('c');
+        assert_eq!(widget.cursor, 3);
+
+        widget.cursor_left();
+        assert_eq!(widget.cursor, 2);
+
+        widget.cursor_left();
+        assert_eq!(widget.cursor, 1);
+
+        widget.cursor_right();
+        assert_eq!(widget.cursor, 2);
+
+        widget.cursor_start();
+        assert_eq!(widget.cursor, 0);
+
+        widget.cursor_end();
+        assert_eq!(widget.cursor, 3);
+    }
+
+    #[test]
+    fn test_search_widget_clear() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('x');
+        widget.insert_char('y');
+        widget.clear();
+        assert!(widget.query().is_empty());
+        assert_eq!(widget.cursor, 0);
+    }
+
+    #[test]
+    fn test_search_widget_matches() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+
+        let matches = vec![
+            SearchMatch {
+                message_index: 0,
+                in_tool: false,
+                tool_index: None,
+                preview: "match 1".to_string(),
+            },
+            SearchMatch {
+                message_index: 1,
+                in_tool: true,
+                tool_index: Some(0),
+                preview: "match 2".to_string(),
+            },
+        ];
+        widget.set_matches(matches);
+
+        assert_eq!(widget.match_count(), 2);
+        assert_eq!(widget.current_match_index(), 0);
+        assert!(widget.current_match().is_some());
+        assert_eq!(widget.matches().len(), 2);
+    }
+
+    #[test]
+    fn test_search_widget_next_prev_match() {
+        let mut widget = SearchWidget::new();
+        let matches = vec![
+            SearchMatch {
+                message_index: 0,
+                in_tool: false,
+                tool_index: None,
+                preview: "1".to_string(),
+            },
+            SearchMatch {
+                message_index: 1,
+                in_tool: false,
+                tool_index: None,
+                preview: "2".to_string(),
+            },
+            SearchMatch {
+                message_index: 2,
+                in_tool: false,
+                tool_index: None,
+                preview: "3".to_string(),
+            },
+        ];
+        widget.set_matches(matches);
+
+        assert_eq!(widget.current_match_index(), 0);
+        widget.next_match();
+        assert_eq!(widget.current_match_index(), 1);
+        widget.next_match();
+        assert_eq!(widget.current_match_index(), 2);
+        widget.next_match(); // Should wrap
+        assert_eq!(widget.current_match_index(), 0);
+
+        widget.prev_match(); // Should wrap backward
+        assert_eq!(widget.current_match_index(), 2);
+        widget.prev_match();
+        assert_eq!(widget.current_match_index(), 1);
+    }
+
+    #[test]
+    fn test_search_widget_height() {
+        let mut widget = SearchWidget::new();
+        assert_eq!(widget.height(), 0);
+
+        widget.activate();
+        assert_eq!(widget.height(), 1);
+
+        widget.deactivate();
+        assert_eq!(widget.height(), 0);
+    }
+
+    #[test]
+    fn test_search_widget_clone() {
+        let mut widget = SearchWidget::new();
+        widget.activate();
+        widget.insert_char('t');
+        let cloned = widget.clone();
+        assert!(cloned.is_active());
+        assert_eq!(cloned.query(), "t");
+    }
+
+    #[test]
+    fn test_search_widget_debug() {
+        let widget = SearchWidget::new();
+        let debug = format!("{:?}", widget);
+        assert!(debug.contains("SearchWidget"));
+    }
+
+    // fuzzy_match tests
+
+    #[test]
+    fn test_fuzzy_match_empty_query() {
+        assert!(!fuzzy_match("", "hello world"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_case_insensitive() {
+        assert!(fuzzy_match("hello", "Hello World"));
+        assert!(fuzzy_match("HELLO", "hello world"));
+        assert!(fuzzy_match("HeLLo", "hElLo WoRlD"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_substring() {
+        assert!(fuzzy_match("world", "hello world"));
+        assert!(fuzzy_match("lo wo", "hello world"));
+        assert!(!fuzzy_match("xyz", "hello world"));
+    }
+
+    // extract_preview tests
+
+    #[test]
+    fn test_extract_preview_with_match() {
+        let preview = extract_preview("the quick brown fox jumps over the lazy dog", "fox", 30);
+        assert!(preview.contains("fox"));
+    }
+
+    #[test]
+    fn test_extract_preview_no_match() {
+        let preview = extract_preview("hello world", "xyz", 20);
+        // Should return truncated original
+        assert!(!preview.is_empty());
+    }
+
+    #[test]
+    fn test_extract_preview_short_text() {
+        let preview = extract_preview("short", "short", 100);
+        assert_eq!(preview, "short");
+    }
+}

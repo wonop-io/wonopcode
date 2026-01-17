@@ -119,3 +119,94 @@ impl TopBarWidget {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_top_bar_widget_new() {
+        let widget = TopBarWidget::new();
+        assert!(widget.directory.is_empty());
+        assert!(widget.session_title.is_none());
+        assert!(widget.project_name.is_none());
+    }
+
+    #[test]
+    fn test_top_bar_widget_default() {
+        let widget = TopBarWidget::default();
+        assert!(widget.directory.is_empty());
+        assert!(widget.session_title.is_none());
+        assert!(widget.project_name.is_none());
+    }
+
+    #[test]
+    fn test_top_bar_widget_set_directory() {
+        let mut widget = TopBarWidget::new();
+        widget.set_directory("/home/user/project");
+        assert_eq!(widget.directory, "/home/user/project");
+    }
+
+    #[test]
+    fn test_top_bar_widget_set_session_title() {
+        let mut widget = TopBarWidget::new();
+        widget.set_session_title(Some("My Session".to_string()));
+        assert_eq!(widget.session_title, Some("My Session".to_string()));
+
+        widget.set_session_title(None);
+        assert!(widget.session_title.is_none());
+    }
+
+    #[test]
+    fn test_top_bar_widget_set_project_name() {
+        let mut widget = TopBarWidget::new();
+        widget.set_project_name(Some("my-project".to_string()));
+        assert_eq!(widget.project_name, Some("my-project".to_string()));
+
+        widget.set_project_name(None);
+        assert!(widget.project_name.is_none());
+    }
+
+    #[test]
+    fn test_top_bar_widget_format_directory_empty() {
+        let widget = TopBarWidget::new();
+        assert_eq!(widget.format_directory(100), "");
+    }
+
+    #[test]
+    fn test_top_bar_widget_format_directory_short() {
+        let mut widget = TopBarWidget::new();
+        widget.set_directory("/short/path");
+        let formatted = widget.format_directory(100);
+        assert_eq!(formatted, "/short/path");
+    }
+
+    #[test]
+    fn test_top_bar_widget_format_directory_long() {
+        let mut widget = TopBarWidget::new();
+        widget.set_directory("/very/long/path/that/exceeds/the/maximum/allowed/width/for/display");
+        let formatted = widget.format_directory(30);
+        assert!(formatted.starts_with("..."));
+        assert!(formatted.len() <= 20); // max_dir_len = 30 - 10 = 20
+    }
+
+    #[test]
+    fn test_top_bar_widget_clone() {
+        let mut widget = TopBarWidget::new();
+        widget.set_directory("/test");
+        widget.set_session_title(Some("Session".to_string()));
+        widget.set_project_name(Some("Project".to_string()));
+
+        let cloned = widget.clone();
+        assert_eq!(cloned.directory, "/test");
+        assert_eq!(cloned.session_title, Some("Session".to_string()));
+        assert_eq!(cloned.project_name, Some("Project".to_string()));
+    }
+
+    #[test]
+    fn test_top_bar_widget_debug() {
+        let widget = TopBarWidget::new();
+        let debug = format!("{:?}", widget);
+        assert!(debug.contains("TopBarWidget"));
+    }
+}
