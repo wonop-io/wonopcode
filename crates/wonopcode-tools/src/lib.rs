@@ -42,8 +42,8 @@ use wonopcode_util::FileTimeState;
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
-    /// Todo list was updated with new items.
-    TodosUpdated(Vec<todo::TodoItem>),
+    /// Todo list was updated with new phased structure.
+    TodosUpdated(todo::PhasedTodos),
 }
 
 /// Context provided to tools during execution.
@@ -246,21 +246,23 @@ mod tests {
 
     #[test]
     fn test_tool_event_clone() {
-        let items = vec![todo::TodoItem {
+        let mut phased = todo::PhasedTodos::new();
+        let mut phase = todo::Phase::new("phase_1", "Test Phase");
+        phase.add_todo(todo::TodoItem {
             id: "1".to_string(),
             content: "Test".to_string(),
             status: todo::TodoStatus::Pending,
             priority: todo::TodoPriority::High,
-        }];
-        let event = ToolEvent::TodosUpdated(items.clone());
-        
+        });
+        phased.add_phase(phase);
+
+        let event = ToolEvent::TodosUpdated(phased);
+
         // Test that we can clone the event
         let cloned = event.clone();
-        if let ToolEvent::TodosUpdated(cloned_items) = cloned {
-            assert_eq!(cloned_items.len(), 1);
-            assert_eq!(cloned_items[0].id, "1");
-        } else {
-            panic!("Expected TodosUpdated event");
-        }
+        let ToolEvent::TodosUpdated(phased_todos) = cloned;
+        assert_eq!(phased_todos.phases.len(), 1);
+        assert_eq!(phased_todos.phases[0].todos.len(), 1);
+        assert_eq!(phased_todos.phases[0].todos[0].id, "1");
     }
 }

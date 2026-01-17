@@ -283,6 +283,15 @@ pub enum EditorResult {
     Cancelled,
 }
 
+/// A phase containing grouped todos (from tool execution).
+#[derive(Debug, Clone)]
+pub struct PhaseUpdate {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub todos: Vec<TodoUpdate>,
+}
+
 /// A todo item for the sidebar (from tool execution).
 #[derive(Debug, Clone)]
 pub struct TodoUpdate {
@@ -290,6 +299,8 @@ pub struct TodoUpdate {
     pub content: String,
     pub status: String,
     pub priority: String,
+    /// Optional phase ID this todo belongs to.
+    pub phase_id: Option<String>,
 }
 
 /// Updates that can be received by the UI.
@@ -329,8 +340,11 @@ pub enum AppUpdate {
     ModelInfo { context_limit: u32 },
     /// Session list update.
     Sessions(Vec<(String, String, String)>),
-    /// Todos updated (from todowrite tool).
-    TodosUpdated(Vec<TodoUpdate>),
+    /// Todos updated (from todowrite tool) - includes phases.
+    TodosUpdated {
+        phases: Vec<PhaseUpdate>,
+        todos: Vec<TodoUpdate>,
+    },
     /// LSP servers updated.
     LspUpdated(Vec<LspStatusUpdate>),
     /// MCP servers updated.
@@ -3148,11 +3162,32 @@ async function fetchUserData(userId) {
             AppUpdate::Sessions(sessions) => {
                 self.sessions = sessions;
             }
-            AppUpdate::TodosUpdated(todos) => {
-                // Convert TodoUpdate to sidebar::TodoItem
-                let sidebar_todos: Vec<TodoItem> = todos
+            AppUpdate::TodosUpdated { phases, todos } => {
+                // Convert phases to sidebar format
+                use crate::widgets::sidebar::{PhaseItem, TodoItem as SidebarTodo};
+                let sidebar_phases: Vec<PhaseItem> = phases
                     .into_iter()
-                    .map(|t| TodoItem {
+                    .map(|p| PhaseItem {
+                        id: p.id,
+                        name: p.name,
+                        status: p.status,
+                        todos: p
+                            .todos
+                            .into_iter()
+                            .map(|t| SidebarTodo {
+                                content: t.content,
+                                completed: t.status == "completed",
+                                in_progress: t.status == "in_progress",
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                self.sidebar.set_phases(sidebar_phases);
+
+                // Also maintain flat todos for backward compatibility
+                let sidebar_todos: Vec<SidebarTodo> = todos
+                    .into_iter()
+                    .map(|t| SidebarTodo {
                         content: t.content,
                         completed: t.status == "completed",
                         in_progress: t.status == "in_progress",

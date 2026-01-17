@@ -51,8 +51,13 @@ pub enum Update {
     /// Session list update.
     Sessions { sessions: Vec<SessionInfo> },
 
-    /// Todos updated.
-    TodosUpdated { todos: Vec<TodoInfo> },
+    /// Todos updated (with phase structure).
+    TodosUpdated {
+        /// Phases containing grouped todos.
+        phases: Vec<PhaseInfo>,
+        /// Flat list of todos (for backward compatibility).
+        todos: Vec<TodoInfo>,
+    },
 
     /// LSP servers updated.
     LspUpdated { servers: Vec<LspInfo> },
@@ -100,6 +105,15 @@ pub struct SessionInfo {
     pub timestamp: String,
 }
 
+/// Phase info containing grouped todos.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseInfo {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub todos: Vec<TodoInfo>,
+}
+
 /// Todo item info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoInfo {
@@ -107,6 +121,9 @@ pub struct TodoInfo {
     pub content: String,
     pub status: String,
     pub priority: String,
+    /// Optional phase ID this todo belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase_id: Option<String>,
 }
 
 /// LSP server info.
@@ -351,7 +368,10 @@ mod tests {
             },
             Update::ModelInfo { context_limit: 0 },
             Update::Sessions { sessions: vec![] },
-            Update::TodosUpdated { todos: vec![] },
+            Update::TodosUpdated {
+                phases: vec![],
+                todos: vec![],
+            },
             Update::LspUpdated { servers: vec![] },
             Update::McpUpdated { servers: vec![] },
             Update::ModifiedFilesUpdated { files: vec![] },
@@ -403,9 +423,20 @@ mod tests {
             content: "Fix bug".to_string(),
             status: "pending".to_string(),
             priority: "high".to_string(),
+            phase_id: Some("phase_1".to_string()),
         };
         let json = serde_json::to_string(&todo).unwrap();
         let _: TodoInfo = serde_json::from_str(&json).unwrap();
+
+        // Phase info
+        let phase = PhaseInfo {
+            id: "phase_1".to_string(),
+            name: "Implementation".to_string(),
+            status: "in_progress".to_string(),
+            todos: vec![todo.clone()],
+        };
+        let json = serde_json::to_string(&phase).unwrap();
+        let _: PhaseInfo = serde_json::from_str(&json).unwrap();
 
         // LSP info
         let lsp = LspInfo {

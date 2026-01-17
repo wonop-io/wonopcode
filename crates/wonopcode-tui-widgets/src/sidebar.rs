@@ -33,6 +33,38 @@ pub struct ContextInfo {
     pub cost: f64,
 }
 
+/// A phase containing grouped todos.
+#[derive(Debug, Clone)]
+pub struct PhaseItem {
+    pub id: String,
+    pub name: String,
+    pub status: String, // "not_started", "in_progress", "finished"
+    pub todos: Vec<TodoItem>,
+}
+
+impl PhaseItem {
+    /// Get display icon for the phase status.
+    pub fn status_icon(&self) -> &'static str {
+        match self.status.as_str() {
+            "not_started" => "○",
+            "in_progress" => "◐",
+            "finished" => "●",
+            _ => "○",
+        }
+    }
+
+    /// Check if phase is completed (all todos done).
+    pub fn is_finished(&self) -> bool {
+        self.status == "finished"
+    }
+
+    /// Count completed todos.
+    pub fn completed_count(&self) -> usize {
+        self.todos.iter().filter(|t| t.completed).count()
+    }
+}
+
+/// A todo item within a phase.
 #[derive(Debug, Clone)]
 pub struct TodoItem {
     pub content: String,
@@ -95,6 +127,9 @@ pub struct SidebarWidget {
     visible: bool,
     session_title: String,
     context: ContextInfo,
+    /// Phases containing grouped todos (new structure).
+    phases: Vec<PhaseItem>,
+    /// Flat todo list (for backward compatibility).
     todos: Vec<TodoItem>,
     modified_files: Vec<ModifiedFile>,
     lsp_servers: Vec<LspStatus>,
@@ -205,8 +240,19 @@ impl SidebarWidget {
         &self.mcp_servers
     }
 
+    /// Set phases (new phased structure).
+    pub fn set_phases(&mut self, phases: Vec<PhaseItem>) {
+        self.phases = phases;
+    }
+
+    /// Set todos (flat list for backward compatibility).
     pub fn set_todos(&mut self, todos: Vec<TodoItem>) {
         self.todos = todos;
+    }
+
+    /// Check if we have any phases or todos.
+    pub fn has_todos(&self) -> bool {
+        !self.phases.is_empty() || !self.todos.is_empty()
     }
 
     pub fn set_modified_files(&mut self, files: Vec<ModifiedFile>) {
@@ -251,7 +297,7 @@ impl SidebarWidget {
             match section {
                 SidebarSection::Lsp => self.lsp_servers.is_empty(),
                 SidebarSection::Mcp => self.mcp_servers.is_empty(),
-                SidebarSection::Todos => self.todos.is_empty(),
+                SidebarSection::Todos => !self.has_todos(),
                 SidebarSection::Modified => self.modified_files.is_empty(),
             }
         } else {
@@ -264,7 +310,7 @@ impl SidebarWidget {
         match section {
             SidebarSection::Lsp => self.lsp_servers.is_empty(),
             SidebarSection::Mcp => self.mcp_servers.is_empty(),
-            SidebarSection::Todos => self.todos.is_empty(),
+            SidebarSection::Todos => !self.has_todos(),
             SidebarSection::Modified => self.modified_files.is_empty(),
         }
     }
@@ -419,11 +465,17 @@ impl SidebarWidget {
         let todos_header_line = current_line;
         current_line += 1; // header
         if !self.is_collapsed(SidebarSection::Todos) {
-            current_line += if self.todos.is_empty() {
-                1
+            if !self.phases.is_empty() {
+                // Each phase: 1 header + N todos
+                for phase in &self.phases {
+                    current_line += 1; // phase header
+                    current_line += phase.todos.len() as u16;
+                }
+            } else if !self.todos.is_empty() {
+                current_line += self.todos.len() as u16;
             } else {
-                self.todos.len() as u16
-            };
+                current_line += 1; // "No todos" message
+            }
         }
         current_line += 1; // spacer
 
@@ -735,30 +787,82 @@ impl SidebarWidget {
         }
     }
 
-    /// Build todo lines.
+    /// Build todo lines (with phase support).
     fn build_todo_lines(&self, lines: &mut Vec<Line<'static>>, width: usize, theme: &Theme) {
         let title_style = Style::default().fg(theme.text).add_modifier(Modifier::BOLD);
 
         let collapsed = self.is_collapsed(SidebarSection::Todos);
         let arrow = if collapsed { "▶" } else { "▼" };
 
+        // Count totals for header
+        let (total_todos, total_completed) = if !self.phases.is_empty() {
+            let total: usize = self.phases.iter().map(|p| p.todos.len()).sum();
+            let completed: usize = self.phases.iter().map(|p| p.completed_count()).sum();
+            (total, completed)
+        } else {
+            let completed = self.todos.iter().filter(|t| t.completed).count();
+            (self.todos.len(), completed)
+        };
+
         let mut header_spans = vec![
             Span::styled(format!("{arrow} "), theme.muted_style()),
             Span::styled("Todos", title_style),
         ];
-        if !self.todos.is_empty() {
-            let completed = self.todos.iter().filter(|t| t.completed).count();
+        if total_todos > 0 {
             header_spans.push(Span::styled(
-                format!(" ({}/{})", completed, self.todos.len()),
+                format!(" ({}/{})", total_completed, total_todos),
                 theme.muted_style(),
             ));
         }
         lines.push(Line::from(header_spans));
 
         if !collapsed {
-            if self.todos.is_empty() {
-                lines.push(Line::from(Span::styled("  No todos", theme.muted_style())));
-            } else {
+            if !self.phases.is_empty() {
+                // Display phased todos
+                for phase in &self.phases {
+                    let phase_icon = phase.status_icon();
+                    let phase_style = if phase.is_finished() {
+                        theme.success_style()
+                    } else if phase.status == "in_progress" {
+                        theme.warning_style()
+                    } else {
+                        theme.muted_style()
+                    };
+
+                    // Phase header
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {phase_icon} "), phase_style),
+                        Span::styled(
+                            truncate(&phase.name, width.saturating_sub(10)),
+                            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!(" ({}/{})", phase.completed_count(), phase.todos.len()),
+                            theme.muted_style(),
+                        ),
+                    ]));
+
+                    // Phase todos
+                    for todo in &phase.todos {
+                        let (icon, style) = if todo.completed {
+                            ("[✓]", theme.success_style())
+                        } else if todo.in_progress {
+                            ("[•]", theme.warning_style())
+                        } else {
+                            ("[ ]", theme.text_style())
+                        };
+
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("    {icon} "), style),
+                            Span::styled(
+                                truncate(&todo.content, width.saturating_sub(12)),
+                                theme.text_style(),
+                            ),
+                        ]));
+                    }
+                }
+            } else if !self.todos.is_empty() {
+                // Fallback to flat todo list (backward compatibility)
                 for todo in &self.todos {
                     let (icon, style) = if todo.completed {
                         ("[✓]", theme.success_style())
@@ -776,6 +880,8 @@ impl SidebarWidget {
                         ),
                     ]));
                 }
+            } else {
+                lines.push(Line::from(Span::styled("  No todos", theme.muted_style())));
             }
         }
     }

@@ -24,8 +24,8 @@ pub use wonopcode_tui_core::{
 pub use app::{
     install_panic_hook, restore_terminal, ActiveDialog, App, AppAction, AppState, AppUpdate,
     GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate, McpStatusUpdate,
-    ModifiedFileUpdate, PermissionRequestUpdate, Route, SandboxStatusUpdate, SaveScope,
-    TerminalGuard, TodoUpdate,
+    ModifiedFileUpdate, PermissionRequestUpdate, PhaseUpdate, Route, SandboxStatusUpdate,
+    SaveScope, TerminalGuard, TodoUpdate,
 };
 pub use backend::{Backend, BackendError, BackendResult, LocalBackend, RemoteBackend};
 pub use widgets::{
