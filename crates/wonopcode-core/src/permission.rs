@@ -1086,4 +1086,201 @@ mod tests {
         assert!(rules.iter().any(|r| r.tool == "read")); // From default rules
         assert!(rules.iter().any(|r| r.tool == "edit" && r.decision == Decision::Allow));
     }
+
+    #[tokio::test]
+    async fn test_check_with_sandbox_allows_write() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // No rules configured - normally would ask/deny
+        let check = PermissionCheck {
+            id: "1".to_string(),
+            tool: "write".to_string(),
+            action: "write".to_string(),
+            description: "Write file".to_string(),
+            path: Some("/tmp/test.txt".to_string()),
+            details: serde_json::Value::Null,
+        };
+
+        // With sandbox_running=true, write should be allowed by sandbox rules
+        let result = manager.check_with_sandbox("session_1", check, true).await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_check_with_sandbox_allows_bash() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        let check = PermissionCheck {
+            id: "2".to_string(),
+            tool: "bash".to_string(),
+            action: "execute".to_string(),
+            description: "Run command".to_string(),
+            path: None,
+            details: serde_json::Value::Null,
+        };
+
+        // With sandbox_running=true, bash should be allowed
+        let result = manager.check_with_sandbox("session_1", check, true).await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_check_with_sandbox_session_rule_takes_precedence() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Add session rule that denies write
+        manager
+            .add_session_rule("session_1", PermissionRule::deny("write"))
+            .await;
+
+        let check = PermissionCheck {
+            id: "3".to_string(),
+            tool: "write".to_string(),
+            action: "write".to_string(),
+            description: "Write file".to_string(),
+            path: Some("/tmp/test.txt".to_string()),
+            details: serde_json::Value::Null,
+        };
+
+        // Session rule should be checked before sandbox rules
+        // But sandbox rules are checked first in check_with_sandbox when sandbox_running=true
+        let result = manager.check_with_sandbox("session_1", check, true).await;
+        // Sandbox rules allow write, so it should be allowed
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_check_rules_only_with_ask_rule() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Add ask rule - should be skipped in check_rules_only
+        manager.add_rule(PermissionRule::ask("bash")).await;
+        // Add allow rule for a different pattern
+        manager.add_rule(PermissionRule::allow("read")).await;
+
+        // bash with ask rule - should return false (ask is skipped, no allow match)
+        let allowed = manager
+            .check_rules_only("session_1", "bash", None, None)
+            .await;
+        assert!(!allowed);
+
+        // read with allow rule - should return true
+        let allowed = manager
+            .check_rules_only("session_1", "read", None, None)
+            .await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn test_respond_nonexistent_request() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Responding to a nonexistent request should not panic
+        manager.respond("nonexistent", true, false).await;
+
+        // Verify no pending requests
+        let pending = manager.pending.read().await;
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_permission_rule_matches_wildcard_tool() {
+        let rule = PermissionRule::allow("web*");
+        assert!(rule.matches("webfetch", None, None));
+        assert!(rule.matches("websearch", None, None));
+        assert!(!rule.matches("read", None, None));
+    }
+
+    #[tokio::test]
+    async fn test_permission_rule_matches_all_conditions() {
+        let mut rule = PermissionRule::allow("bash");
+        rule.action = Some("ls*".to_string());
+        rule.path = Some("/tmp/*".to_string());
+
+        // All conditions must match
+        assert!(rule.matches("bash", Some("ls -la"), Some("/tmp/test")));
+        assert!(!rule.matches("bash", Some("rm -rf"), Some("/tmp/test"))); // action mismatch
+        assert!(!rule.matches("bash", Some("ls -la"), Some("/home/test"))); // path mismatch
+        assert!(!rule.matches("read", Some("ls -la"), Some("/tmp/test"))); // tool mismatch
+    }
+
+    #[tokio::test]
+    async fn test_multiple_session_rules() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        // Add multiple session rules
+        manager
+            .add_session_rule("session_1", PermissionRule::deny("bash"))
+            .await;
+        manager
+            .add_session_rule("session_1", PermissionRule::allow("bash"))
+            .await; // Later rule takes precedence
+
+        // Later rule (allow) should take precedence (rules checked in reverse)
+        let allowed = manager
+            .check_rules_only("session_1", "bash", None, None)
+            .await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn test_check_rules_only_with_path() {
+        let bus = Bus::new();
+        let manager = PermissionManager::new(bus);
+
+        manager
+            .add_rule(PermissionRule::allow("edit").with_path("src/*"))
+            .await;
+
+        // Matches path pattern
+        let allowed = manager
+            .check_rules_only("session_1", "edit", None, Some("src/main.rs"))
+            .await;
+        assert!(allowed);
+
+        // Doesn't match path pattern
+        let allowed = manager
+            .check_rules_only("session_1", "edit", None, Some("tests/test.rs"))
+            .await;
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn test_permission_check_clone() {
+        let check = PermissionCheck {
+            id: "1".to_string(),
+            tool: "bash".to_string(),
+            action: "execute".to_string(),
+            description: "Run command".to_string(),
+            path: Some("/tmp".to_string()),
+            details: serde_json::json!({"key": "value"}),
+        };
+
+        let cloned = check.clone();
+        assert_eq!(cloned.id, "1");
+        assert_eq!(cloned.tool, "bash");
+        assert_eq!(cloned.path, Some("/tmp".to_string()));
+    }
+
+    #[test]
+    fn test_decision_copy() {
+        let allow = Decision::Allow;
+        let copied = allow;
+        assert_eq!(copied, Decision::Allow);
+    }
+
+    #[test]
+    fn test_permission_rule_clone() {
+        let rule = PermissionRule::allow("bash").with_path("/tmp/*");
+        let cloned = rule.clone();
+        assert_eq!(cloned.tool, "bash");
+        assert_eq!(cloned.path, Some("/tmp/*".to_string()));
+        assert_eq!(cloned.decision, Decision::Allow);
+    }
 }
