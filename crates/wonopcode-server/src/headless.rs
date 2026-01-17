@@ -975,3 +975,392 @@ async fn git_pull(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    // === HeadlessState tests ===
+
+    #[tokio::test]
+    async fn test_headless_state_new() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let state = HeadlessState::new(tx);
+
+        assert!(state.shutdown_tx.is_none());
+        let shutdown = state.shutdown.read().await;
+        assert!(!*shutdown);
+    }
+
+    #[tokio::test]
+    async fn test_headless_state_with_shutdown_tx() {
+        let (action_tx, _action_rx) = mpsc::unbounded_channel();
+        let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
+
+        let state = HeadlessState::new(action_tx).with_shutdown_tx(shutdown_tx);
+        assert!(state.shutdown_tx.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_headless_state_send_update() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let state = HeadlessState::new(tx);
+
+        // Subscribe before sending
+        let mut rx = state.update_tx.subscribe();
+
+        let update = Update::Started;
+        state.send_update(update);
+
+        // Should receive the update
+        let received = rx.try_recv();
+        assert!(received.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_headless_state_update_state() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let state = HeadlessState::new(tx);
+
+        state
+            .update_state(|s| {
+                s.project = "/test/path".to_string();
+            })
+            .await;
+
+        let current = state.current_state.read().await;
+        assert_eq!(current.project, "/test/path");
+    }
+
+    #[tokio::test]
+    async fn test_headless_state_clone() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let state = HeadlessState::new(tx);
+
+        state
+            .update_state(|s| {
+                s.project = "/original".to_string();
+            })
+            .await;
+
+        let cloned = state.clone();
+
+        // Both should share the same state
+        let original_state = state.current_state.read().await;
+        let cloned_state = cloned.current_state.read().await;
+        assert_eq!(original_state.project, cloned_state.project);
+    }
+
+    // === extract_api_key tests ===
+
+    #[test]
+    fn test_extract_api_key_from_x_api_key_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("test-key-123"));
+
+        let key = extract_api_key(&headers);
+        assert_eq!(key, Some("test-key-123"));
+    }
+
+    #[test]
+    fn test_extract_api_key_from_bearer_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer my-bearer-token"),
+        );
+
+        let key = extract_api_key(&headers);
+        assert_eq!(key, Some("my-bearer-token"));
+    }
+
+    #[test]
+    fn test_extract_api_key_bearer_with_whitespace() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer   spaced-token  "),
+        );
+
+        let key = extract_api_key(&headers);
+        assert_eq!(key, Some("spaced-token"));
+    }
+
+    #[test]
+    fn test_extract_api_key_prefers_x_api_key() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("x-api-key-value"));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer bearer-value"),
+        );
+
+        let key = extract_api_key(&headers);
+        assert_eq!(key, Some("x-api-key-value"));
+    }
+
+    #[test]
+    fn test_extract_api_key_missing() {
+        let headers = HeaderMap::new();
+        let key = extract_api_key(&headers);
+        assert!(key.is_none());
+    }
+
+    #[test]
+    fn test_extract_api_key_non_bearer_auth() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Basic dXNlcjpwYXNz"));
+
+        let key = extract_api_key(&headers);
+        assert!(key.is_none());
+    }
+
+    // === constant_time_eq tests ===
+
+    #[test]
+    fn test_constant_time_eq_equal() {
+        assert!(constant_time_eq(b"test", b"test"));
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"longer string here", b"longer string here"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_not_equal() {
+        assert!(!constant_time_eq(b"test", b"tset"));
+        assert!(!constant_time_eq(b"test", b"test1"));
+        assert!(!constant_time_eq(b"a", b"b"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_lengths() {
+        assert!(!constant_time_eq(b"short", b"longer"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    // === Request types tests ===
+
+    #[test]
+    fn test_git_stage_request_deserialize() {
+        let json = r#"{"paths": ["file1.txt", "file2.txt"]}"#;
+        let req: GitStageRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.paths, vec!["file1.txt", "file2.txt"]);
+    }
+
+    #[test]
+    fn test_git_stage_request_deserialize_empty() {
+        let json = r#"{"paths": []}"#;
+        let req: GitStageRequest = serde_json::from_str(json).unwrap();
+        assert!(req.paths.is_empty());
+    }
+
+    #[test]
+    fn test_git_commit_request_deserialize() {
+        let json = r#"{"message": "Initial commit"}"#;
+        let req: GitCommitRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message, "Initial commit");
+    }
+
+    #[test]
+    fn test_git_checkout_request_deserialize_with_paths() {
+        let json = r#"{"paths": ["src/main.rs"]}"#;
+        let req: GitCheckoutRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.paths, vec!["src/main.rs".to_string()]);
+    }
+
+    #[test]
+    fn test_git_checkout_request_deserialize_empty() {
+        let json = r#"{"paths": []}"#;
+        let req: GitCheckoutRequest = serde_json::from_str(json).unwrap();
+        assert!(req.paths.is_empty());
+    }
+
+    #[test]
+    fn test_git_push_request_default() {
+        let req = GitPushRequest::default();
+        assert!(req.remote.is_none());
+        assert!(req.branch.is_none());
+    }
+
+    #[test]
+    fn test_git_push_request_deserialize_full() {
+        let json = r#"{"remote": "upstream", "branch": "feature"}"#;
+        let req: GitPushRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.remote, Some("upstream".to_string()));
+        assert_eq!(req.branch, Some("feature".to_string()));
+    }
+
+    #[test]
+    fn test_git_pull_request_default() {
+        let req = GitPullRequest::default();
+        assert!(req.remote.is_none());
+        assert!(req.branch.is_none());
+    }
+
+    #[test]
+    fn test_git_pull_request_deserialize_partial() {
+        let json = r#"{"remote": "origin"}"#;
+        let req: GitPullRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.remote, Some("origin".to_string()));
+        assert!(req.branch.is_none());
+    }
+
+    #[test]
+    fn test_history_query_default() {
+        let query = GitHistoryQuery::default();
+        // Using #[derive(Default)] uses usize::default() which is 0
+        // The serde default of 50 only applies during deserialization
+        assert_eq!(query.limit, 0);
+    }
+
+    #[test]
+    fn test_history_query_deserialize() {
+        let json = r#"{"limit": 100}"#;
+        let query: GitHistoryQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.limit, 100);
+    }
+
+    #[test]
+    fn test_history_query_deserialize_uses_default() {
+        let json = r#"{}"#;
+        let query: GitHistoryQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.limit, 50); // default_history_limit
+    }
+
+    // === AuthState tests ===
+
+    #[test]
+    fn test_auth_state_clone() {
+        let state = AuthState {
+            api_key: Some("secret".to_string()),
+        };
+        let cloned = state.clone();
+        assert_eq!(cloned.api_key, Some("secret".to_string()));
+    }
+
+    #[test]
+    fn test_auth_state_no_key() {
+        let state = AuthState { api_key: None };
+        assert!(state.api_key.is_none());
+    }
+
+    // === Additional Request types tests ===
+
+    #[test]
+    fn test_prompt_request_deserialize() {
+        let json = r#"{"prompt": "Hello, world!"}"#;
+        let req: PromptRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.prompt, "Hello, world!");
+    }
+
+    #[test]
+    fn test_model_request_deserialize() {
+        let json = r#"{"model": "claude-3-opus"}"#;
+        let req: ModelRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model, "claude-3-opus");
+    }
+
+    #[test]
+    fn test_agent_request_deserialize() {
+        let json = r#"{"agent": "coder"}"#;
+        let req: AgentRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.agent, "coder");
+    }
+
+    #[test]
+    fn test_session_switch_request_deserialize() {
+        let json = r#"{"session_id": "sess-123"}"#;
+        let req: SessionSwitchRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.session_id, "sess-123");
+    }
+
+    #[test]
+    fn test_session_rename_request_deserialize() {
+        let json = r#"{"title": "New Session Title"}"#;
+        let req: SessionRenameRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.title, "New Session Title");
+    }
+
+    #[test]
+    fn test_session_fork_request_deserialize_with_message() {
+        let json = r#"{"message_id": "msg-456"}"#;
+        let req: SessionForkRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message_id, Some("msg-456".to_string()));
+    }
+
+    #[test]
+    fn test_session_fork_request_deserialize_without_message() {
+        let json = r#"{}"#;
+        let req: SessionForkRequest = serde_json::from_str(json).unwrap();
+        assert!(req.message_id.is_none());
+    }
+
+    #[test]
+    fn test_revert_request_deserialize() {
+        let json = r#"{"message_id": "msg-789"}"#;
+        let req: RevertRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message_id, "msg-789");
+    }
+
+    #[test]
+    fn test_mcp_toggle_request_deserialize() {
+        let json = r#"{"name": "my-mcp-server"}"#;
+        let req: McpToggleRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "my-mcp-server");
+    }
+
+    #[test]
+    fn test_mcp_reconnect_request_deserialize() {
+        let json = r#"{"name": "filesystem"}"#;
+        let req: McpReconnectRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "filesystem");
+    }
+
+    #[test]
+    fn test_goto_request_deserialize() {
+        let json = r#"{"message_id": "msg-navigate-to"}"#;
+        let req: GotoRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message_id, "msg-navigate-to");
+    }
+
+    #[test]
+    fn test_settings_request_deserialize() {
+        let json = r#"{"scope": "project", "config": {"key": "value"}}"#;
+        let req: SettingsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.config.get("key").and_then(|v| v.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn test_permission_request_deserialize() {
+        let json = r#"{"request_id": "perm-123", "allow": true, "remember": false}"#;
+        let req: PermissionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.request_id, "perm-123");
+        assert!(req.allow);
+        assert!(!req.remember);
+    }
+
+    #[test]
+    fn test_permission_request_deserialize_denied() {
+        let json = r#"{"request_id": "perm-456", "allow": false, "remember": true}"#;
+        let req: PermissionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.request_id, "perm-456");
+        assert!(!req.allow);
+        assert!(req.remember);
+    }
+
+    #[test]
+    fn test_git_unstage_request_deserialize() {
+        let json = r#"{"paths": ["src/lib.rs", "Cargo.toml"]}"#;
+        let req: GitUnstageRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.paths.len(), 2);
+        assert_eq!(req.paths[0], "src/lib.rs");
+        assert_eq!(req.paths[1], "Cargo.toml");
+    }
+
+    #[test]
+    fn test_git_unstage_request_deserialize_empty() {
+        let json = r#"{"paths": []}"#;
+        let req: GitUnstageRequest = serde_json::from_str(json).unwrap();
+        assert!(req.paths.is_empty());
+    }
+}

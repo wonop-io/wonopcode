@@ -992,4 +992,124 @@ mod tests {
         assert!(prompt.contains("writing files"));
         assert!(prompt.contains("shell commands"));
     }
+
+    // === Additional PromptEvent tests ===
+
+    #[test]
+    fn prompt_event_status_serializes_correctly() {
+        let event = PromptEvent::Status {
+            message: "Processing request...".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"status\""));
+        assert!(json.contains("\"message\":\"Processing request...\""));
+    }
+
+    // === PromptUsage tests ===
+
+    #[test]
+    fn prompt_usage_serializes_correctly() {
+        let usage = PromptUsage {
+            input_tokens: 500,
+            output_tokens: 250,
+            cost: 0.0075,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"input_tokens\":500"));
+        assert!(json.contains("\"output_tokens\":250"));
+        assert!(json.contains("\"cost\":0.0075"));
+    }
+
+    #[test]
+    fn prompt_usage_zero_values() {
+        let usage = PromptUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cost: 0.0,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"input_tokens\":0"));
+        assert!(json.contains("\"output_tokens\":0"));
+    }
+
+    // === new_session_runners test ===
+
+    #[test]
+    fn new_session_runners_creates_empty_map() {
+        let runners = new_session_runners();
+        // Should be able to read without blocking
+        let guard = runners.try_read().unwrap();
+        assert!(guard.is_empty());
+    }
+
+    // === AgentConfig Clone tests ===
+
+    #[test]
+    fn agent_config_clone_preserves_values() {
+        let mut tools = HashMap::new();
+        tools.insert("read".to_string(), true);
+        tools.insert("write".to_string(), false);
+
+        let config = AgentConfig {
+            name: Some("coder".to_string()),
+            prompt: Some("Custom instructions".to_string()),
+            temperature: Some(0.7),
+            top_p: Some(0.95),
+            tools,
+            max_steps: Some(20),
+        };
+
+        let cloned = config.clone();
+        assert_eq!(cloned.name, Some("coder".to_string()));
+        assert_eq!(cloned.prompt, Some("Custom instructions".to_string()));
+        assert_eq!(cloned.temperature, Some(0.7));
+        assert_eq!(cloned.top_p, Some(0.95));
+        assert_eq!(cloned.tools.get("read"), Some(&true));
+        assert_eq!(cloned.tools.get("write"), Some(&false));
+        assert_eq!(cloned.max_steps, Some(20));
+    }
+
+    // === Additional model info tests ===
+
+    #[test]
+    fn model_info_o_series_has_correct_limits() {
+        let info = build_model_info("o1", "openai");
+        assert_eq!(info.limit.context, 200_000);
+        assert_eq!(info.limit.output, 100_000);
+    }
+
+    #[test]
+    fn model_info_o3_mini_has_correct_limits() {
+        let info = build_model_info("o3-mini", "openai");
+        assert_eq!(info.limit.context, 200_000);
+        assert_eq!(info.limit.output, 100_000);
+    }
+
+    #[test]
+    fn model_info_gemini_flash_has_correct_limits() {
+        let info = build_model_info("gemini-2.0-flash", "google");
+        assert_eq!(info.limit.context, 1_000_000);
+        assert_eq!(info.limit.output, 8_192);
+    }
+
+    #[test]
+    fn model_info_gemini_pro_has_higher_output() {
+        let info = build_model_info("gemini-1.5-pro", "google");
+        assert_eq!(info.limit.context, 2_000_000);
+        assert!(info.limit.output > 8_000); // Pro has higher output
+    }
+
+    #[test]
+    fn model_info_gpt4o_has_correct_limits() {
+        let info = build_model_info("gpt-4o", "openai");
+        assert_eq!(info.limit.context, 128_000);
+        assert_eq!(info.limit.output, 16_384);
+    }
+
+    #[test]
+    fn model_info_claude_opus_has_extended_output() {
+        let info = build_model_info("claude-opus-4-5", "anthropic");
+        assert_eq!(info.limit.context, 200_000);
+        assert_eq!(info.limit.output, 64_000);
+    }
 }

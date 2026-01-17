@@ -2608,3 +2608,543 @@ async fn path_get(State(state): State<AppState>) -> impl IntoResponse {
             .unwrap_or_default()
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === ApiError tests ===
+
+    #[test]
+    fn test_api_error_serializes() {
+        let error = ApiError {
+            error: "Test error message".to_string(),
+            code: "TEST_ERROR".to_string(),
+        };
+        let json = serde_json::to_string(&error).unwrap();
+        assert!(json.contains("\"error\":\"Test error message\""));
+        assert!(json.contains("\"code\":\"TEST_ERROR\""));
+    }
+
+    #[test]
+    fn test_api_error_new() {
+        let error = ApiError::new("Something went wrong", "SOMETHING_WRONG");
+        assert_eq!(error.error, "Something went wrong");
+        assert_eq!(error.code, "SOMETHING_WRONG");
+    }
+
+    #[test]
+    fn test_api_error_not_found() {
+        let (status, json) = ApiError::not_found("Resource not found");
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json.0.error, "Resource not found");
+        assert_eq!(json.0.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn test_api_error_bad_request() {
+        let (status, json) = ApiError::bad_request("Invalid input");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json.0.error, "Invalid input");
+        assert_eq!(json.0.code, "BAD_REQUEST");
+    }
+
+    #[test]
+    fn test_api_error_internal() {
+        let (status, json) = ApiError::internal("Server error");
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json.0.error, "Server error");
+        assert_eq!(json.0.code, "INTERNAL_ERROR");
+    }
+
+    // === Helper function tests ===
+
+    #[test]
+    fn test_default_replay_limit() {
+        assert_eq!(default_replay_limit(), 100);
+    }
+
+    #[test]
+    fn test_generate_id_produces_hex_string() {
+        let id = generate_id();
+        // Should only contain hex characters
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        // Should not be empty
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn test_generate_id_produces_unique_ids() {
+        let id1 = generate_id();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let id2 = generate_id();
+        // IDs should differ (due to time component)
+        assert_ne!(id1, id2);
+    }
+
+    // === CreateSessionRequest tests ===
+
+    #[test]
+    fn test_create_session_request_deserialize_minimal() {
+        let json = r#"{}"#;
+        let req: CreateSessionRequest = serde_json::from_str(json).unwrap();
+        assert!(req.title.is_none());
+        assert!(req.parent_id.is_none());
+    }
+
+    #[test]
+    fn test_create_session_request_deserialize_full() {
+        let json = r#"{
+            "title": "Test Session",
+            "parent_id": "parent-123"
+        }"#;
+        let req: CreateSessionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.title, Some("Test Session".to_string()));
+        assert_eq!(req.parent_id, Some("parent-123".to_string()));
+    }
+
+    // === UpdateSessionRequest tests ===
+
+    #[test]
+    fn test_update_session_request_deserialize() {
+        let json = r#"{"title": "Updated Name"}"#;
+        let req: UpdateSessionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.title, Some("Updated Name".to_string()));
+    }
+
+    #[test]
+    fn test_update_session_request_deserialize_empty() {
+        let json = r#"{}"#;
+        let req: UpdateSessionRequest = serde_json::from_str(json).unwrap();
+        assert!(req.title.is_none());
+    }
+
+    // === MessagesQuery tests ===
+
+    #[test]
+    fn test_messages_query_deserialize() {
+        let json = r#"{"limit": 50}"#;
+        let query: MessagesQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.limit, Some(50));
+    }
+
+    #[test]
+    fn test_messages_query_deserialize_empty() {
+        let json = r#"{}"#;
+        let query: MessagesQuery = serde_json::from_str(json).unwrap();
+        assert!(query.limit.is_none());
+    }
+
+    // === PromptRequest tests ===
+
+    #[test]
+    fn test_prompt_request_deserialize_minimal() {
+        let json = r#"{"prompt": "Hello"}"#;
+        let req: PromptRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.prompt, "Hello");
+        assert!(req.model.is_none());
+        assert!(req.provider.is_none());
+        assert!(req.agent.is_none());
+        assert!(req.system_prompt.is_none());
+    }
+
+    #[test]
+    fn test_prompt_request_deserialize_full() {
+        let json = r#"{
+            "prompt": "Explain this code",
+            "model": "gpt-4o",
+            "provider": "openai",
+            "agent": "coder",
+            "system_prompt": "You are helpful"
+        }"#;
+        let req: PromptRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.prompt, "Explain this code");
+        assert_eq!(req.model, Some("gpt-4o".to_string()));
+        assert_eq!(req.provider, Some("openai".to_string()));
+        assert_eq!(req.agent, Some("coder".to_string()));
+        assert_eq!(req.system_prompt, Some("You are helpful".to_string()));
+    }
+
+    // === SummarizeRequest tests ===
+
+    #[test]
+    fn test_summarize_request_deserialize_empty() {
+        let json = r#"{}"#;
+        let req: SummarizeRequest = serde_json::from_str(json).unwrap();
+        assert!(req.from_message_id.is_none());
+    }
+
+    #[test]
+    fn test_summarize_request_deserialize_with_message() {
+        let json = r#"{"from_message_id": "msg-789"}"#;
+        let req: SummarizeRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.from_message_id, Some("msg-789".to_string()));
+    }
+
+    // === RevertRequest tests ===
+
+    #[test]
+    fn test_revert_request_deserialize() {
+        let json = r#"{"message_id": "msg-123", "part_id": "part-456"}"#;
+        let req: RevertRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message_id, "msg-123");
+        assert_eq!(req.part_id, Some("part-456".to_string()));
+    }
+
+    #[test]
+    fn test_revert_request_deserialize_minimal() {
+        let json = r#"{"message_id": "msg-123"}"#;
+        let req: RevertRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.message_id, "msg-123");
+        assert!(req.part_id.is_none());
+    }
+
+    // === ShareRequest tests ===
+
+    #[test]
+    fn test_share_request_deserialize() {
+        let json = r#"{"share_url": "https://example.com/share"}"#;
+        let req: ShareRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.share_url, Some("https://example.com/share".to_string()));
+    }
+
+    #[test]
+    fn test_share_request_deserialize_default() {
+        let json = r#"{}"#;
+        let req: ShareRequest = serde_json::from_str(json).unwrap();
+        assert!(req.share_url.is_none());
+    }
+
+    // === UnshareRequest tests ===
+
+    #[test]
+    fn test_unshare_request_deserialize() {
+        let json = r#"{"secret": "my-secret", "share_url": "https://example.com/share"}"#;
+        let req: UnshareRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.secret, "my-secret");
+        assert_eq!(req.share_url, Some("https://example.com/share".to_string()));
+    }
+
+    #[test]
+    fn test_unshare_request_deserialize_minimal() {
+        let json = r#"{"secret": "my-secret"}"#;
+        let req: UnshareRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.secret, "my-secret");
+        assert!(req.share_url.is_none());
+    }
+
+    // === CommandRequest tests ===
+
+    #[test]
+    fn test_command_request_deserialize() {
+        let json = r#"{"command": "/help"}"#;
+        let req: CommandRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.command, "/help");
+    }
+
+    // === UpdatePartRequest tests ===
+
+    #[test]
+    fn test_update_part_request_deserialize_empty() {
+        let json = r#"{}"#;
+        let req: UpdatePartRequest = serde_json::from_str(json).unwrap();
+        assert!(req.content.is_none());
+    }
+
+    #[test]
+    fn test_update_part_request_deserialize_full() {
+        let json = r#"{"content": "Updated content"}"#;
+        let req: UpdatePartRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.content, Some("Updated content".to_string()));
+    }
+
+    // === FileReadQuery tests ===
+
+    #[test]
+    fn test_file_read_query_deserialize() {
+        let json = r#"{"path": "/tmp/test.txt", "offset": 10, "limit": 100}"#;
+        let query: FileReadQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.path, "/tmp/test.txt");
+        assert_eq!(query.offset, Some(10));
+        assert_eq!(query.limit, Some(100));
+    }
+
+    #[test]
+    fn test_file_read_query_deserialize_path_only() {
+        let json = r#"{"path": "/tmp/test.txt"}"#;
+        let query: FileReadQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.path, "/tmp/test.txt");
+        assert!(query.offset.is_none());
+        assert!(query.limit.is_none());
+    }
+
+    // === FileListQuery tests ===
+
+    #[test]
+    fn test_file_list_query_deserialize() {
+        let json = r#"{"path": "/home/user"}"#;
+        let query: FileListQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.path, Some("/home/user".to_string()));
+    }
+
+    #[test]
+    fn test_file_list_query_deserialize_empty() {
+        let json = r#"{}"#;
+        let query: FileListQuery = serde_json::from_str(json).unwrap();
+        assert!(query.path.is_none());
+    }
+
+    // === FindFilesRequest tests ===
+
+    #[test]
+    fn test_find_files_request_deserialize() {
+        let json = r#"{"pattern": "*.rs", "path": "/src"}"#;
+        let req: FindFilesRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.pattern, "*.rs");
+        assert_eq!(req.path, Some("/src".to_string()));
+    }
+
+    #[test]
+    fn test_find_files_request_deserialize_minimal() {
+        let json = r#"{"pattern": "*.txt"}"#;
+        let req: FindFilesRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.pattern, "*.txt");
+        assert!(req.path.is_none());
+    }
+
+    // === FindTextRequest tests ===
+
+    #[test]
+    fn test_find_text_request_deserialize() {
+        let json = r#"{"pattern": "TODO", "path": "/src", "include": "*.rs"}"#;
+        let req: FindTextRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.pattern, "TODO");
+        assert_eq!(req.path, Some("/src".to_string()));
+        assert_eq!(req.include, Some("*.rs".to_string()));
+    }
+
+    #[test]
+    fn test_find_text_request_deserialize_minimal() {
+        let json = r#"{"pattern": "FIXME"}"#;
+        let req: FindTextRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.pattern, "FIXME");
+        assert!(req.path.is_none());
+        assert!(req.include.is_none());
+    }
+
+    // === FindSymbolsRequest tests ===
+
+    #[test]
+    fn test_find_symbols_request_deserialize() {
+        let json = r#"{"query": "MyClass"}"#;
+        let req: FindSymbolsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.query, "MyClass");
+    }
+
+    // === ConfigUpdateRequest tests ===
+
+    #[test]
+    fn test_config_update_request_deserialize() {
+        let json = r#"{"model": "claude-sonnet-4-5"}"#;
+        let req: ConfigUpdateRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req.updates.get("model").and_then(|v| v.as_str()),
+            Some("claude-sonnet-4-5")
+        );
+    }
+
+    #[test]
+    fn test_config_update_request_deserialize_multiple() {
+        let json = r#"{"model": "gpt-4o", "temperature": 0.7, "enabled": true}"#;
+        let req: ConfigUpdateRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.updates.get("model").and_then(|v| v.as_str()), Some("gpt-4o"));
+        assert_eq!(req.updates.get("temperature").and_then(|v| v.as_f64()), Some(0.7));
+        assert_eq!(req.updates.get("enabled").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    // === ProviderInfo tests ===
+
+    #[test]
+    fn test_provider_info_serializes() {
+        let info = ProviderInfo {
+            id: "anthropic".to_string(),
+            name: "Anthropic".to_string(),
+            env: vec!["ANTHROPIC_API_KEY".to_string()],
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"id\":\"anthropic\""));
+        assert!(json.contains("\"name\":\"Anthropic\""));
+        assert!(json.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn test_provider_info_serializes_no_env() {
+        let info = ProviderInfo {
+            id: "local".to_string(),
+            name: "Local".to_string(),
+            env: vec![],
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"id\":\"local\""));
+        // env is serialized even when empty
+    }
+
+    // === ModelListInfo tests ===
+
+    #[test]
+    fn test_model_list_info_serializes() {
+        let info = ModelListInfo {
+            id: "claude-sonnet-4-5".to_string(),
+            name: "Claude Sonnet 4.5".to_string(),
+            provider: "anthropic".to_string(),
+            context: Some(200000),
+            output: Some(8192),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"id\":\"claude-sonnet-4-5\""));
+        assert!(json.contains("\"context\":200000"));
+    }
+
+    #[test]
+    fn test_model_list_info_serializes_without_optional() {
+        let info = ModelListInfo {
+            id: "unknown".to_string(),
+            name: "Unknown Model".to_string(),
+            provider: "unknown".to_string(),
+            context: None,
+            output: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"id\":\"unknown\""));
+    }
+
+    // === AuthSetRequest tests ===
+
+    #[test]
+    fn test_auth_set_request_deserialize() {
+        let json = r#"{"provider": "anthropic", "key": "sk-xxx"}"#;
+        let req: AuthSetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.provider, "anthropic");
+        assert_eq!(req.key, "sk-xxx");
+    }
+
+    // === PermissionRespondRequest tests ===
+
+    #[test]
+    fn test_permission_respond_request_allow() {
+        let json = r#"{"allow": true, "remember": true}"#;
+        let req: PermissionRespondRequest = serde_json::from_str(json).unwrap();
+        assert!(req.allow);
+        assert!(req.remember);
+    }
+
+    #[test]
+    fn test_permission_respond_request_deny() {
+        let json = r#"{"allow": false, "remember": false}"#;
+        let req: PermissionRespondRequest = serde_json::from_str(json).unwrap();
+        assert!(!req.allow);
+        assert!(!req.remember);
+    }
+
+    #[test]
+    fn test_permission_respond_request_default_remember() {
+        let json = r#"{"allow": true}"#;
+        let req: PermissionRespondRequest = serde_json::from_str(json).unwrap();
+        assert!(req.allow);
+        assert!(!req.remember); // default is false
+    }
+
+    // === McpAddRequest tests ===
+
+    #[test]
+    fn test_mcp_add_request_deserialize() {
+        let json = r#"{"name": "test-server", "url": "http://localhost:8080"}"#;
+        let req: McpAddRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "test-server");
+        assert_eq!(req.url, "http://localhost:8080");
+        assert!(req.headers.is_none());
+    }
+
+    #[test]
+    fn test_mcp_add_request_deserialize_with_headers() {
+        let json = r#"{"name": "test-server", "url": "http://localhost:8080", "headers": {"Authorization": "Bearer token"}}"#;
+        let req: McpAddRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "test-server");
+        assert_eq!(req.url, "http://localhost:8080");
+        let headers = req.headers.unwrap();
+        assert_eq!(headers.get("Authorization"), Some(&"Bearer token".to_string()));
+    }
+
+    // === EventReplayQuery tests ===
+
+    #[test]
+    fn test_event_replay_query_deserialize() {
+        let json = r#"{"from_seq": 10, "limit": 100}"#;
+        let query: EventReplayQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.from_seq, 10);
+        assert_eq!(query.limit, 100);
+    }
+
+    #[test]
+    fn test_event_replay_query_deserialize_uses_default_limit() {
+        let json = r#"{"from_seq": 5}"#;
+        let query: EventReplayQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.from_seq, 5);
+        assert_eq!(query.limit, 100); // default_replay_limit
+    }
+
+    // === Response types tests ===
+
+    #[test]
+    fn test_session_response_serializes() {
+        let response = SessionResponse {
+            id: "sess-123".to_string(),
+            project_id: "proj-456".to_string(),
+            title: "Test Session".to_string(),
+            directory: "/home/user/project".to_string(),
+            parent_id: None,
+            created: 1700000000,
+            updated: 1700000001,
+            summary: None,
+            share: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"id\":\"sess-123\""));
+        assert!(json.contains("\"title\":\"Test Session\""));
+        assert!(json.contains("\"created\":1700000000"));
+    }
+
+    #[test]
+    fn test_session_summary_response_serializes() {
+        let response = SessionSummaryResponse {
+            additions: 100,
+            deletions: 50,
+            files: 5,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"additions\":100"));
+        assert!(json.contains("\"deletions\":50"));
+        assert!(json.contains("\"files\":5"));
+    }
+
+    #[test]
+    fn test_share_response_serializes() {
+        let response = ShareResponse {
+            url: "https://example.com/share/789".to_string(),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("https://example.com/share/789"));
+    }
+
+    #[test]
+    fn test_instance_info_serializes() {
+        let info = InstanceInfo {
+            directory: "/home/user/project".to_string(),
+            project_id: "proj-abc".to_string(),
+            worktree: "/home/user/project".to_string(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"directory\":\"/home/user/project\""));
+        assert!(json.contains("\"project_id\":\"proj-abc\""));
+    }
+}
