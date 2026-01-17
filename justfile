@@ -80,7 +80,7 @@ covstats:
     # Get unique crate names and process each - crate name is before first /
     # Lines format: name  regions  missed  cover%  functions  missed  cover%  lines  missed  cover%
     # Columns (1-indexed): 1=name, 2=regions, 3=missed_regions, 4=cover%, 5=functions, 6=missed_funcs, 7=cover%, 8=lines, 9=missed_lines, 10=cover%
-    echo "$COVERAGE_OUTPUT" | grep -E "^wonopcode[a-z-]*/src" | \
+    echo "$COVERAGE_OUTPUT" | grep -E "^wonop(code)?[a-z-]*/src" | \
         sed 's|/src/.*||' | sort -u | \
     while read -r crate; do
         # Sum up lines for this crate - column 8 is total lines, column 9 is missed

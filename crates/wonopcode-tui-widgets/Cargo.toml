@@ -1,0 +1,22 @@
+[package]
+name = "wonopcode-tui-widgets"
+version = "0.1.0"
+edition = "2021"
+description = "Basic UI widgets for wonopcode TUI"
+license = "MIT"
+
+[dependencies]
+wonopcode-tui-core.workspace = true
+
+ratatui.workspace = true
+crossterm.workspace = true
+tui-textarea.workspace = true
+chrono.workspace = true
+arboard.workspace = true
+ignore.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]

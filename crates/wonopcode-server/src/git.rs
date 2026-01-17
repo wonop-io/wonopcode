@@ -897,4 +897,221 @@ mod tests {
         // Default branch could be "master" or "main" depending on git config
         assert!(!status.branch.is_empty());
     }
+
+    // === Additional git type tests ===
+
+    #[test]
+    fn git_file_status_debug() {
+        let status = GitFileStatus {
+            path: "test.txt".to_string(),
+            status: GitFileState::Modified,
+            staged: true,
+        };
+        let debug = format!("{:?}", status);
+        assert!(debug.contains("GitFileStatus"));
+        assert!(debug.contains("test.txt"));
+    }
+
+    #[test]
+    fn git_file_status_clone() {
+        let status = GitFileStatus {
+            path: "file.rs".to_string(),
+            status: GitFileState::Added,
+            staged: false,
+        };
+        let cloned = status.clone();
+        assert_eq!(cloned.path, "file.rs");
+        assert_eq!(cloned.status, GitFileState::Added);
+        assert!(!cloned.staged);
+    }
+
+    #[test]
+    fn git_file_status_serialize() {
+        let status = GitFileStatus {
+            path: "src/main.rs".to_string(),
+            status: GitFileState::Deleted,
+            staged: true,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"path\":\"src/main.rs\""));
+        assert!(json.contains("\"status\":\"deleted\""));
+        assert!(json.contains("\"staged\":true"));
+    }
+
+    #[test]
+    fn git_file_status_deserialize() {
+        let json = r#"{"path": "lib.rs", "status": "renamed", "staged": false}"#;
+        let status: GitFileStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(status.path, "lib.rs");
+        assert_eq!(status.status, GitFileState::Renamed);
+        assert!(!status.staged);
+    }
+
+    #[test]
+    fn git_file_state_copy() {
+        let state = GitFileState::Conflicted;
+        let copied = state;
+        assert_eq!(copied, GitFileState::Conflicted);
+    }
+
+    #[test]
+    fn git_file_state_eq() {
+        assert_eq!(GitFileState::Modified, GitFileState::Modified);
+        assert_ne!(GitFileState::Modified, GitFileState::Added);
+    }
+
+    #[test]
+    fn git_status_debug() {
+        let status = GitStatus {
+            branch: "main".to_string(),
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            files: vec![],
+        };
+        let debug = format!("{:?}", status);
+        assert!(debug.contains("GitStatus"));
+        assert!(debug.contains("main"));
+    }
+
+    #[test]
+    fn git_status_clone() {
+        let status = GitStatus {
+            branch: "feature".to_string(),
+            upstream: Some("origin/feature".to_string()),
+            ahead: 2,
+            behind: 1,
+            files: vec![
+                GitFileStatus {
+                    path: "a.txt".to_string(),
+                    status: GitFileState::Modified,
+                    staged: true,
+                },
+            ],
+        };
+        let cloned = status.clone();
+        assert_eq!(cloned.branch, "feature");
+        assert_eq!(cloned.ahead, 2);
+        assert_eq!(cloned.files.len(), 1);
+    }
+
+    #[test]
+    fn git_status_deserialize() {
+        let json = r#"{
+            "branch": "dev",
+            "upstream": null,
+            "ahead": 0,
+            "behind": 0,
+            "files": []
+        }"#;
+        let status: GitStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(status.branch, "dev");
+        assert!(status.upstream.is_none());
+    }
+
+    #[test]
+    fn git_commit_info_debug() {
+        let info = GitCommitInfo {
+            id: "abc1234".to_string(),
+            full_id: "abc1234567890".to_string(),
+            message: "Test commit".to_string(),
+            author: "Test".to_string(),
+            email: "test@test.com".to_string(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+        };
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("GitCommitInfo"));
+    }
+
+    #[test]
+    fn git_commit_info_clone() {
+        let info = GitCommitInfo {
+            id: "xyz".to_string(),
+            full_id: "xyz123".to_string(),
+            message: "Msg".to_string(),
+            author: "Auth".to_string(),
+            email: "a@b.com".to_string(),
+            timestamp: "2024".to_string(),
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.id, "xyz");
+        assert_eq!(cloned.message, "Msg");
+    }
+
+    #[test]
+    fn git_commit_info_deserialize() {
+        let json = r#"{
+            "id": "abc",
+            "full_id": "abc123",
+            "message": "Initial",
+            "author": "Author",
+            "email": "a@b.com",
+            "timestamp": "2024-01-01"
+        }"#;
+        let info: GitCommitInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "abc");
+        assert_eq!(info.message, "Initial");
+    }
+
+    #[test]
+    fn git_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let git_err = GitError::Io(io_err);
+        let msg = git_err.to_string();
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn git_error_path_display() {
+        let err = GitError::Path("invalid path".to_string());
+        assert_eq!(err.to_string(), "Path error: invalid path");
+    }
+
+    #[test]
+    fn git_error_not_supported_display() {
+        let err = GitError::NotSupported("feature".to_string());
+        assert_eq!(err.to_string(), "Operation not supported: feature");
+    }
+
+    #[test]
+    fn git_operations_new() {
+        let ops = GitOperations::new(Path::new("/tmp"));
+        // Should create successfully even if path isn't a git repo
+        assert!(ops.working_dir.to_str().unwrap().contains("tmp"));
+    }
+
+    // === Additional integration-like tests ===
+
+    #[test]
+    fn user_sees_renamed_file_display() {
+        assert_eq!(format!("{}", GitFileState::Renamed), "R");
+    }
+
+    #[test]
+    fn user_sees_conflicted_file_display() {
+        assert_eq!(format!("{}", GitFileState::Conflicted), "C");
+    }
+
+    #[test]
+    fn user_sees_added_file_display() {
+        assert_eq!(format!("{}", GitFileState::Added), "A");
+    }
+
+    #[test]
+    fn git_file_state_untracked_serializes() {
+        let json = serde_json::to_string(&GitFileState::Untracked).unwrap();
+        assert_eq!(json, r#""untracked""#);
+    }
+
+    #[test]
+    fn git_file_state_conflicted_serializes() {
+        let json = serde_json::to_string(&GitFileState::Conflicted).unwrap();
+        assert_eq!(json, r#""conflicted""#);
+    }
+
+    #[test]
+    fn git_file_state_renamed_serializes() {
+        let json = serde_json::to_string(&GitFileState::Renamed).unwrap();
+        assert_eq!(json, r#""renamed""#);
+    }
 }

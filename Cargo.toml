@@ -18,6 +18,12 @@ members = [
     "crates/wonopcode-protocol",
     "crates/wonopcode-discover",
     "crates/wonopcode-test-utils",
+    # TUI sub-crates
+    "crates/wonopcode-tui-core",
+    "crates/wonopcode-tui-render",
+    "crates/wonopcode-tui-widgets",
+    "crates/wonopcode-tui-dialog",
+    "crates/wonopcode-tui-messages",
 ]
 
 [workspace.package]
@@ -49,6 +55,13 @@ wonopcode-sandbox = { path = "crates/wonopcode-sandbox" }
 wonopcode-protocol = { path = "crates/wonopcode-protocol" }
 wonopcode-discover = { path = "crates/wonopcode-discover" }
 wonopcode-test-utils = { path = "crates/wonopcode-test-utils" }
+
+# TUI sub-crates
+wonopcode-tui-core = { path = "crates/wonopcode-tui-core" }
+wonopcode-tui-render = { path = "crates/wonopcode-tui-render" }
+wonopcode-tui-widgets = { path = "crates/wonopcode-tui-widgets" }
+wonopcode-tui-dialog = { path = "crates/wonopcode-tui-dialog" }
+wonopcode-tui-messages = { path = "crates/wonopcode-tui-messages" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

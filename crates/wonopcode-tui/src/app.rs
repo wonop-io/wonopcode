@@ -1,11 +1,6 @@
 //! Main application for the TUI.
 
-use crate::{
-    event::{is_escape, Event, EventHandler},
-    metrics::{self, EventType},
-    model_state::ModelState,
-    theme::{AgentMode, RenderSettings, Theme},
-    widgets::{
+use crate::widgets::{
         autocomplete::{AutocompleteAction, FileAutocomplete},
         dialog::{
             AgentDialog, AgentInfo, CommandPalette, GitCommitDisplay, GitDialog, GitDialogResult,
@@ -28,9 +23,12 @@ use crate::{
         toast::{Toast, ToastManager},
         topbar::TopBarWidget,
         which_key::WhichKeyOverlay,
-    },
 };
 use arboard::Clipboard;
+use wonopcode_tui_core::{
+    is_escape, metrics, Event, EventHandler,
+    EventType, ModelState, AgentMode, RenderSettings, Theme,
+};
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,

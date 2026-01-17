@@ -1,0 +1,19 @@
+[package]
+name = "wonopcode-tui-messages"
+version = "0.1.0"
+edition = "2021"
+description = "Message display widget for wonopcode TUI"
+license = "MIT"
+
+[dependencies]
+wonopcode-tui-core.workspace = true
+wonopcode-tui-render.workspace = true
+
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]

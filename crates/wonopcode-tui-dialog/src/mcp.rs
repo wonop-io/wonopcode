@@ -13,9 +13,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Status of an MCP server connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

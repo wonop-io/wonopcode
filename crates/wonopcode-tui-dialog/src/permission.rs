@@ -8,9 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::theme::Theme;
+use wonopcode_tui_core::Theme;
 
-use super::common::centered_rect;
+use crate::common::centered_rect;
 
 /// Result of a permission dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

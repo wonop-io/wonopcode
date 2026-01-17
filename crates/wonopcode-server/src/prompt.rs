@@ -1112,4 +1112,351 @@ mod tests {
         assert_eq!(info.limit.context, 200_000);
         assert_eq!(info.limit.output, 64_000);
     }
+
+    // === Additional model info tests ===
+
+    #[test]
+    fn model_info_claude_sonnet_4_5_has_correct_limits() {
+        let info = build_model_info("claude-sonnet-4-5", "anthropic");
+        assert!(info.limit.context >= 200_000);
+        assert!(info.limit.output > 0);
+    }
+
+    #[test]
+    fn model_info_claude_haiku_4_5_has_correct_limits() {
+        let info = build_model_info("claude-haiku-4-5", "anthropic");
+        assert!(info.limit.context > 0);
+    }
+
+    #[test]
+    fn model_info_gpt_5_has_correct_limits() {
+        let info = build_model_info("gpt-5", "openai");
+        assert!(info.limit.context > 0);
+    }
+
+    #[test]
+    fn model_info_gpt_4o_mini_has_correct_limits() {
+        let info = build_model_info("gpt-4o-mini", "openai");
+        assert!(info.limit.context > 0);
+    }
+
+    #[test]
+    fn model_info_openrouter_fallback() {
+        let info = build_model_info("some-model", "openrouter");
+        assert_eq!(info.limit.context, 128_000);
+        assert_eq!(info.limit.output, 8_192);
+    }
+
+    // === PromptEvent Debug tests ===
+
+    #[test]
+    fn prompt_event_started_debug() {
+        let event = PromptEvent::Started {
+            session_id: "s1".to_string(),
+            message_id: "m1".to_string(),
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Started"));
+    }
+
+    #[test]
+    fn prompt_event_tool_started_debug() {
+        let event = PromptEvent::ToolStarted {
+            id: "t1".to_string(),
+            name: "read".to_string(),
+            input: serde_json::json!({}),
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("ToolStarted"));
+    }
+
+    // === PromptRequest Debug ===
+
+    #[test]
+    fn prompt_request_debug() {
+        let request = PromptRequest {
+            prompt: "Hello".to_string(),
+            model: None,
+            provider: None,
+            agent: None,
+            system_prompt: None,
+        };
+        let debug = format!("{:?}", request);
+        assert!(debug.contains("PromptRequest"));
+    }
+
+    // === PromptResponse Debug ===
+
+    #[test]
+    fn prompt_response_debug() {
+        let response = PromptResponse {
+            message_id: "m1".to_string(),
+            text: "Response".to_string(),
+            usage: PromptUsage {
+                input_tokens: 10,
+                output_tokens: 20,
+                cost: 0.001,
+            },
+        };
+        let debug = format!("{:?}", response);
+        assert!(debug.contains("PromptResponse"));
+    }
+
+    // === PromptUsage Debug ===
+
+    #[test]
+    fn prompt_usage_debug() {
+        let usage = PromptUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cost: 0.005,
+        };
+        let debug = format!("{:?}", usage);
+        assert!(debug.contains("PromptUsage"));
+    }
+
+    // === AgentConfig Debug ===
+
+    #[test]
+    fn agent_config_debug() {
+        let config = AgentConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("AgentConfig"));
+    }
+
+    // === PromptEvent Clone tests ===
+
+    #[test]
+    fn prompt_event_clone() {
+        let event = PromptEvent::TextDelta { delta: "text".to_string() };
+        let cloned = event.clone();
+        if let PromptEvent::TextDelta { delta } = cloned {
+            assert_eq!(delta, "text");
+        } else {
+            panic!("Clone should preserve variant");
+        }
+    }
+
+    // === build_basic_system_prompt additional tests ===
+
+    #[test]
+    fn system_prompt_handles_special_characters_in_path() {
+        let cwd = std::path::Path::new("/home/user/project with spaces");
+        let prompt = build_basic_system_prompt(cwd);
+        assert!(prompt.contains("project with spaces"));
+    }
+
+    // === infer_provider edge cases ===
+
+    #[test]
+    fn infer_provider_deepseek() {
+        // Unknown model defaults to anthropic
+        assert_eq!(infer_provider("deepseek-v2"), "anthropic");
+    }
+
+    #[test]
+    fn infer_provider_llama_openrouter() {
+        assert_eq!(infer_provider("meta-llama/llama-3.1-70b"), "openrouter");
+    }
+
+    #[test]
+    fn infer_provider_anthropic_openrouter() {
+        assert_eq!(infer_provider("anthropic/claude-3-opus"), "openrouter");
+    }
+
+    // === Additional build_model_info tests for all model branches ===
+
+    #[test]
+    fn model_info_claude_sonnet_4_5_full_name() {
+        let info = build_model_info("claude-sonnet-4-5-20250929", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_haiku_4_5_full_name() {
+        let info = build_model_info("claude-haiku-4-5-20251001", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_5_full_name() {
+        let info = build_model_info("claude-opus-4-5-20251101", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_sonnet_4_full_name() {
+        let info = build_model_info("claude-sonnet-4-20250514", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_sonnet_4_0_alias() {
+        let info = build_model_info("claude-sonnet-4-0", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_sonnet_4_alias() {
+        let info = build_model_info("claude-sonnet-4", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_1_full() {
+        let info = build_model_info("claude-opus-4-1-20250805", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_1_alias() {
+        let info = build_model_info("claude-opus-4-1", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_full() {
+        let info = build_model_info("claude-opus-4-20250514", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_0_alias() {
+        let info = build_model_info("claude-opus-4-0", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_opus_4_alias() {
+        let info = build_model_info("claude-opus-4", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_3_7_sonnet_full() {
+        let info = build_model_info("claude-3-7-sonnet-20250219", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_3_7_sonnet_alias() {
+        let info = build_model_info("claude-3-7-sonnet", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_3_7_sonnet_latest() {
+        let info = build_model_info("claude-3-7-sonnet-latest", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_3_haiku_full() {
+        let info = build_model_info("claude-3-haiku-20240307", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    #[test]
+    fn model_info_claude_3_haiku_alias() {
+        let info = build_model_info("claude-3-haiku", "anthropic");
+        assert!(info.id.contains("claude"));
+    }
+
+    // OpenAI GPT-5 series
+    #[test]
+    fn model_info_gpt_5_2() {
+        let info = build_model_info("gpt-5.2", "openai");
+        assert!(info.id.contains("gpt-5"));
+    }
+
+    #[test]
+    fn model_info_gpt_5_1() {
+        let info = build_model_info("gpt-5.1", "openai");
+        assert!(info.id.contains("gpt-5"));
+    }
+
+    #[test]
+    fn model_info_gpt_5_mini() {
+        let info = build_model_info("gpt-5-mini", "openai");
+        assert!(info.id.contains("gpt-5"));
+    }
+
+    #[test]
+    fn model_info_gpt_5_nano() {
+        let info = build_model_info("gpt-5-nano", "openai");
+        assert!(info.id.contains("gpt-5"));
+    }
+
+    // OpenAI GPT-4.1 series
+    #[test]
+    fn model_info_gpt_4_1() {
+        let info = build_model_info("gpt-4.1", "openai");
+        assert!(info.id.contains("gpt-4"));
+    }
+
+    #[test]
+    fn model_info_gpt_4_1_mini() {
+        let info = build_model_info("gpt-4.1-mini", "openai");
+        assert!(info.id.contains("gpt-4"));
+    }
+
+    #[test]
+    fn model_info_gpt_4_1_nano() {
+        let info = build_model_info("gpt-4.1-nano", "openai");
+        assert!(info.id.contains("gpt-4"));
+    }
+
+    // OpenAI O-series
+    #[test]
+    fn model_info_o3() {
+        let info = build_model_info("o3", "openai");
+        assert!(info.id.contains("o3"));
+    }
+
+    #[test]
+    fn model_info_o4_mini() {
+        let info = build_model_info("o4-mini", "openai");
+        assert!(info.id.contains("o4"));
+    }
+
+    // Google Gemini
+    #[test]
+    fn model_info_gemini_2_flash() {
+        let info = build_model_info("gemini-2.0-flash", "google");
+        assert!(info.id.contains("gemini"));
+    }
+
+    #[test]
+    fn model_info_gemini_1_5_pro() {
+        let info = build_model_info("gemini-1.5-pro", "google");
+        assert!(info.id.contains("gemini"));
+    }
+
+    #[test]
+    fn model_info_gemini_1_5_flash() {
+        let info = build_model_info("gemini-1.5-flash", "google");
+        assert!(info.id.contains("gemini"));
+    }
+
+    // === infer_provider additional tests ===
+
+    #[test]
+    fn infer_provider_grok() {
+        assert_eq!(infer_provider("grok-beta"), "xai");
+    }
+
+    #[test]
+    fn infer_provider_codestral() {
+        assert_eq!(infer_provider("codestral-latest"), "mistral");
+    }
+
+    #[test]
+    fn infer_provider_mistral_large() {
+        assert_eq!(infer_provider("mistral-large-latest"), "mistral");
+    }
+
+    #[test]
+    fn infer_provider_o4_mini() {
+        assert_eq!(infer_provider("o4-mini"), "openai");
+    }
 }

@@ -204,6 +204,148 @@ mod tests {
         assert!(json.contains(r#""type":"event""#));
         assert!(json.contains(r#""seq":1"#));
     }
+
+    // === Additional serialization tests ===
+
+    #[test]
+    fn test_instance_state_serialize() {
+        let state = InstanceState {
+            directory: "/home/user".to_string(),
+            project_id: "proj-1".to_string(),
+            worktree: "/home/user/work".to_string(),
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"directory\":\"/home/user\""));
+        assert!(json.contains("\"project_id\":\"proj-1\""));
+        assert!(json.contains("\"worktree\":\"/home/user/work\""));
+    }
+
+    #[test]
+    fn test_todo_state_serialize() {
+        let state = TodoState {
+            id: "todo-1".to_string(),
+            content: "Fix bug".to_string(),
+            status: "in_progress".to_string(),
+            priority: "high".to_string(),
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"id\":\"todo-1\""));
+        assert!(json.contains("\"content\":\"Fix bug\""));
+        assert!(json.contains("\"status\":\"in_progress\""));
+        assert!(json.contains("\"priority\":\"high\""));
+    }
+
+    #[test]
+    fn test_event_sequence_state_serialize() {
+        let state = EventSequenceState {
+            current_seq: 100,
+            oldest_seq: Some(5),
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"current_seq\":100"));
+        assert!(json.contains("\"oldest_seq\":5"));
+    }
+
+    #[test]
+    fn test_server_message_state_full() {
+        let msg = ServerMessage::State {
+            instance: InstanceState {
+                directory: "/dir".to_string(),
+                project_id: "p1".to_string(),
+                worktree: "/dir".to_string(),
+            },
+            todos: vec![
+                TodoState {
+                    id: "1".to_string(),
+                    content: "Task 1".to_string(),
+                    status: "pending".to_string(),
+                    priority: "low".to_string(),
+                },
+                TodoState {
+                    id: "2".to_string(),
+                    content: "Task 2".to_string(),
+                    status: "completed".to_string(),
+                    priority: "medium".to_string(),
+                },
+            ],
+            active_sessions: vec!["s1".to_string(), "s2".to_string()],
+            events: EventSequenceState {
+                current_seq: 50,
+                oldest_seq: None,
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"state\""));
+        assert!(json.contains("Task 1"));
+        assert!(json.contains("Task 2"));
+    }
+
+    // === ClientMessage edge cases ===
+
+    #[test]
+    fn test_client_message_subscribe_empty_events() {
+        let json = r#"{"type": "subscribe", "events": []}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::Subscribe { events } => {
+                assert!(events.unwrap().is_empty());
+            }
+            _ => panic!("Expected Subscribe"),
+        }
+    }
+
+    #[test]
+    fn test_client_message_unsubscribe_no_events() {
+        let json = r#"{"type": "unsubscribe"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::Unsubscribe { events } => {
+                assert!(events.is_none());
+            }
+            _ => panic!("Expected Unsubscribe"),
+        }
+    }
+
+    // === ServerMessage Clone ===
+
+    #[test]
+    fn test_sequenced_event_clone() {
+        let event = SequencedEvent {
+            seq: 42,
+            event_type: "test".to_string(),
+            payload: serde_json::json!({"data": 123}),
+            timestamp: 1000,
+        };
+        let cloned = event.clone();
+        assert_eq!(cloned.seq, 42);
+        assert_eq!(cloned.event_type, "test");
+    }
+
+    // === Debug format tests ===
+
+    #[test]
+    fn test_instance_state_clone() {
+        let state = InstanceState {
+            directory: "/test".to_string(),
+            project_id: "p".to_string(),
+            worktree: "/test".to_string(),
+        };
+        // InstanceState only has Debug, not Clone, so test debug format
+        let debug = format!("{:?}", state);
+        assert!(debug.contains("/test"));
+    }
+
+    #[test]
+    fn test_todo_state_clone() {
+        let state = TodoState {
+            id: "1".to_string(),
+            content: "Task".to_string(),
+            status: "pending".to_string(),
+            priority: "low".to_string(),
+        };
+        let debug = format!("{:?}", state);
+        assert!(debug.contains("pending"));
+    }
 }
 
 /// Message from client to server.

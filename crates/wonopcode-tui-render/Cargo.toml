@@ -1,0 +1,17 @@
+[package]
+name = "wonopcode-tui-render"
+version = "0.1.0"
+edition = "2021"
+description = "Rendering utilities for wonopcode TUI (markdown, syntax, diff)"
+license = "MIT"
+
+[dependencies]
+wonopcode-tui-core.workspace = true
+
+ratatui.workspace = true
+syntect.workspace = true
+similar.workspace = true
+once_cell.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]
