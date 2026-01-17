@@ -511,17 +511,22 @@ mod tests {
         let test_path = temp_dir.path();
 
         if let Ok(instance) = create_test_instance(test_path).await {
-            // Get initial count (may have sessions from other tests in global storage)
-            let initial_sessions = instance.list_sessions().await;
-            let initial_count = initial_sessions.len();
-
             // Create some sessions
-            let _session1 = instance.create_session(None).await.unwrap();
-            let _session2 = instance.create_session(None).await.unwrap();
+            let session1 = instance.create_session(None).await.unwrap();
+            let session2 = instance.create_session(None).await.unwrap();
 
-            // Should have 2 more sessions now
+            // Verify our sessions are in the list
+            // (don't check exact count due to parallel test interference)
             let sessions = instance.list_sessions().await;
-            assert_eq!(sessions.len(), initial_count + 2);
+            let session_ids: Vec<_> = sessions.iter().map(|s| s.id.as_str()).collect();
+            assert!(
+                session_ids.contains(&session1.id.as_str()),
+                "session1 should be in list"
+            );
+            assert!(
+                session_ids.contains(&session2.id.as_str()),
+                "session2 should be in list"
+            );
 
             instance.dispose().await;
         }

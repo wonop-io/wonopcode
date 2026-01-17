@@ -488,10 +488,19 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_resolve_path_nonexistent_absolute() {
         let dir = TempDir::new().unwrap();
         let result = resolve_path("/nonexistent/path.rs", dir.path(), dir.path()).unwrap();
         assert_eq!(result, PathBuf::from("/nonexistent/path.rs"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_resolve_path_nonexistent_absolute() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_path("C:\\nonexistent\\path.rs", dir.path(), dir.path()).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\nonexistent\\path.rs"));
     }
 
     // Note: format_locations is implicitly tested through the LSP tool execution tests.
