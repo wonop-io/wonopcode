@@ -60,9 +60,40 @@ coverage-open: coverage-html
     open coverage/html/index.html
 
 # Show coverage statistics summary per crate
-covstats:
+# Usage: just covstats [--sort crate|lines|covered|coverage|status]
+covstats *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    
+    # Parse arguments
+    SORT_BY="crate"  # Default sort
+    for arg in {{ARGS}}; do
+        case "$arg" in
+            --sort)
+                shift_next=true
+                ;;
+            crate|lines|covered|coverage|status)
+                if [[ "${shift_next:-false}" == "true" ]]; then
+                    SORT_BY="$arg"
+                    shift_next=false
+                fi
+                ;;
+            --sort=*)
+                SORT_BY="${arg#--sort=}"
+                ;;
+            -h|--help)
+                echo "Usage: just covstats [--sort <field>]"
+                echo ""
+                echo "Sort options:"
+                echo "  crate     - Sort by crate name (default)"
+                echo "  lines     - Sort by total lines (descending)"
+                echo "  covered   - Sort by covered lines (descending)"
+                echo "  coverage  - Sort by coverage percentage (descending)"
+                echo "  status    - Sort by status (worst first: 🔴 → 🟠 → 🟡 → ✅)"
+                exit 0
+                ;;
+        esac
+    done
     
     echo "📊 Running tests and collecting coverage..."
     echo ""
@@ -71,19 +102,15 @@ covstats:
     COVERAGE_OUTPUT=$(cargo llvm-cov --all-features --workspace \
         --ignore-filename-regex '(tests/|test\.rs|mock\.rs)' 2>&1)
     
-    echo "╔══════════════════════════════════════════════════════════════════════╗"
-    echo "║                    WONOPCODE COVERAGE SUMMARY                        ║"
-    echo "╠══════════════════════════════════════════════════════════════════════╣"
-    echo "║ Crate                      │ Lines    │ Covered  │ Coverage │ Status ║"
-    echo "╠════════════════════════════╪══════════╪══════════╪══════════╪════════╣"
+    # Collect all crate data into a temp file for sorting
+    TEMP_DATA=$(mktemp)
+    trap "rm -f $TEMP_DATA" EXIT
     
-    # Get unique crate names and process each - crate name is before first /
-    # Lines format: name  regions  missed  cover%  functions  missed  cover%  lines  missed  cover%
-    # Columns (1-indexed): 1=name, 2=regions, 3=missed_regions, 4=cover%, 5=functions, 6=missed_funcs, 7=cover%, 8=lines, 9=missed_lines, 10=cover%
+    # Get unique crate names and process each
     echo "$COVERAGE_OUTPUT" | grep -E "^wonop(code)?[a-z-]*/src" | \
         sed 's|/src/.*||' | sort -u | \
     while read -r crate; do
-        # Sum up lines for this crate - column 8 is total lines, column 9 is missed
+        # Sum up lines for this crate
         CRATE_DATA=$(echo "$COVERAGE_OUTPUT" | grep "^${crate}/src" | \
             awk '{total+=$8; missed+=$9} END {
                 if(total>0) {
@@ -99,29 +126,69 @@ covstats:
         COVERED=$(echo "$CRATE_DATA" | awk '{print $2}')
         PCT=$(echo "$CRATE_DATA" | awk '{print $3}')
         
-        # Determine status emoji based on coverage
+        # Determine status (numeric for sorting: 1=red, 2=orange, 3=yellow, 4=green)
         if (( $(echo "$PCT >= 90" | bc -l) )); then
+            STATUS_NUM=4
             STATUS="✅"
         elif (( $(echo "$PCT >= 70" | bc -l) )); then
+            STATUS_NUM=3
             STATUS="🟡"
         elif (( $(echo "$PCT >= 50" | bc -l) )); then
+            STATUS_NUM=2
             STATUS="🟠"
         else
+            STATUS_NUM=1
             STATUS="🔴"
         fi
         
-        # Format output
+        # Output: crate|lines|covered|coverage|status_num|status_emoji
+        echo "${crate}|${TOTAL_LINES}|${COVERED}|${PCT}|${STATUS_NUM}|${STATUS}" >> "$TEMP_DATA"
+    done
+    
+    # Sort the data based on the selected field
+    case "$SORT_BY" in
+        crate)
+            SORTED_DATA=$(sort -t'|' -k1 "$TEMP_DATA")
+            ;;
+        lines)
+            SORTED_DATA=$(sort -t'|' -k2 -rn "$TEMP_DATA")
+            ;;
+        covered)
+            SORTED_DATA=$(sort -t'|' -k3 -rn "$TEMP_DATA")
+            ;;
+        coverage)
+            SORTED_DATA=$(sort -t'|' -k4 -rn "$TEMP_DATA")
+            ;;
+        status)
+            # Sort by status (ascending = worst first), then by coverage (ascending)
+            SORTED_DATA=$(sort -t'|' -k5 -n -k4 -n "$TEMP_DATA")
+            ;;
+        *)
+            echo "Unknown sort field: $SORT_BY"
+            echo "Valid options: crate, lines, covered, coverage, status"
+            exit 1
+            ;;
+    esac
+    
+    # Print header
+    echo "╔══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    WONOPCODE COVERAGE SUMMARY                        ║"
+    echo "╠══════════════════════════════════════════════════════════════════════╣"
+    echo "║ Crate                      │ Lines    │ Covered  │ Coverage │ Status ║"
+    echo "╠════════════════════════════╪══════════╪══════════╪══════════╪════════╣"
+    
+    # Print sorted rows
+    echo "$SORTED_DATA" | while IFS='|' read -r crate lines covered pct status_num status; do
         CRATE_FMT=$(printf "%-26s" "$crate")
-        LINES_FMT=$(printf "%8d" "$TOTAL_LINES")
-        COV_FMT=$(printf "%8d" "$COVERED")
-        PCT_FMT=$(printf "%7.2f%%" "$PCT")
-        
-        echo "║ ${CRATE_FMT} │ ${LINES_FMT} │ ${COV_FMT} │ ${PCT_FMT} │   ${STATUS}   ║"
+        LINES_FMT=$(printf "%8d" "$lines")
+        COV_FMT=$(printf "%8d" "$covered")
+        PCT_FMT=$(printf "%7.2f%%" "$pct")
+        echo "║ ${CRATE_FMT} │ ${LINES_FMT} │ ${COV_FMT} │ ${PCT_FMT} │   ${status}   ║"
     done
     
     echo "╠════════════════════════════╪══════════╪══════════╪══════════╪════════╣"
     
-    # Parse total line - columns are: TOTAL  regions  missed  cover%  functions  missed  cover%  lines  missed  cover%
+    # Parse total line
     TOTAL_LINE=$(echo "$COVERAGE_OUTPUT" | grep "^TOTAL")
     TOTAL_LINES=$(echo "$TOTAL_LINE" | awk '{print $8}')
     MISSED=$(echo "$TOTAL_LINE" | awk '{print $9}')
@@ -145,7 +212,7 @@ covstats:
     echo ""
     echo "Legend: ✅ ≥90% (target) │ 🟡 ≥70% │ 🟠 ≥50% │ 🔴 <50%"
     echo ""
-    echo "Target: 90% coverage"
+    echo "Sorted by: $SORT_BY | Target: 90% coverage"
 
 # === Linting & Formatting ===
 
