@@ -633,6 +633,9 @@ mod tests {
         let part = MessagePart::Text(TextPart::new(&session.id, user_msg.id(), "User input"));
         session_repo.save_part(&part).await.unwrap();
 
+        // Small delay to ensure different timestamps for message ordering
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
         // Create assistant message with a part
         let assistant_msg = Message::Assistant(AssistantMessage::new(
             &session.id,
@@ -662,10 +665,13 @@ mod tests {
         let result = revert_handler.revert("proj_1", input).await.unwrap();
         // The revert function returns a session with revert info set if found
         // When reverting to an assistant message without a part_id, it reverts to the user message before it
-        if result.revert.is_some() {
-            let revert_info = result.revert.unwrap();
-            // Should be the user message
-            assert_eq!(revert_info.message_id, user_msg.id());
-        }
+        assert!(result.revert.is_some(), "revert info should be set");
+        let revert_info = result.revert.unwrap();
+        // Should be the user message (not the assistant message we targeted)
+        assert_eq!(
+            revert_info.message_id,
+            user_msg.id(),
+            "should revert to user message before assistant"
+        );
     }
 }
