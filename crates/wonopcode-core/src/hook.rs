@@ -443,6 +443,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_hook_execute_with_cwd() {
         let hook = Hook::new(vec!["pwd".to_string()]);
         let context = HookContext::new().with_cwd("/tmp");
@@ -453,8 +454,34 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(windows)]
+    async fn test_hook_execute_with_cwd() {
+        let hook = Hook::new(vec!["cmd".to_string(), "/c".to_string(), "cd".to_string()]);
+        let temp_dir = std::env::temp_dir();
+        let context = HookContext::new().with_cwd(temp_dir.to_str().unwrap());
+        let result = hook.execute(&context).await.unwrap();
+        assert!(result.success);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
     async fn test_hook_execute_failure() {
         let hook = Hook::new(vec!["false".to_string()]);
+        let context = HookContext::new();
+        let result = hook.execute(&context).await;
+        assert!(matches!(result, Err(HookError::ExecutionFailed(_))));
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn test_hook_execute_failure() {
+        // On Windows, use cmd /c exit 1 to simulate a failed command
+        let hook = Hook::new(vec![
+            "cmd".to_string(),
+            "/c".to_string(),
+            "exit".to_string(),
+            "1".to_string(),
+        ]);
         let context = HookContext::new();
         let result = hook.execute(&context).await;
         assert!(matches!(result, Err(HookError::ExecutionFailed(_))));

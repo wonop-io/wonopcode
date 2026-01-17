@@ -2038,10 +2038,11 @@ mod tests {
         // Load config from directory
         let (config, sources) = Config::load(Some(dir.path())).await.unwrap();
 
-        // Verify .vscode/mcp.json was loaded
-        assert!(sources
-            .iter()
-            .any(|s| s.to_string_lossy().contains(".vscode/mcp.json")));
+        // Verify .vscode/mcp.json was loaded (use path components for cross-platform)
+        assert!(sources.iter().any(|s| {
+            let path_str = s.to_string_lossy();
+            path_str.contains(".vscode") && path_str.contains("mcp.json")
+        }));
 
         // Verify MCP servers were loaded
         let mcp = config.mcp.expect("MCP config should be present");
