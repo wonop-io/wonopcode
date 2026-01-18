@@ -1,0 +1,107 @@
+name: Mirror External PRs to Monorepo
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  mirror-pr:
+    name: Mirror PR to monorepo
+    runs-on: ubuntu-latest
+    # Only run for PRs from forks (external contributors)
+    if: github.event.pull_request.head.repo.fork == true
+    
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: public-pr
+
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          repository: wonop-io/wonop-ng
+          token: ${{ secrets.MONOREPO_PAT }}
+          fetch-depth: 0
+          path: monorepo
+
+      - name: Configure git
+        run: |
+          git config --global user.name "Wonop Bot"
+          git config --global user.email "bot@wonop.io"
+
+      - name: Create branch and apply changes
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.MONOREPO_PAT }}
+        run: |
+          cd monorepo
+          
+          BRANCH_NAME="external/wonopcode-pr-${PR_NUMBER}"
+          SUBTREE_PATH="wonop/apps/wonopcode/communityedition"
+          
+          # Create branch from main
+          git checkout -b "${BRANCH_NAME}" origin/main
+          
+          # Remove existing subtree content (except .github if it exists in monorepo)
+          if [ -d "${SUBTREE_PATH}" ]; then
+            find "${SUBTREE_PATH}" -mindepth 1 -maxdepth 1 ! -name '.github' -exec rm -rf {} +
+          else
+            mkdir -p "${SUBTREE_PATH}"
+          fi
+          
+          # Copy PR content to subtree location (excluding .github from public repo)
+          rsync -av --exclude='.github' ../public-pr/ "${SUBTREE_PATH}/"
+          
+          # Commit changes
+          git add -A
+          git commit -m "Mirror external PR #${PR_NUMBER} from wonopcode
+
+Original PR: ${PR_URL}
+Author: @${PR_AUTHOR}"
+          
+          # Push branch
+          git push origin "${BRANCH_NAME}" --force
+          
+          # Check if PR already exists
+          EXISTING_PR=$(gh pr list --repo wonop-io/wonop-ng --head "${BRANCH_NAME}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} already exists, updated branch"
+          else
+            # Create PR using GitHub CLI
+            gh pr create \
+              --repo wonop-io/wonop-ng \
+              --head "${BRANCH_NAME}" \
+              --base main \
+              --title "[External] ${PR_TITLE}" \
+              --body "This PR mirrors an external contribution from the public repository.
+
+**Original PR:** ${PR_URL}
+**Author:** @${PR_AUTHOR}
+
+---
+
+When this PR is merged, changes will automatically sync back to the public repo."
+          fi
+
+      - name: Comment on public PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Check if we already commented
+          EXISTING_COMMENT=$(gh pr view ${PR_NUMBER} --repo wonop-io/wonopcode --json comments --jq '.comments[] | select(.body | contains("mirrored to our internal monorepo")) | .id' 2>/dev/null | head -1 || echo "")
+          
+          if [ -z "$EXISTING_COMMENT" ]; then
+            gh pr comment ${PR_NUMBER} --repo wonop-io/wonopcode --body "👋 Thanks for your contribution!
+
+Your PR has been mirrored to our internal monorepo for review. We'll merge it there, and the changes will automatically sync back to this repository.
+
+You don't need to do anything else - we'll keep you updated on the progress!"
+          fi
