@@ -45,10 +45,7 @@ pub fn sanitize_for_display(text: &str) -> String {
                         if next.is_ascii_alphabetic() {
                             result.push(chars.next().unwrap());
                             break;
-                        } else if next.is_ascii_digit()
-                            || next == ';'
-                            || next == '?'
-                            || next == '='
+                        } else if next.is_ascii_digit() || next == ';' || next == '?' || next == '='
                         {
                             result.push(chars.next().unwrap());
                         } else {
@@ -63,7 +60,7 @@ pub fn sanitize_for_display(text: &str) -> String {
                     // Consume until ST (ESC\) or BEL (\x07)
                     while let Some(&next) = chars.peek() {
                         if next == '\x07' {
-                            result.push_str("␇");
+                            result.push('␇');
                             chars.next();
                             break;
                         } else if next == '\x1B' {
@@ -72,7 +69,7 @@ pub fn sanitize_for_display(text: &str) -> String {
                                 chars.next();
                                 result.push_str("␛\\");
                             } else {
-                                result.push_str("␛");
+                                result.push('␛');
                             }
                             break;
                         } else {
@@ -81,7 +78,7 @@ pub fn sanitize_for_display(text: &str) -> String {
                     }
                 } else {
                     // Just an ESC character
-                    result.push_str("␛");
+                    result.push('␛');
                 }
             }
 
@@ -100,7 +97,7 @@ pub fn sanitize_for_display(text: &str) -> String {
                     }
                 } else if code == 127 {
                     // DEL character
-                    result.push_str("␡");
+                    result.push('␡');
                 } else {
                     // Other control chars (shouldn't happen in UTF-8)
                     result.push(c);
