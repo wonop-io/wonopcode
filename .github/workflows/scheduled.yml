@@ -1,0 +1,50 @@
+name: Scheduled Checks
+
+on:
+  schedule:
+    # Run every day at 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Check that the project still builds with latest stable Rust
+  check-latest:
+    name: Check Latest Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features --workspace
+
+  # Check MSRV (Minimum Supported Rust Version)
+  check-msrv:
+    name: Check MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features --workspace
+
+  # Run tests with all feature combinations
+  test-features:
+    name: Test Feature Combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libavahi-client-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-hack
+        run: cargo install cargo-hack
+      - name: Test feature powerset
+        run: cargo hack test --feature-powerset --workspace

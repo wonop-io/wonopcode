@@ -1,0 +1,66 @@
+[package]
+name = "wonopcode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "AI-powered coding assistant CLI"
+
+[[bin]]
+name = "wonopcode"
+path = "src/main.rs"
+
+[features]
+default = ["discover"]
+# GitHub Actions integration (experimental)
+github = []
+# mDNS service discovery (requires Bonjour SDK on Windows, libavahi on Linux)
+discover = ["dep:wonopcode-discover"]
+
+[dependencies]
+wonopcode-util.workspace = true
+wonopcode-core.workspace = true
+wonopcode-provider.workspace = true
+wonopcode-tools.workspace = true
+wonopcode-storage.workspace = true
+wonopcode-tui.workspace = true
+wonopcode-server.workspace = true
+wonopcode-snapshot.workspace = true
+wonopcode-sandbox.workspace = true
+wonopcode-mcp.workspace = true
+wonopcode-lsp.workspace = true
+wonopcode-acp.workspace = true
+wonopcode-protocol.workspace = true
+wonopcode-discover = { workspace = true, optional = true }
+
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+axum.workspace = true
+dirs.workspace = true
+chrono.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+uuid.workspace = true
+open = "5"
+flate2 = "1"
+hostname = "0.4"
+tar = "0.4"
+zip = "0.6"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

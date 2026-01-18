@@ -1,0 +1,746 @@
+//! Backend abstraction for TUI communication.
+//!
+//! This module provides a trait for backend communication, allowing the TUI
+//! to work with either a local runner (direct channels) or a remote server (HTTP/SSE).
+
+use crate::{AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate};
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+
+/// Error type for backend operations.
+#[derive(Debug, thiserror::Error)]
+pub enum BackendError {
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
+
+    #[error("Request failed: {0}")]
+    RequestFailed(String),
+
+    #[error("Channel closed")]
+    ChannelClosed,
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+}
+
+/// Result type for backend operations.
+pub type BackendResult<T> = Result<T, BackendError>;
+
+/// Trait for backend communication.
+///
+/// Implementations provide either local (channel-based) or remote (HTTP/SSE) communication.
+#[async_trait]
+pub trait Backend: Send + Sync {
+    /// Send an action to the agent.
+    async fn send_action(&self, action: AppAction) -> BackendResult<()>;
+
+    /// Check if the backend is connected.
+    fn is_connected(&self) -> bool;
+
+    /// Get the backend type name (for display).
+    fn backend_type(&self) -> &'static str;
+}
+
+/// Local backend using direct tokio channels.
+///
+/// This is used when the TUI and runner are in the same process.
+pub struct LocalBackend {
+    action_tx: mpsc::UnboundedSender<AppAction>,
+}
+
+impl LocalBackend {
+    /// Create a new local backend with the given action sender.
+    pub fn new(action_tx: mpsc::UnboundedSender<AppAction>) -> Self {
+        Self { action_tx }
+    }
+}
+
+#[async_trait]
+impl Backend for LocalBackend {
+    async fn send_action(&self, action: AppAction) -> BackendResult<()> {
+        self.action_tx
+            .send(action)
+            .map_err(|_| BackendError::ChannelClosed)
+    }
+
+    fn is_connected(&self) -> bool {
+        !self.action_tx.is_closed()
+    }
+
+    fn backend_type(&self) -> &'static str {
+        "local"
+    }
+}
+
+/// Remote backend using HTTP for actions and SSE for updates.
+///
+/// This is used when connecting to a remote headless agent server.
+pub struct RemoteBackend {
+    client: reqwest::Client,
+    base_url: String,
+    api_key: Option<String>,
+    connected: std::sync::atomic::AtomicBool,
+    /// Sender for updates (used for git operations that need to send updates back).
+    update_tx: Option<mpsc::UnboundedSender<AppUpdate>>,
+}
+
+impl RemoteBackend {
+    /// Create a new remote backend connecting to the given address.
+    pub fn new(address: &str) -> BackendResult<Self> {
+        Self::with_api_key(address, None)
+    }
+
+    /// Create a new remote backend with optional API key authentication.
+    pub fn with_api_key(address: &str, api_key: Option<String>) -> BackendResult<Self> {
+        let base_url = if address.starts_with("http://") || address.starts_with("https://") {
+            address.to_string()
+        } else {
+            format!("http://{address}")
+        };
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| BackendError::ConnectionFailed(e.to_string()))?;
+
+        Ok(Self {
+            client,
+            base_url,
+            api_key,
+            connected: std::sync::atomic::AtomicBool::new(false),
+            update_tx: None,
+        })
+    }
+
+    /// Get the base URL.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Add API key header to a request if configured.
+    fn add_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(ref key) = self.api_key {
+            request.header("X-API-Key", key)
+        } else {
+            request
+        }
+    }
+
+    /// Check server health and mark as connected.
+    pub async fn connect(&self) -> BackendResult<()> {
+        let url = format!("{}/health", self.base_url);
+        self.client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| BackendError::ConnectionFailed(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| BackendError::ConnectionFailed(e.to_string()))?;
+
+        self.connected
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Get the full state from the server.
+    pub async fn get_state(&self) -> BackendResult<wonopcode_protocol::State> {
+        let url = format!("{}/state", self.base_url);
+        let resp = self
+            .add_auth(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        resp.json()
+            .await
+            .map_err(|e| BackendError::SerializationError(e.to_string()))
+    }
+
+    /// Subscribe to SSE events and forward them to the given sender.
+    ///
+    /// This spawns a background task that reads SSE events and sends them
+    /// as AppUpdate messages.
+    pub fn subscribe_updates(
+        &self,
+        update_tx: mpsc::UnboundedSender<AppUpdate>,
+    ) -> tokio::task::JoinHandle<()> {
+        let url = format!("{}/events", self.base_url);
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+
+            loop {
+                let mut request = client.get(&url);
+                if let Some(ref key) = api_key {
+                    request = request.header("X-API-Key", key);
+                }
+
+                match request.send().await {
+                    Ok(response) => {
+                        let mut stream = response.bytes_stream();
+                        let mut buffer = String::new();
+
+                        while let Some(chunk) = stream.next().await {
+                            match chunk {
+                                Ok(bytes) => {
+                                    buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                                    // Process complete SSE events
+                                    while let Some(pos) = buffer.find("\n\n") {
+                                        let event_str = buffer[..pos].to_string();
+                                        buffer = buffer[pos + 2..].to_string();
+
+                                        if let Some(update) = parse_sse_event(&event_str) {
+                                            if update_tx.send(update).is_err() {
+                                                return; // Channel closed
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("SSE stream error: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to connect to SSE stream: {}", e);
+                    }
+                }
+
+                // Reconnect after a delay
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        })
+    }
+
+    /// Convert AppAction to protocol Action and send via HTTP.
+    async fn send_protocol_action(&self, action: wonopcode_protocol::Action) -> BackendResult<()> {
+        let endpoint = action.endpoint();
+        let url = format!("{}{}", self.base_url, endpoint);
+
+        self.add_auth(self.client.post(&url))
+            .json(&action)
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Set the update sender for git operations.
+    pub fn set_update_sender(&mut self, update_tx: mpsc::UnboundedSender<AppUpdate>) {
+        self.update_tx = Some(update_tx);
+    }
+
+    /// Send an update via the update channel.
+    fn send_update(&self, update: AppUpdate) {
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(update);
+        }
+    }
+
+    /// Handle git status request.
+    async fn handle_git_status(&self) -> BackendResult<()> {
+        let url = format!("{}/git/status", self.base_url);
+        let resp = self
+            .add_auth(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let status: GitStatusResponse = resp
+                .json()
+                .await
+                .map_err(|e| BackendError::SerializationError(e.to_string()))?;
+
+            self.send_update(AppUpdate::GitStatusUpdated(GitStatusUpdate {
+                branch: status.branch,
+                ahead: status.ahead,
+                behind: status.behind,
+                files: status
+                    .files
+                    .into_iter()
+                    .map(|f| GitFileUpdate {
+                        path: f.path,
+                        status: f.status,
+                        staged: f.staged,
+                    })
+                    .collect(),
+            }));
+        } else {
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            self.send_update(AppUpdate::GitOperationResult {
+                success: false,
+                message: error,
+            });
+        }
+        Ok(())
+    }
+
+    /// Handle git stage request.
+    async fn handle_git_stage(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/stage", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after staging
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git unstage request.
+    async fn handle_git_unstage(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/unstage", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after unstaging
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git checkout request.
+    async fn handle_git_checkout(&self, paths: Vec<String>) -> BackendResult<()> {
+        let url = format!("{}/git/checkout", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "paths": paths }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after checkout
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git commit request.
+    async fn handle_git_commit(&self, message: String) -> BackendResult<()> {
+        let url = format!("{}/git/commit", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .json(&serde_json::json!({ "message": message }))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let result_message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult {
+            success,
+            message: result_message,
+        });
+
+        // Refresh status after commit
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git history request.
+    async fn handle_git_history(&self) -> BackendResult<()> {
+        let url = format!("{}/git/history", self.base_url);
+        let resp = self
+            .add_auth(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let commits: Vec<GitCommitResponse> = resp
+                .json()
+                .await
+                .map_err(|e| BackendError::SerializationError(e.to_string()))?;
+
+            self.send_update(AppUpdate::GitHistoryUpdated(
+                commits
+                    .into_iter()
+                    .map(|c| GitCommitUpdate {
+                        id: c.id,
+                        message: c.message,
+                        author: c.author,
+                        date: c.date,
+                    })
+                    .collect(),
+            ));
+        } else {
+            let error = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            self.send_update(AppUpdate::GitOperationResult {
+                success: false,
+                message: error,
+            });
+        }
+        Ok(())
+    }
+
+    /// Handle git push request.
+    async fn handle_git_push(&self) -> BackendResult<()> {
+        let url = format!("{}/git/push", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after push
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+
+    /// Handle git pull request.
+    async fn handle_git_pull(&self) -> BackendResult<()> {
+        let url = format!("{}/git/pull", self.base_url);
+        let resp = self
+            .add_auth(self.client.post(&url))
+            .send()
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        let success = resp.status().is_success();
+        let message = resp.text().await.unwrap_or_default();
+
+        self.send_update(AppUpdate::GitOperationResult { success, message });
+
+        // Refresh status after pull
+        if success {
+            let _ = self.handle_git_status().await;
+        }
+        Ok(())
+    }
+}
+
+/// Response structure for git status endpoint.
+#[derive(Debug, serde::Deserialize)]
+struct GitStatusResponse {
+    branch: String,
+    ahead: usize,
+    behind: usize,
+    files: Vec<GitFileResponse>,
+}
+
+/// Response structure for individual git file.
+#[derive(Debug, serde::Deserialize)]
+struct GitFileResponse {
+    path: String,
+    status: String,
+    staged: bool,
+}
+
+/// Response structure for git commit info.
+#[derive(Debug, serde::Deserialize)]
+struct GitCommitResponse {
+    id: String,
+    message: String,
+    author: String,
+    date: String,
+}
+
+#[async_trait]
+impl Backend for RemoteBackend {
+    async fn send_action(&self, action: AppAction) -> BackendResult<()> {
+        // Handle git actions specially via direct HTTP calls
+        match action {
+            AppAction::GitStatus => return self.handle_git_status().await,
+            AppAction::GitStage { paths } => return self.handle_git_stage(paths).await,
+            AppAction::GitUnstage { paths } => return self.handle_git_unstage(paths).await,
+            AppAction::GitCheckout { paths } => return self.handle_git_checkout(paths).await,
+            AppAction::GitCommit { message } => return self.handle_git_commit(message).await,
+            AppAction::GitHistory => return self.handle_git_history().await,
+            AppAction::GitPush => return self.handle_git_push().await,
+            AppAction::GitPull => return self.handle_git_pull().await,
+            _ => {}
+        }
+
+        // Handle other actions via protocol conversion
+        let protocol_action = app_action_to_protocol(action)?;
+        self.send_protocol_action(protocol_action).await
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn backend_type(&self) -> &'static str {
+        "remote"
+    }
+}
+
+/// Convert AppAction to protocol Action.
+fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol::Action> {
+    use wonopcode_protocol::Action;
+
+    Ok(match action {
+        AppAction::SendPrompt(prompt) => Action::SendPrompt { prompt },
+        AppAction::Cancel => Action::Cancel,
+        AppAction::Quit => Action::Quit,
+        AppAction::SwitchSession(session_id) => Action::SwitchSession { session_id },
+        AppAction::ChangeModel(model) => Action::ChangeModel { model },
+        AppAction::ChangeAgent(agent) => Action::ChangeAgent { agent },
+        AppAction::NewSession => Action::NewSession,
+        AppAction::Undo => Action::Undo,
+        AppAction::Redo => Action::Redo,
+        AppAction::Revert { message_id } => Action::Revert { message_id },
+        AppAction::Unrevert => Action::Unrevert,
+        AppAction::Compact => Action::Compact,
+        AppAction::RenameSession { title } => Action::RenameSession { title },
+        AppAction::McpToggle { name } => Action::McpToggle { name },
+        AppAction::McpReconnect { name } => Action::McpReconnect { name },
+        AppAction::ForkSession { message_id } => Action::ForkSession { message_id },
+        AppAction::ShareSession => Action::ShareSession,
+        AppAction::UnshareSession => Action::UnshareSession,
+        AppAction::GotoMessage { message_id } => Action::GotoMessage { message_id },
+        AppAction::SandboxStart => Action::SandboxStart,
+        AppAction::SandboxStop => Action::SandboxStop,
+        AppAction::SandboxRestart => Action::SandboxRestart,
+        AppAction::SaveSettings { scope, config } => {
+            let protocol_scope = match scope {
+                crate::SaveScope::Project => wonopcode_protocol::SaveScope::Project,
+                crate::SaveScope::Global => wonopcode_protocol::SaveScope::Global,
+            };
+            Action::SaveSettings {
+                scope: protocol_scope,
+                config: serde_json::to_value(&*config)
+                    .map_err(|e| BackendError::SerializationError(e.to_string()))?,
+            }
+        }
+        AppAction::UpdateTestProviderSettings {
+            emulate_thinking,
+            emulate_tool_calls,
+            emulate_tool_observed,
+            emulate_streaming,
+        } => Action::UpdateTestProviderSettings {
+            emulate_thinking,
+            emulate_tool_calls,
+            emulate_tool_observed,
+            emulate_streaming,
+        },
+        AppAction::PermissionResponse {
+            request_id,
+            allow,
+            remember,
+        } => Action::PermissionResponse {
+            request_id,
+            allow,
+            remember,
+        },
+        // OpenEditor is handled locally, not sent to server
+        AppAction::OpenEditor { .. } => {
+            return Err(BackendError::RequestFailed(
+                "OpenEditor is not supported for remote backend".to_string(),
+            ));
+        }
+        // Git actions are handled specially via HTTP, should not reach here
+        AppAction::GitStatus
+        | AppAction::GitStage { .. }
+        | AppAction::GitUnstage { .. }
+        | AppAction::GitCheckout { .. }
+        | AppAction::GitCommit { .. }
+        | AppAction::GitHistory
+        | AppAction::GitPush
+        | AppAction::GitPull => {
+            return Err(BackendError::RequestFailed(
+                "Git actions should be handled via HTTP endpoints".to_string(),
+            ));
+        }
+    })
+}
+
+/// Parse an SSE event string into an AppUpdate.
+fn parse_sse_event(event_str: &str) -> Option<AppUpdate> {
+    let mut data = None;
+
+    for line in event_str.lines() {
+        if let Some(rest) = line.strip_prefix("data:") {
+            data = Some(rest.trim().to_string());
+        }
+        // We ignore the event type since we parse the full Update which has the type embedded
+    }
+
+    let data = data?;
+    let update: wonopcode_protocol::Update = serde_json::from_str(&data).ok()?;
+
+    Some(protocol_update_to_app(update))
+}
+
+/// Convert protocol Update to AppUpdate.
+fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
+    use wonopcode_protocol::Update;
+
+    match update {
+        Update::Started => AppUpdate::Started,
+        Update::TextDelta { delta } => AppUpdate::TextDelta(delta),
+        Update::ToolStarted { id, name, input } => AppUpdate::ToolStarted { name, id, input },
+        Update::ToolCompleted {
+            id,
+            success,
+            output,
+            metadata,
+        } => AppUpdate::ToolCompleted {
+            id,
+            success,
+            output,
+            metadata,
+        },
+        Update::Completed { text } => AppUpdate::Completed { text },
+        Update::Error { error } => AppUpdate::Error(error),
+        Update::Status { message } => AppUpdate::Status(message),
+        Update::TokenUsage {
+            input,
+            output,
+            cost,
+            context_limit,
+        } => AppUpdate::TokenUsage {
+            input,
+            output,
+            cost,
+            context_limit,
+        },
+        Update::ModelInfo { context_limit } => AppUpdate::ModelInfo { context_limit },
+        Update::Sessions { sessions } => AppUpdate::Sessions(
+            sessions
+                .into_iter()
+                .map(|s| (s.id, s.title, s.timestamp))
+                .collect(),
+        ),
+        Update::TodosUpdated { phases, todos } => AppUpdate::TodosUpdated {
+            phases: phases
+                .into_iter()
+                .map(|p| crate::PhaseUpdate {
+                    id: p.id,
+                    name: p.name,
+                    status: p.status,
+                    todos: p
+                        .todos
+                        .into_iter()
+                        .map(|t| crate::TodoUpdate {
+                            id: t.id,
+                            content: t.content,
+                            status: t.status,
+                            priority: t.priority,
+                            phase_id: t.phase_id,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            todos: todos
+                .into_iter()
+                .map(|t| crate::TodoUpdate {
+                    id: t.id,
+                    content: t.content,
+                    status: t.status,
+                    priority: t.priority,
+                    phase_id: t.phase_id,
+                })
+                .collect(),
+        },
+        Update::LspUpdated { servers } => AppUpdate::LspUpdated(
+            servers
+                .into_iter()
+                .map(|s| crate::LspStatusUpdate {
+                    id: s.id,
+                    name: s.name,
+                    root: s.root,
+                    connected: s.connected,
+                })
+                .collect(),
+        ),
+        Update::McpUpdated { servers } => AppUpdate::McpUpdated(
+            servers
+                .into_iter()
+                .map(|s| crate::McpStatusUpdate {
+                    name: s.name,
+                    connected: s.connected,
+                    error: s.error,
+                })
+                .collect(),
+        ),
+        Update::ModifiedFilesUpdated { files } => AppUpdate::ModifiedFilesUpdated(
+            files
+                .into_iter()
+                .map(|f| crate::ModifiedFileUpdate {
+                    path: f.path,
+                    added: f.added,
+                    removed: f.removed,
+                })
+                .collect(),
+        ),
+        Update::PermissionsPending { count } => AppUpdate::PermissionsPending(count),
+        Update::SandboxUpdated {
+            state,
+            runtime_type,
+            error,
+        } => AppUpdate::SandboxUpdated(crate::SandboxStatusUpdate {
+            state,
+            runtime_type,
+            error,
+        }),
+        Update::SystemMessage { message } => AppUpdate::SystemMessage(message),
+        Update::AgentChanged { agent } => AppUpdate::AgentChanged(agent),
+        Update::PermissionRequest {
+            id,
+            tool,
+            action,
+            description,
+            path,
+        } => AppUpdate::PermissionRequest(crate::PermissionRequestUpdate {
+            id,
+            tool,
+            action,
+            description,
+            path,
+        }),
+    }
+}

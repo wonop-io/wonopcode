@@ -1,0 +1,38 @@
+[package]
+name = "wonopcode-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Sandboxed execution environment for wonopcode tools"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["process", "fs", "io-util", "time", "sync"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Docker client
+bollard = "0.18"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"
+
+[lints]
+workspace = true

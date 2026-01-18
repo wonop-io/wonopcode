@@ -1,0 +1,48 @@
+[package]
+name = "wonopcode-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "HTTP server for wonopcode"
+
+[dependencies]
+wonopcode-util.workspace = true
+wonopcode-core.workspace = true
+wonopcode-provider.workspace = true
+wonopcode-tools.workspace = true
+wonopcode-auth.workspace = true
+wonopcode-protocol.workspace = true
+wonopcode-mcp.workspace = true
+
+glob.workspace = true
+dirs.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+
+# For secure API key comparison
+subtle = "2.5"
+
+# Git operations
+git2.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

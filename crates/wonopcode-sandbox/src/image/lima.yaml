@@ -1,0 +1,111 @@
+# Lima VM configuration for wonopcode sandbox
+# This template is used to create isolated development environments
+# with automatic project mounting and common development tools.
+
+# VM Image - Use Alpine for small footprint and fast boot
+images:
+  - location: "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-virt-3.19.1-aarch64.iso"
+    arch: "aarch64"
+  - location: "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-virt-3.19.1-x86_64.iso"
+    arch: "x86_64"
+
+# Resource limits (placeholders replaced at runtime)
+cpus: {{CPUS}}
+memory: "{{MEMORY}}"
+
+# Disk size
+disk: "10GiB"
+
+# Mount the project workspace
+mounts:
+  - location: "{{HOST_ROOT}}"
+    mountPoint: "{{SANDBOX_ROOT}}"
+    writable: {{WRITABLE}}
+    # Use virtiofs for better performance on macOS
+    # Falls back to 9p if virtiofs is not available
+    9p:
+      securityModel: mapped-xattr
+      cache: mmap
+
+# SSH configuration
+ssh:
+  localPort: 0  # Automatically find available port
+  loadDotSSHPubKeys: false
+
+# Provision script - install development tools
+provision:
+  - mode: system
+    script: |
+      #!/bin/ash
+      set -eux
+      
+      # Update package index
+      apk update
+      
+      # Install core tools
+      apk add --no-cache \
+        bash \
+        coreutils \
+        curl \
+        git \
+        jq \
+        openssh-client \
+        ripgrep \
+        wget
+      
+      # Install Python
+      apk add --no-cache \
+        python3 \
+        py3-pip
+      
+      # Install Node.js
+      apk add --no-cache \
+        nodejs \
+        npm
+      
+      # Install build tools (for native packages)
+      apk add --no-cache \
+        build-base \
+        linux-headers
+      
+      # Set up environment
+      echo 'export TERM=dumb' >> /etc/profile
+      echo 'export NO_COLOR=1' >> /etc/profile
+      echo 'export GIT_TERMINAL_PROMPT=0' >> /etc/profile
+      
+      # Create workspace directory if it doesn't exist
+      mkdir -p "{{SANDBOX_ROOT}}"
+
+# Port forwarding rules
+portForwards: []
+
+# Network settings
+networks: []
+
+# Rosetta 2 for x86_64 emulation on Apple Silicon
+rosetta:
+  enabled: true
+  binfmt: true
+
+# Environment variables passed to the VM
+env:
+  TERM: "dumb"
+  NO_COLOR: "1"
+  GIT_TERMINAL_PROMPT: "0"
+
+# Host resolver for network access
+hostResolver:
+  enabled: true
+  hosts:
+    host.lima.internal: host.lima.internal
+
+# Containerd is not needed for shell-based execution
+containerd:
+  system: false
+  user: false
+
+# VM type: vz is faster on macOS 13+, qemu for older versions
+vmType: null  # Auto-detect (vz on macOS 13+, qemu otherwise)
+
+# Plain mode: minimal Lima setup
+plain: false

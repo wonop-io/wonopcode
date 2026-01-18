@@ -1,0 +1,46 @@
+[package]
+name = "wonopcode-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "ACP (Agent Client Protocol) implementation for wonopcode"
+
+[dependencies]
+# Workspace crates
+wonopcode-core = { workspace = true }
+wonopcode-util = { workspace = true }
+wonopcode-provider = { workspace = true }
+wonopcode-tools = { workspace = true }
+wonopcode-snapshot = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+tokio-util = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

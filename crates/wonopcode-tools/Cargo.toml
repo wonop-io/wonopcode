@@ -1,0 +1,42 @@
+[package]
+name = "wonopcode-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Tool implementations for wonopcode"
+
+[dependencies]
+wonopcode-util.workspace = true
+wonopcode-snapshot.workspace = true
+wonopcode-lsp.workspace = true
+wonopcode-mcp.workspace = true
+wonopcode-sandbox.workspace = true
+
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+globwalk.workspace = true
+ignore.workspace = true
+similar.workspace = true
+regex.workspace = true
+url.workspace = true
+reqwest.workspace = true
+once_cell.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

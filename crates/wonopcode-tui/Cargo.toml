@@ -1,0 +1,46 @@
+[package]
+name = "wonopcode-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Terminal UI for wonopcode"
+
+[dependencies]
+wonopcode-util.workspace = true
+wonopcode-core.workspace = true
+wonopcode-protocol.workspace = true
+wonopcode-tui-core.workspace = true
+wonopcode-tui-render.workspace = true
+wonopcode-tui-widgets.workspace = true
+wonopcode-tui-dialog.workspace = true
+wonopcode-tui-messages.workspace = true
+
+thiserror.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tui-textarea.workspace = true
+syntect.workspace = true
+similar.workspace = true
+reqwest.workspace = true
+dirs.workspace = true
+arboard.workspace = true
+ignore.workspace = true
+once_cell.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

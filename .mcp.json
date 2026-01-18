@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ace": {
+      "args": [
+        "serve"
+      ],
+      "command": "/Users/tfr/.cargo/bin/ace"
+    }
+  }
+}
