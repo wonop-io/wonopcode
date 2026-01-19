@@ -30,7 +30,7 @@ use wonopcode_provider::{
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
-use wonopcode_tools::{mcp::McpToolsBuilder, task, todo, ToolRegistry};
+use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, task, todo, ToolRegistry};
 use wonopcode_tui::{
     AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate,
     McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, PhaseUpdate, SaveScope,
@@ -264,6 +264,8 @@ pub struct Runner {
     todo_store: Arc<todo::SharedFileTodoStore>,
     /// Shared LSP client for status reporting.
     lsp_client: Arc<wonopcode_lsp::LspClient>,
+    /// MCP TODO adapter for bridging MCP TODO tools to native events.
+    mcp_todo_adapter: Option<mcp_todo_adapter::McpTodoAdapter>,
 }
 
 impl Runner {
@@ -300,8 +302,11 @@ impl Runner {
         let mut tools = ToolRegistry::with_builtins();
         tools.register(Arc::new(wonopcode_tools::bash::BashTool));
         tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
+        
+        // TODO tools are registered initially - they may be replaced later if MCP TODO tools are detected
         tools.register(Arc::new(todo::TodoWriteTool::new(todo_store.clone())));
         tools.register(Arc::new(todo::TodoReadTool::new(todo_store.clone())));
+        
         tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
             lsp_client.clone(),
         )));
@@ -339,6 +344,7 @@ impl Runner {
             sandbox_manager: None, // Will be initialized async in new_with_features
             todo_store,
             lsp_client,
+            mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
         })
     }
 
@@ -664,12 +670,36 @@ impl Runner {
                 "MCP initialized"
             );
 
+            // Check for MCP TODO tools and create adapter
+            let mcp_todo_adapter = mcp_todo_adapter::detect_mcp_todo_tools(&mcp_tools);
+            let has_mcp_todo_tools = mcp_todo_adapter.has_mcp_todo_tools();
+
+            // For now, default to preferring MCP TODO tools when available
+            // TODO: Add proper config integration later
+            let prefer_mcp_todo = true;
+            
+            if has_mcp_todo_tools {
+                info!(
+                    mcp_todo_tools = %mcp_todo_adapter.get_summary(),
+                    prefer_mcp = prefer_mcp_todo,
+                    "Detected MCP TODO tools"
+                );
+            }
+
             // We need a mutable tools registry - create a new one with MCP tools
             let mut new_tools = ToolRegistry::with_builtins();
             new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
             new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-            new_tools.register(Arc::new(todo::TodoWriteTool::new(self.todo_store.clone())));
-            new_tools.register(Arc::new(todo::TodoReadTool::new(self.todo_store.clone())));
+            
+            // Conditionally register TODO tools based on MCP availability and configuration
+            if !has_mcp_todo_tools || !prefer_mcp_todo {
+                new_tools.register(Arc::new(todo::TodoWriteTool::new(self.todo_store.clone())));
+                new_tools.register(Arc::new(todo::TodoReadTool::new(self.todo_store.clone())));
+                info!("Registered native TODO tools");
+            } else {
+                info!("Skipping native TODO tools - using MCP TODO tools");
+            }
+            
             new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
                 self.lsp_client.clone(),
             )));
@@ -692,6 +722,12 @@ impl Runner {
 
             self.tools = Arc::new(new_tools);
             self.mcp_client = Some(mcp_client);
+            
+            // Store the MCP TODO adapter for event bridging
+            if has_mcp_todo_tools && prefer_mcp_todo {
+                self.mcp_todo_adapter = Some(mcp_todo_adapter);
+                info!("MCP TODO adapter initialized for event bridging");
+            }
         }
     }
 

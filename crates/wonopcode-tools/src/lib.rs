@@ -15,6 +15,7 @@ pub mod grep;
 pub mod list;
 pub mod lsp;
 pub mod mcp;
+pub mod mcp_todo_adapter;
 pub mod multiedit;
 pub mod patch;
 pub mod plan_mode;

@@ -281,6 +281,10 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<HashMap<String, bool>>,
 
+    /// Prefer MCP TODO tools over native ones when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefer_mcp_todo_tools: Option<bool>,
+
     /// Additional instructions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Vec<String>>,
