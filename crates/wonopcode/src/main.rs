@@ -4,11 +4,9 @@
 // @ace:implements COMP-T90R9Q-UR4
 
 mod commands;
-mod compaction;
 #[cfg(feature = "github")]
 mod github;
 mod publish;
-mod runner;
 mod stats;
 mod upgrade;
 
@@ -19,7 +17,7 @@ use commands::{
 };
 
 use clap::{Parser, Subcommand};
-use runner::{Runner, RunnerConfig};
+use wonopcode_runner::{load_api_key, Runner, RunnerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -485,7 +483,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     };
 
     // Load API key (may be empty for CLI-based auth)
-    let api_key = runner::load_api_key(&provider).unwrap_or_default();
+    let api_key = load_api_key(&provider).unwrap_or_default();
 
     // Log authentication status (but don't block startup)
     if api_key.is_empty() {
@@ -778,9 +776,9 @@ async fn run_tui_mode(
     shared_bus: wonopcode_core::bus::Bus,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
 ) -> anyhow::Result<()> {
-    use wonopcode_tui::App;
+    use wonopcode_tui::{App, SidebarWidget};
 
-    let mut app = App::new();
+    let mut app: App<SidebarWidget> = App::new();
 
     // Apply saved settings from config (theme, render settings, etc.)
     app.apply_config(app_config);
@@ -889,7 +887,7 @@ async fn run_headless(
     };
 
     // Load API key
-    let api_key = runner::load_api_key(&provider).unwrap_or_default();
+    let api_key = load_api_key(&provider).unwrap_or_default();
 
     // Get secret for server authentication (needed early for runner config)
     // Priority: CLI arg > environment variable > config file
@@ -1810,7 +1808,7 @@ async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
 /// Connect to a remote headless server.
 #[allow(clippy::cognitive_complexity)]
 async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
-    use wonopcode_tui::{App, Backend, RemoteBackend, SandboxStatusUpdate};
+    use wonopcode_tui::{App, Backend, RemoteBackend, SandboxStatusUpdate, SidebarWidget};
 
     // Parse address
     let address = if address.starts_with(':') {
@@ -1840,7 +1838,7 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
     let state = backend.get_state().await?;
 
     // Create TUI app
-    let mut app = App::new();
+    let mut app: App<SidebarWidget> = App::new();
 
     // Apply initial state from server
     app.set_project(state.project);

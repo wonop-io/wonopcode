@@ -17,7 +17,9 @@ use crate::widgets::{
     mode_indicator::{DisplayMode, ModeIndicator},
     onboarding::OnboardingOverlay,
     search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget},
-    sidebar::{LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarWidget, TodoItem},
+    sidebar::{
+        LspStatus, McpServerStatus, McpStatus, ModifiedFile, SidebarTrait, SidebarWidget, TodoItem,
+    },
     slash_commands::{SlashCommandAction, SlashCommandAutocomplete},
     toast::{Toast, ToastManager},
     topbar::TopBarWidget,
@@ -464,7 +466,11 @@ pub struct McpStatusUpdate {
 }
 
 /// The main TUI application.
-pub struct App {
+///
+/// The `S` type parameter allows customizing the sidebar widget.
+/// By default, it uses `SidebarWidget` from the community edition.
+/// Pro edition can use a different sidebar type that implements `SidebarTrait`.
+pub struct App<S: SidebarTrait = SidebarWidget> {
     /// Current state.
     state: AppState,
     /// Current route.
@@ -487,8 +493,8 @@ pub struct App {
     topbar: TopBarWidget,
     /// Footer widget.
     footer: FooterWidget,
-    /// Sidebar widget.
-    sidebar: SidebarWidget,
+    /// Sidebar widget (generic, can be customized per edition).
+    sidebar: S,
     /// Toast manager.
     toasts: ToastManager,
     /// Command palette.
@@ -575,7 +581,7 @@ pub struct App {
     render_settings: RenderSettings,
 }
 
-impl App {
+impl<S: SidebarTrait> App<S> {
     /// Create a new application.
     pub fn new() -> Self {
         let (action_tx, action_rx) = mpsc::unbounded_channel();
@@ -601,7 +607,7 @@ impl App {
             messages: MessagesWidget::new(),
             topbar: TopBarWidget::new(),
             footer: FooterWidget::new(),
-            sidebar: SidebarWidget::new(),
+            sidebar: S::new(),
             toasts: ToastManager::new(),
             command_palette: CommandPalette::new(),
             model_dialog: ModelDialog::new(),
@@ -697,6 +703,19 @@ impl App {
     /// Get an update sender (for the runner).
     pub fn update_sender(&self) -> mpsc::UnboundedSender<AppUpdate> {
         self.update_tx.clone()
+    }
+
+    /// Get mutable access to the sidebar widget.
+    ///
+    /// This allows Pro edition to access Pro-specific sidebar methods
+    /// that aren't part of the SidebarTrait (e.g., set_workstreams).
+    pub fn sidebar_mut(&mut self) -> &mut S {
+        &mut self.sidebar
+    }
+
+    /// Get immutable access to the sidebar widget.
+    pub fn sidebar(&self) -> &S {
+        &self.sidebar
     }
 
     /// Set the model name.
@@ -3394,7 +3413,7 @@ async function fetchUserData(userId) {
     }
 }
 
-impl Default for App {
+impl<S: SidebarTrait> Default for App<S> {
     fn default() -> Self {
         Self::new()
     }

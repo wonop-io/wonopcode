@@ -39,7 +39,8 @@ use wonopcode_tui::{
 use wonopcode_util::perf;
 use wonopcode_util::FileTimeState;
 
-use crate::compaction::{self, CompactionConfig, CompactionResult};
+use crate::compaction;
+use crate::compaction::{CompactionConfig, CompactionResult};
 
 /// Helper to send updates to the TUI with proper error logging.
 /// This replaces `let _ = update_tx.send(...)` to avoid silent failures.

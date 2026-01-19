@@ -35,6 +35,7 @@ wonopcode-mcp.workspace = true
 wonopcode-lsp.workspace = true
 wonopcode-acp.workspace = true
 wonopcode-protocol.workspace = true
+wonopcode-runner.workspace = true
 wonopcode-discover = { workspace = true, optional = true }
 
 thiserror.workspace = true

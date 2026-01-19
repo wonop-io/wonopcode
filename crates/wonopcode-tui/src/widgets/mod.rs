@@ -48,7 +48,10 @@ pub use messages::{
 pub use mode_indicator::{DisplayMode, ModeIndicator};
 pub use onboarding::OnboardingOverlay;
 pub use search::{extract_preview, fuzzy_match, SearchMatch, SearchWidget};
-pub use sidebar::{ContextInfo, ModifiedFile, SidebarSection, SidebarWidget, TodoItem};
+pub use sidebar::{
+    ContextInfo, LspServerStatus, LspStatus, McpServerStatus, McpStatus, ModifiedFile, PhaseItem,
+    SidebarSection, SidebarTrait, SidebarWidget, TodoItem,
+};
 pub use slash_commands::{SlashCommand, SlashCommandAction, SlashCommandAutocomplete};
 pub use spinner::DotsSpinner;
 pub use syntax::{highlight_code, highlight_diff, is_diff};

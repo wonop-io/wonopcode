@@ -3986,6 +3986,7 @@ dependencies = [
  "wonopcode-mcp",
  "wonopcode-protocol",
  "wonopcode-provider",
+ "wonopcode-runner",
  "wonopcode-sandbox",
  "wonopcode-server",
  "wonopcode-snapshot",
@@ -4137,6 +4138,30 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "wonopcode-runner"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "wonopcode-core",
+ "wonopcode-lsp",
+ "wonopcode-mcp",
+ "wonopcode-provider",
+ "wonopcode-sandbox",
+ "wonopcode-server",
+ "wonopcode-snapshot",
+ "wonopcode-tools",
+ "wonopcode-tui",
+ "wonopcode-util",
 ]
 
 [[package]]

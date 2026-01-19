@@ -2,7 +2,7 @@
 //!
 //! Handles login, logout, and status commands for various AI providers.
 
-use crate::runner;
+use wonopcode_runner as runner;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;

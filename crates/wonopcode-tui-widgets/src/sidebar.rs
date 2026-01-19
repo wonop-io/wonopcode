@@ -12,6 +12,105 @@ use ratatui::{
 use wonopcode_tui_core::metrics;
 use wonopcode_tui_core::Theme;
 
+/// Trait for sidebar widgets, allowing different sidebar implementations.
+///
+/// This trait enables the TUI App to be generic over the sidebar type,
+/// so Pro edition can use a different sidebar (with workstreams) while
+/// reusing all the App logic.
+pub trait SidebarTrait: Default + Send {
+    /// Create a new sidebar instance.
+    fn new() -> Self
+    where
+        Self: Sized;
+
+    /// Get the width of the sidebar (0 if not visible).
+    fn width(&self) -> u16;
+
+    /// Check if the sidebar is visible.
+    fn is_visible(&self) -> bool;
+
+    /// Set visibility of the sidebar.
+    fn set_visible(&mut self, visible: bool);
+
+    /// Toggle visibility.
+    fn toggle(&mut self);
+
+    /// Set the session title.
+    fn set_session_title(&mut self, title: impl Into<String>);
+
+    /// Set the current agent name.
+    fn set_agent(&mut self, agent: impl Into<String>);
+
+    /// Set the current model name.
+    fn set_model(&mut self, model: impl Into<String>);
+
+    /// Update token counts.
+    fn update_tokens(&mut self, input: u32, output: u32);
+
+    /// Set the cost.
+    fn set_cost(&mut self, cost: f64);
+
+    /// Set the maximum tokens (context limit).
+    fn set_max_tokens(&mut self, max: u32);
+
+    /// Get current token counts (input, output).
+    fn get_tokens(&self) -> (u32, u32);
+
+    /// Get current cost.
+    fn get_cost(&self) -> f64;
+
+    /// Get max tokens (context limit).
+    fn get_max_tokens(&self) -> u32;
+
+    /// Get MCP server counts (connected, total).
+    fn get_mcp_counts(&self) -> (usize, usize);
+
+    /// Get LSP server counts (connected, total).
+    fn get_lsp_counts(&self) -> (usize, usize);
+
+    /// Get MCP servers list.
+    fn get_mcp_servers(&self) -> &[McpStatus];
+
+    /// Set phases (grouped todos).
+    fn set_phases(&mut self, phases: Vec<PhaseItem>);
+
+    /// Set todos (flat list for backward compatibility).
+    fn set_todos(&mut self, todos: Vec<TodoItem>);
+
+    /// Check if there are any todos or phases.
+    fn has_todos(&self) -> bool;
+
+    /// Set modified files.
+    fn set_modified_files(&mut self, files: Vec<ModifiedFile>);
+
+    /// Add a single modified file (for incremental updates).
+    fn add_modified_file(&mut self, path: String, added: u32, removed: u32);
+
+    /// Set LSP server statuses.
+    fn set_lsp_servers(&mut self, servers: Vec<LspStatus>);
+
+    /// Set MCP server statuses.
+    fn set_mcp_servers(&mut self, servers: Vec<McpStatus>);
+
+    /// Set context info.
+    fn set_context(&mut self, context: ContextInfo);
+
+    /// Check if the sidebar is focused.
+    fn is_focused(&self) -> bool;
+
+    /// Set whether the sidebar is focused.
+    fn set_focused(&mut self, focused: bool);
+
+    /// Handle a mouse click. Returns true if handled.
+    fn handle_click(&mut self, x: u16, y: u16, area: Rect) -> bool;
+
+    /// Handle mouse scroll.
+    fn handle_scroll(&mut self, up: bool, area: Rect);
+
+    /// Render the sidebar.
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme);
+}
+
 /// Format a number with comma separators (e.g., 67360 -> "67,360").
 fn format_number(n: u32) -> String {
     let s = n.to_string();
@@ -1034,4 +1133,127 @@ fn open_url(url: &str) -> std::io::Result<()> {
             .spawn()?;
     }
     Ok(())
+}
+
+// Implement SidebarTrait for SidebarWidget
+impl SidebarTrait for SidebarWidget {
+    fn new() -> Self {
+        SidebarWidget::new()
+    }
+
+    fn width(&self) -> u16 {
+        self.width()
+    }
+
+    fn is_visible(&self) -> bool {
+        self.is_visible()
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.set_visible(visible)
+    }
+
+    fn toggle(&mut self) {
+        self.toggle()
+    }
+
+    fn set_session_title(&mut self, title: impl Into<String>) {
+        self.set_session_title(title)
+    }
+
+    fn set_agent(&mut self, agent: impl Into<String>) {
+        self.set_agent(agent)
+    }
+
+    fn set_model(&mut self, model: impl Into<String>) {
+        self.set_model(model)
+    }
+
+    fn update_tokens(&mut self, input: u32, output: u32) {
+        self.update_tokens(input, output)
+    }
+
+    fn set_cost(&mut self, cost: f64) {
+        self.set_cost(cost)
+    }
+
+    fn set_max_tokens(&mut self, max: u32) {
+        self.set_max_tokens(max)
+    }
+
+    fn get_tokens(&self) -> (u32, u32) {
+        self.get_tokens()
+    }
+
+    fn get_cost(&self) -> f64 {
+        self.get_cost()
+    }
+
+    fn get_max_tokens(&self) -> u32 {
+        self.get_max_tokens()
+    }
+
+    fn get_mcp_counts(&self) -> (usize, usize) {
+        self.get_mcp_counts()
+    }
+
+    fn get_lsp_counts(&self) -> (usize, usize) {
+        self.get_lsp_counts()
+    }
+
+    fn get_mcp_servers(&self) -> &[McpStatus] {
+        self.get_mcp_servers()
+    }
+
+    fn set_phases(&mut self, phases: Vec<PhaseItem>) {
+        self.set_phases(phases)
+    }
+
+    fn set_todos(&mut self, todos: Vec<TodoItem>) {
+        self.set_todos(todos)
+    }
+
+    fn has_todos(&self) -> bool {
+        self.has_todos()
+    }
+
+    fn set_modified_files(&mut self, files: Vec<ModifiedFile>) {
+        self.set_modified_files(files)
+    }
+
+    fn add_modified_file(&mut self, path: String, added: u32, removed: u32) {
+        self.add_modified_file(path, added, removed)
+    }
+
+    fn set_lsp_servers(&mut self, servers: Vec<LspStatus>) {
+        self.set_lsp_servers(servers)
+    }
+
+    fn set_mcp_servers(&mut self, servers: Vec<McpStatus>) {
+        self.set_mcp_servers(servers)
+    }
+
+    fn set_context(&mut self, context: ContextInfo) {
+        self.set_context(context)
+    }
+
+    fn is_focused(&self) -> bool {
+        self.is_focused()
+    }
+
+    fn set_focused(&mut self, focused: bool) {
+        self.set_focused(focused)
+    }
+
+    fn handle_click(&mut self, x: u16, y: u16, area: Rect) -> bool {
+        self.handle_click(x, y, area)
+    }
+
+    fn handle_scroll(&mut self, up: bool, area: Rect) {
+        self.handle_scroll(up, area)
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        self.render(frame, area, theme)
+    }
 }

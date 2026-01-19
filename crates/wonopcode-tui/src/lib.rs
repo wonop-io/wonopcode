@@ -49,7 +49,8 @@ pub use widgets::{
     highlight_code, highlight_diff, is_diff, render_markdown, render_markdown_with_width,
     CommandPalette, ContextInfo, DialogItem, DiffHunk, DiffLine, DiffWidget, DisplayMessage,
     DisplayToolCall, DotsSpinner, FileDiff, FooterStatus, FooterWidget, HelpDialog, InputAction,
-    InputWidget, LogoWidget, MessageRole, MessagesWidget, ModelDialog, ModifiedFile, PromptHistory,
-    SelectDialog, SessionDialog, SidebarWidget, ThemeDialog, Toast, ToastManager, ToastType,
-    TodoItem, ToolStatus,
+    InputWidget, LogoWidget, LspServerStatus, LspStatus, McpServerStatus, McpStatus, MessageRole,
+    MessagesWidget, ModelDialog, ModifiedFile, PhaseItem, PromptHistory, SelectDialog,
+    SessionDialog, SidebarSection, SidebarTrait, SidebarWidget, ThemeDialog, Toast, ToastManager,
+    ToastType, TodoItem, ToolStatus,
 };

@@ -69,7 +69,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
                 .sandbox_runtime_any()
                 .await
                 .and_then(|any| {
-                    any.downcast::<crate::runner::SandboxRuntimeWrapper>()
+                    any.downcast::<wonopcode_runner::SandboxRuntimeWrapper>()
                         .ok()
                         .map(|wrapper| wrapper.0.clone())
                 })

@@ -3,7 +3,7 @@
 //! Handles the execution of single prompts in non-interactive mode,
 //! as well as headless server mode for remote operation.
 
-use crate::runner::{Runner, RunnerConfig};
+use wonopcode_runner::{load_api_key, Runner, RunnerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
@@ -98,7 +98,7 @@ pub async fn run_command(
     tracing::debug!(provider = %provider, model_id = %model_id, "Using provider and model");
 
     // Load API key (may be empty for CLI-based auth)
-    let api_key = crate::runner::load_api_key(&provider).unwrap_or_default();
+    let api_key = load_api_key(&provider).unwrap_or_default();
 
     // Check if we have authentication
     if api_key.is_empty() {
