@@ -2386,6 +2386,40 @@ impl MessagesWidget {
             spans.push(Span::styled(" ", theme.text_style()));
             spans.push(Span::styled(status_icon, status_style));
             lines.push(Line::from(spans));
+
+            // For inline tools with errors, show the error message below
+            if tool.status == ToolStatus::Error {
+                if let Some(ref output) = tool.output {
+                    if !output.is_empty() {
+                        // Show error output (truncated for inline display)
+                        let error_lines: Vec<&str> = output.lines().take(5).collect();
+                        for line in error_lines {
+                            let truncated = if line.chars().count() > 80 {
+                                let t: String = line.chars().take(77).collect();
+                                format!("{t}...")
+                            } else {
+                                line.to_string()
+                            };
+                            lines.push(Line::from(vec![
+                                Span::styled("    ", theme.text_style()),
+                                Span::styled("⚠ ", theme.error_style()),
+                                Span::styled(truncated, theme.error_style()),
+                            ]));
+                        }
+                        // If there are more lines, show indicator
+                        let total_lines = output.lines().count();
+                        if total_lines > 5 {
+                            lines.push(Line::from(vec![
+                                Span::styled("    ", theme.text_style()),
+                                Span::styled(
+                                    format!("  ... {} more lines", total_lines - 5),
+                                    theme.dim_style(),
+                                ),
+                            ]));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2456,35 +2490,47 @@ impl MessagesWidget {
 
         // Show output preview for completed tools
         // Note: We always show some output indicator for block tools to give user feedback
-        // Debug: Show status for troubleshooting
         if tool.status == ToolStatus::Success || tool.status == ToolStatus::Error {
+            // Add error label for failed tools
+            if tool.status == ToolStatus::Error {
+                lines.push(Line::from(vec![
+                    Span::styled("  │ ", theme.tool_border_style()),
+                    Span::styled("⚠ Error: ", theme.error_style().add_modifier(Modifier::BOLD)),
+                ]));
+            }
+
             match &tool.output {
                 Some(output) if !output.is_empty() => {
                     let output_lines: Vec<&str> = output.lines().collect();
                     let total_lines = output_lines.len();
 
                     if total_lines > 0 {
-                        // Tool-specific rendering
-                        match tool.name.as_str() {
-                            "edit" => {
-                                // Render colored diff
-                                self.render_diff_output(lines, &output_lines, tool, theme);
-                            }
-                            "read" => {
-                                // Render file content preview
-                                self.render_read_output(lines, &output_lines, tool, theme);
-                            }
-                            "glob" | "grep" => {
-                                // Render match preview
-                                self.render_search_output(lines, &output_lines, tool, theme);
-                            }
-                            "write" => {
-                                // Render write preview from metadata if available
-                                self.render_write_output(lines, output, tool, theme);
-                            }
-                            _ => {
-                                // Default rendering for bash, task, webfetch, etc.
-                                self.render_default_output(lines, &output_lines, tool, theme);
+                        // For errors, always use default output rendering to show the error message
+                        if tool.status == ToolStatus::Error {
+                            self.render_default_output(lines, &output_lines, tool, theme);
+                        } else {
+                            // Tool-specific rendering for success
+                            match tool.name.as_str() {
+                                "edit" => {
+                                    // Render colored diff
+                                    self.render_diff_output(lines, &output_lines, tool, theme);
+                                }
+                                "read" => {
+                                    // Render file content preview
+                                    self.render_read_output(lines, &output_lines, tool, theme);
+                                }
+                                "glob" | "grep" => {
+                                    // Render match preview
+                                    self.render_search_output(lines, &output_lines, tool, theme);
+                                }
+                                "write" => {
+                                    // Render write preview from metadata if available
+                                    self.render_write_output(lines, output, tool, theme);
+                                }
+                                _ => {
+                                    // Default rendering for bash, task, webfetch, etc.
+                                    self.render_default_output(lines, &output_lines, tool, theme);
+                                }
                             }
                         }
                     } else {
