@@ -2495,7 +2495,10 @@ impl MessagesWidget {
             if tool.status == ToolStatus::Error {
                 lines.push(Line::from(vec![
                     Span::styled("  │ ", theme.tool_border_style()),
-                    Span::styled("⚠ Error: ", theme.error_style().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "⚠ Error: ",
+                        theme.error_style().add_modifier(Modifier::BOLD),
+                    ),
                 ]));
             }
 

@@ -45,7 +45,7 @@ impl McpTodoAdapter {
 
         for tool in tools {
             let tool_id = tool.id();
-            
+
             // Check if this is an MCP TODO tool based on naming patterns
             if Self::is_mcp_todo_read_tool(tool_id) {
                 info!("Detected MCP TODO read tool: {}", tool_id);
@@ -96,7 +96,7 @@ impl McpTodoAdapter {
     }
 
     /// Intercept MCP TODO tool output and emit appropriate events.
-    /// 
+    ///
     /// This method should be called by the runner when an MCP TODO tool completes execution.
     /// It parses the tool output and emits TodosUpdated events so the sidebar receives updates.
     pub fn intercept_and_emit_events(
@@ -106,31 +106,44 @@ impl McpTodoAdapter {
         event_tx: &Option<mpsc::UnboundedSender<ToolEvent>>,
     ) {
         if let Some(tool_type) = self.tool_mappings.get(tool_id) {
-            debug!("Intercepting MCP TODO tool output: {} ({:?})", tool_id, tool_type);
+            debug!(
+                "Intercepting MCP TODO tool output: {} ({:?})",
+                tool_id, tool_type
+            );
 
             if let Some(tx) = event_tx {
                 // Parse the output and extract TODO data
                 if let Ok(phased_todos) = self.parse_mcp_todo_output(&output.output, *tool_type) {
                     if let Err(e) = tx.send(ToolEvent::TodosUpdated(phased_todos)) {
-                        warn!("Failed to emit TodosUpdated event for MCP tool {}: {}", tool_id, e);
+                        warn!(
+                            "Failed to emit TodosUpdated event for MCP tool {}: {}",
+                            tool_id, e
+                        );
                     } else {
                         debug!("Emitted TodosUpdated event for MCP tool: {}", tool_id);
                     }
                 } else {
-                    debug!("Could not parse TODO data from MCP tool output: {}", tool_id);
+                    debug!(
+                        "Could not parse TODO data from MCP tool output: {}",
+                        tool_id
+                    );
                 }
             }
         }
     }
 
     /// Parse MCP TODO tool output and convert it to PhasedTodos.
-    /// 
+    ///
     /// This attempts to parse the output in multiple formats:
     /// 1. Direct JSON format matching our PhasedTodos structure
     /// 2. Simplified JSON with flat todo arrays
     /// 3. Markdown format with phase headers
     /// 4. Plain text format
-    fn parse_mcp_todo_output(&self, output: &str, _tool_type: McpTodoToolType) -> Result<PhasedTodos, serde_json::Error> {
+    fn parse_mcp_todo_output(
+        &self,
+        output: &str,
+        _tool_type: McpTodoToolType,
+    ) -> Result<PhasedTodos, serde_json::Error> {
         // Try to parse as JSON first
         if let Ok(value) = serde_json::from_str::<Value>(output) {
             // Try direct PhasedTodos format
@@ -169,7 +182,7 @@ impl McpTodoAdapter {
         // Fallback: create a simple phase with the output as a single todo
         let mut phased_todos = PhasedTodos::new();
         let mut phase = Phase::new("mcp_output", "MCP TODO Output");
-        
+
         // Create a single todo item from the output
         let todo = TodoItem {
             id: format!("mcp_todo_{}", chrono::Utc::now().timestamp()),
@@ -184,9 +197,9 @@ impl McpTodoAdapter {
     }
 
     /// Parse TODO data from markdown format.
-    /// 
+    ///
     /// Expected format:
-    /// ```
+    /// ```text
     /// ## ○ Phase Name (0/3 done)
     ///   [ ] [high] Task description (task_id)
     ///   [>] [medium] In progress task (task_id_2)
@@ -198,7 +211,7 @@ impl McpTodoAdapter {
 
         for line in output.lines() {
             let trimmed = line.trim();
-            
+
             // Phase header: ## ○ Phase Name (0/3 done)
             if trimmed.starts_with("##") {
                 // Save previous phase if exists
@@ -216,7 +229,7 @@ impl McpTodoAdapter {
 
                 // Remove status icon if present
                 let phase_name = phase_name.trim_start_matches(['○', '◐', '●']).trim();
-                
+
                 current_phase = Some(Phase::new(
                     format!("phase_{}", phased_todos.phases.len() + 1),
                     phase_name,
@@ -241,7 +254,7 @@ impl McpTodoAdapter {
         if phased_todos.phases.is_empty() {
             return Err(serde_json::Error::io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "No valid TODO phases found in markdown"
+                "No valid TODO phases found in markdown",
             )));
         }
 
@@ -252,7 +265,7 @@ impl McpTodoAdapter {
     fn parse_markdown_todo_line(&self, line: &str) -> Option<TodoItem> {
         // Match patterns like: [x] [high] Task description (task_id)
         let line = line.trim();
-        
+
         // Extract status icon
         let status = if line.starts_with("[ ]") {
             TodoStatus::Pending
@@ -268,7 +281,7 @@ impl McpTodoAdapter {
 
         // Remove status part
         let rest = line[3..].trim();
-        
+
         // Extract priority if present: [high], [medium], [low]
         let (priority, rest) = if rest.starts_with('[') {
             if let Some(end) = rest.find(']') {
@@ -295,13 +308,22 @@ impl McpTodoAdapter {
                     let content = rest[..start].trim().to_string();
                     (content, id)
                 } else {
-                    (rest.to_string(), format!("todo_{}", chrono::Utc::now().timestamp()))
+                    (
+                        rest.to_string(),
+                        format!("todo_{}", chrono::Utc::now().timestamp()),
+                    )
                 }
             } else {
-                (rest.to_string(), format!("todo_{}", chrono::Utc::now().timestamp()))
+                (
+                    rest.to_string(),
+                    format!("todo_{}", chrono::Utc::now().timestamp()),
+                )
             }
         } else {
-            (rest.to_string(), format!("todo_{}", chrono::Utc::now().timestamp()))
+            (
+                rest.to_string(),
+                format!("todo_{}", chrono::Utc::now().timestamp()),
+            )
         };
 
         Some(TodoItem {
@@ -363,7 +385,7 @@ impl McpTodoAdapter {
     /// Get summary of detected MCP TODO tools for logging.
     pub fn get_summary(&self) -> String {
         let mut parts = Vec::new();
-        
+
         if let Some(ref tool) = self.read_tool {
             parts.push(format!("read({})", tool.id()));
         }
@@ -383,7 +405,7 @@ impl McpTodoAdapter {
 }
 
 /// Helper function for scanning tools and detecting MCP TODO tools.
-/// 
+///
 /// This is a convenience function for use in the runner.
 pub fn detect_mcp_todo_tools(tools: &[Arc<dyn Tool>]) -> McpTodoAdapter {
     McpTodoAdapter::new(tools)
@@ -393,9 +415,9 @@ pub fn detect_mcp_todo_tools(tools: &[Arc<dyn Tool>]) -> McpTodoAdapter {
 pub fn has_any_mcp_todo_tools(tools: &[Arc<dyn Tool>]) -> bool {
     tools.iter().any(|tool| {
         let id = tool.id();
-        McpTodoAdapter::is_mcp_todo_read_tool(id) ||
-        McpTodoAdapter::is_mcp_todo_write_tool(id) ||
-        McpTodoAdapter::is_mcp_todo_update_tool(id)
+        McpTodoAdapter::is_mcp_todo_read_tool(id)
+            || McpTodoAdapter::is_mcp_todo_write_tool(id)
+            || McpTodoAdapter::is_mcp_todo_update_tool(id)
     })
 }
 
@@ -404,7 +426,6 @@ mod tests {
     use super::*;
     use crate::{ToolContext, ToolResult};
     use async_trait::async_trait;
-
 
     struct MockMcpTodoTool {
         id: String,
@@ -428,8 +449,6 @@ mod tests {
             Ok(ToolOutput::new("Mock", "Mock output"))
         }
     }
-
-
 
     #[test]
     fn test_mcp_tool_detection() {
@@ -503,17 +522,13 @@ mod tests {
 
     #[test]
     fn test_has_any_mcp_todo_tools() {
-        let tools_with_mcp: Vec<Arc<dyn Tool>> = vec![
-            Arc::new(MockMcpTodoTool {
-                id: "mcp__server__todoread".to_string(),
-            }),
-        ];
+        let tools_with_mcp: Vec<Arc<dyn Tool>> = vec![Arc::new(MockMcpTodoTool {
+            id: "mcp__server__todoread".to_string(),
+        })];
 
-        let tools_without_mcp: Vec<Arc<dyn Tool>> = vec![
-            Arc::new(MockMcpTodoTool {
-                id: "regular_tool".to_string(),
-            }),
-        ];
+        let tools_without_mcp: Vec<Arc<dyn Tool>> = vec![Arc::new(MockMcpTodoTool {
+            id: "regular_tool".to_string(),
+        })];
 
         assert!(has_any_mcp_todo_tools(&tools_with_mcp));
         assert!(!has_any_mcp_todo_tools(&tools_without_mcp));
@@ -522,7 +537,7 @@ mod tests {
     #[test]
     fn test_parse_markdown_todos() {
         let adapter = McpTodoAdapter::new(&[]);
-        
+
         let markdown = r#"
 ## ○ Analysis Phase (1/3 done)
   [x] [high] Explore codebase structure (explore_task)
@@ -535,23 +550,23 @@ mod tests {
 "#;
 
         let result = adapter.parse_markdown_todos(markdown).unwrap();
-        
+
         assert_eq!(result.phases.len(), 2);
-        
+
         // Check first phase
         let phase1 = &result.phases[0];
         assert_eq!(phase1.name, "Analysis Phase");
         assert_eq!(phase1.todos.len(), 3);
-        
+
         assert_eq!(phase1.todos[0].status, TodoStatus::Completed);
         assert_eq!(phase1.todos[0].priority, TodoPriority::High);
         assert_eq!(phase1.todos[0].content, "Explore codebase structure");
         assert_eq!(phase1.todos[0].id, "explore_task");
-        
+
         assert_eq!(phase1.todos[1].status, TodoStatus::InProgress);
         assert_eq!(phase1.todos[2].status, TodoStatus::Pending);
 
-        // Check second phase  
+        // Check second phase
         let phase2 = &result.phases[1];
         assert_eq!(phase2.name, "Implementation Phase");
         assert_eq!(phase2.todos.len(), 2);
@@ -560,7 +575,7 @@ mod tests {
     #[test]
     fn test_parse_json_todos() {
         let adapter = McpTodoAdapter::new(&[]);
-        
+
         let json_output = serde_json::json!({
             "phases": [
                 {
@@ -576,10 +591,13 @@ mod tests {
                     ]
                 }
             ]
-        }).to_string();
+        })
+        .to_string();
 
-        let result = adapter.parse_mcp_todo_output(&json_output, McpTodoToolType::Read).unwrap();
-        
+        let result = adapter
+            .parse_mcp_todo_output(&json_output, McpTodoToolType::Read)
+            .unwrap();
+
         assert_eq!(result.phases.len(), 1);
         assert_eq!(result.phases[0].name, "Test Phase");
         assert_eq!(result.phases[0].todos.len(), 1);

@@ -4144,7 +4144,6 @@ dependencies = [
 name = "wonopcode-runner"
 version = "0.1.2"
 dependencies = [
- "anyhow",
  "futures",
  "serde",
  "serde_json",

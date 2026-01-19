@@ -3,10 +3,10 @@
 //! Handles the execution of single prompts in non-interactive mode,
 //! as well as headless server mode for remote operation.
 
-use wonopcode_runner::{load_api_key, Runner, RunnerConfig};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
+use wonopcode_runner::{load_api_key, Runner, RunnerConfig};
 
 /// Run the wonopcode server in headless mode.
 ///

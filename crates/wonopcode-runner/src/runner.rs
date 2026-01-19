@@ -302,11 +302,11 @@ impl Runner {
         let mut tools = ToolRegistry::with_builtins();
         tools.register(Arc::new(wonopcode_tools::bash::BashTool));
         tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-        
+
         // TODO tools are registered initially - they may be replaced later if MCP TODO tools are detected
         tools.register(Arc::new(todo::TodoWriteTool::new(todo_store.clone())));
         tools.register(Arc::new(todo::TodoReadTool::new(todo_store.clone())));
-        
+
         tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
             lsp_client.clone(),
         )));
@@ -677,7 +677,7 @@ impl Runner {
             // For now, default to preferring MCP TODO tools when available
             // TODO: Add proper config integration later
             let prefer_mcp_todo = true;
-            
+
             if has_mcp_todo_tools {
                 info!(
                     mcp_todo_tools = %mcp_todo_adapter.get_summary(),
@@ -690,7 +690,7 @@ impl Runner {
             let mut new_tools = ToolRegistry::with_builtins();
             new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
             new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-            
+
             // Conditionally register TODO tools based on MCP availability and configuration
             if !has_mcp_todo_tools || !prefer_mcp_todo {
                 new_tools.register(Arc::new(todo::TodoWriteTool::new(self.todo_store.clone())));
@@ -699,7 +699,7 @@ impl Runner {
             } else {
                 info!("Skipping native TODO tools - using MCP TODO tools");
             }
-            
+
             new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
                 self.lsp_client.clone(),
             )));
@@ -722,7 +722,7 @@ impl Runner {
 
             self.tools = Arc::new(new_tools);
             self.mcp_client = Some(mcp_client);
-            
+
             // Store the MCP TODO adapter for event bridging
             if has_mcp_todo_tools && prefer_mcp_todo {
                 self.mcp_todo_adapter = Some(mcp_todo_adapter);
