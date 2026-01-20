@@ -343,8 +343,8 @@ impl McpTodoAdapter {
             tool_id.contains("__todo_read__") ||
             tool_id.contains("__todoread__")
         )) ||
-        // ACE framework tools
-        tool_id == "ace_todo_read" ||
+        // ACE framework tools (both direct and MCP-prefixed)
+        tool_id == "ace_todo_read" || tool_id == "mcp_ace_todo_read" ||
         // Generic patterns for other frameworks
         tool_id.ends_with("_todo_read") ||
         tool_id.ends_with("_todoread")
@@ -359,8 +359,8 @@ impl McpTodoAdapter {
             tool_id.contains("__todo_write__") ||
             tool_id.contains("__todowrite__")
         )) ||
-        // ACE framework tools
-        tool_id == "ace_todo_write" ||
+        // ACE framework tools (both direct and MCP-prefixed)
+        tool_id == "ace_todo_write" || tool_id == "mcp_ace_todo_write" ||
         // Generic patterns for other frameworks
         tool_id.ends_with("_todo_write") ||
         tool_id.ends_with("_todowrite")
@@ -375,8 +375,8 @@ impl McpTodoAdapter {
             tool_id.contains("__todo_update__") ||
             tool_id.contains("__todoupdate__")
         )) ||
-        // ACE framework tools
-        tool_id == "ace_todo_update" ||
+        // ACE framework tools (both direct and MCP-prefixed)
+        tool_id == "ace_todo_update" || tool_id == "mcp_ace_todo_update" ||
         // Generic patterns for other frameworks
         tool_id.ends_with("_todo_update") ||
         tool_id.ends_with("_todoupdate")

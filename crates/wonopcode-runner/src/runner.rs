@@ -660,8 +660,9 @@ impl Runner {
         }
 
         if connected_servers > 0 {
-            // Register MCP tools
-            let builder = McpToolsBuilder::new(mcp_client.clone());
+            // Register MCP tools with server-specific prefixes to avoid name conflicts
+            // Use "mcp" prefix to distinguish from native tools
+            let builder = McpToolsBuilder::new(mcp_client.clone()).with_prefix("mcp");
             let mcp_tools = builder.build_all().await;
 
             info!(
@@ -975,6 +976,13 @@ impl Runner {
             match action {
                 AppAction::SendPrompt(text) => {
                     debug!(prompt_text = %text, "Received SendPrompt action");
+                    
+                    // Handle slash commands
+                    if let Some(response) = self.handle_slash_command(&text).await {
+                        send_update(&update_tx, AppUpdate::SystemMessage(response));
+                        continue;
+                    }
+                    
                     // Reset cancellation token for new prompt
                     self.reset_cancel_token().await;
 
@@ -3297,6 +3305,118 @@ impl Runner {
         }
 
         mcp_updates
+    }
+
+    /// Handle slash commands like /tools and /help
+    async fn handle_slash_command(&self, input: &str) -> Option<String> {
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        let parts: Vec<&str> = trimmed[1..].split_whitespace().collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        match parts[0] {
+            "tools" => Some(self.format_tools_list().await),
+            "help" => Some(self.format_help()),
+            _ => Some(format!("Unknown command: /{}\nType /help for available commands.", parts[0])),
+        }
+    }
+
+    /// Format list of all available tools for debugging
+    async fn format_tools_list(&self) -> String {
+        let all_tools = self.tools.all();
+        let mut tools_vec: Vec<_> = all_tools.collect();
+        tools_vec.sort_by_key(|tool| tool.id());
+
+        let mut output = String::new();
+        output.push_str("Available Tools (sorted alphabetically):\n");
+        output.push_str("=".repeat(50).as_str());
+        output.push('\n');
+
+        // Group tools by prefix to identify duplicates
+        let mut tool_groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        
+        for tool in &tools_vec {
+            let id = tool.id().to_string();
+            let base_name = if let Some(pos) = id.rfind('_') {
+                id[..pos].to_string()
+            } else if id.starts_with("mcp_") {
+                id[4..].to_string()
+            } else {
+                id.clone()
+            };
+            
+            tool_groups.entry(base_name).or_insert_with(Vec::new).push(id);
+        }
+
+        // Show duplicates first if any
+        let mut has_duplicates = false;
+        for (base_name, ids) in &tool_groups {
+            if ids.len() > 1 {
+                if !has_duplicates {
+                    output.push_str("\n🚨 DUPLICATE TOOLS DETECTED:\n");
+                    output.push_str("-".repeat(30).as_str());
+                    output.push('\n');
+                    has_duplicates = true;
+                }
+                output.push_str(&format!("Base name: {}\n", base_name));
+                for id in ids {
+                    output.push_str(&format!("  - {}\n", id));
+                }
+                output.push('\n');
+            }
+        }
+
+        if has_duplicates {
+            output.push_str("=".repeat(50).as_str());
+            output.push('\n');
+        }
+
+        // Show all tools
+        output.push_str(&format!("\nAll {} Tools:\n", tools_vec.len()));
+        output.push_str("-".repeat(30).as_str());
+        output.push('\n');
+
+        for tool in tools_vec {
+            let id = tool.id();
+            let description = tool.description();
+            
+            // Truncate long descriptions
+            let short_desc = if description.len() > 80 {
+                format!("{}...", &description[..77])
+            } else {
+                description.to_string()
+            };
+            
+            output.push_str(&format!("{}\n  {}\n\n", id, short_desc));
+        }
+
+        output.push_str("=".repeat(50).as_str());
+        output.push('\n');
+
+        if has_duplicates {
+            output.push_str("\n⚠️  Tool name conflicts detected! This may cause API errors.\n");
+        } else {
+            output.push_str("\n✅ No duplicate tool names detected.\n");
+        }
+
+        output
+    }
+
+    /// Format help text for available slash commands
+    fn format_help(&self) -> String {
+        let mut help = String::new();
+        help.push_str("Available Commands:\n");
+        help.push_str("=".repeat(30).as_str());
+        help.push('\n');
+        help.push_str("/tools  - Show all available tools with IDs and descriptions\n");
+        help.push_str("/help   - Show this help message\n");
+        help.push_str("\nType any command starting with '/' to use it.\n");
+        help
     }
 }
 
