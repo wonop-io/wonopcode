@@ -64,7 +64,12 @@ impl Browser {
         }
 
         // Extract results
-        let result: Vec<ServerInfo> = servers.lock().unwrap().values().cloned().collect();
+        let result: Vec<ServerInfo> = servers.lock()
+            .map(|servers| servers.values().cloned().collect())
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "Failed to acquire servers lock for result extraction");
+                Vec::new()
+            });
 
         info!(count = result.len(), "Browse completed");
 
@@ -108,10 +113,13 @@ impl Browser {
                 .map_err(|e| DiscoverError::ServiceInfo(e.to_string()))?;
 
             // Check if we found a server
-            let guard = servers.lock().unwrap();
-            if !guard.is_empty() {
-                let first = guard.values().next().cloned();
-                return Ok(first);
+            if let Ok(guard) = servers.lock() {
+                if !guard.is_empty() {
+                    let first = guard.values().next().cloned();
+                    return Ok(first);
+                }
+            } else {
+                warn!("Failed to acquire servers lock for first server check");
             }
         }
 
@@ -139,10 +147,11 @@ fn on_service_event(
                     address = %server_info.address,
                     "Found server"
                 );
-                servers
-                    .lock()
-                    .unwrap()
-                    .insert(discovery.name().to_string(), server_info);
+                if let Ok(mut servers_guard) = servers.lock() {
+                    servers_guard.insert(discovery.name().to_string(), server_info);
+                } else {
+                    warn!("Failed to acquire servers lock for inserting discovered server");
+                }
             }
         }
         Ok(BrowserEvent::Remove(removal)) => {
@@ -150,7 +159,11 @@ fn on_service_event(
                 name = %removal.name(),
                 "Service removed"
             );
-            servers.lock().unwrap().remove(removal.name());
+            if let Ok(mut servers_guard) = servers.lock() {
+                servers_guard.remove(removal.name());
+            } else {
+                warn!("Failed to acquire servers lock for removing server");
+            }
         }
         Err(e) => {
             warn!(error = %e, "Service discovery error");
@@ -169,7 +182,13 @@ fn parse_discovery(discovery: &zeroconf::ServiceDiscovery) -> Option<ServerInfo>
     // For 0.0.0.0, use 127.0.0.1 for local connections
     // (The service is advertising on all interfaces, so localhost will work)
     let ip = if ip.is_unspecified() {
-        "127.0.0.1".parse().unwrap()
+        match "127.0.0.1".parse() {
+            Ok(ip) => ip,
+            Err(e) => {
+                warn!(error = %e, "Failed to parse localhost IP");
+                return None;
+            }
+        }
     } else {
         ip
     };
@@ -261,9 +280,14 @@ pub fn build_server_info(
 
 #[allow(dead_code)]
 /// Normalize an IP address - converts 0.0.0.0 to 127.0.0.1.
+/// 
+/// # Panics
+/// 
+/// This function should not panic as "127.0.0.1" is a valid IP address,
+/// but if it does, it indicates a serious system issue.
 pub fn normalize_ip(ip: IpAddr) -> IpAddr {
     if ip.is_unspecified() {
-        "127.0.0.1".parse().unwrap()
+        "127.0.0.1".parse().expect("Failed to parse localhost IP - this should never happen")
     } else {
         ip
     }
@@ -287,13 +311,21 @@ pub fn handle_service_add(
     name: String,
     server_info: ServerInfo,
 ) {
-    servers.lock().unwrap().insert(name, server_info);
+    if let Ok(mut servers_guard) = servers.lock() {
+        servers_guard.insert(name, server_info);
+    } else {
+        warn!("Failed to acquire servers lock for adding service");
+    }
 }
 
 #[allow(dead_code)]
 /// Handle a service remove event by removing from the servers map.
 pub fn handle_service_remove(servers: &Mutex<HashMap<String, ServerInfo>>, name: &str) {
-    servers.lock().unwrap().remove(name);
+    if let Ok(mut servers_guard) = servers.lock() {
+        servers_guard.remove(name);
+    } else {
+        warn!("Failed to acquire servers lock for removing service");
+    }
 }
 
 #[allow(dead_code)]

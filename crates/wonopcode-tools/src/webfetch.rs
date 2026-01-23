@@ -497,10 +497,16 @@ fn truncate_content(content: &str, max_len: usize) -> (String, bool) {
         return (content.to_string(), false);
     }
 
+    // Find a safe character boundary for truncation
+    let mut boundary = max_len;
+    while boundary > 0 && !content.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+
     let truncated = format!(
         "{}\n\n... [content truncated, showing first {} chars of {}] ...",
-        &content[..max_len],
-        max_len,
+        &content[..boundary],
+        boundary,
         content.len()
     );
 

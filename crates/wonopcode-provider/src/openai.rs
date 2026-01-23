@@ -402,10 +402,13 @@ impl LanguageModel for OpenAIProvider {
                     continue;
                 }
 
-                let chunk: ChatChunk = match serde_json::from_str(data) {
-                    Ok(c) => c,
+                let chunk: ChatChunk = match serde_json::from_str::<ChatChunk>(data) {
+                    Ok(c) => {
+                        tracing::info!(choices_count = c.choices.len(), "✅ OPENAI: Parsed chunk successfully");
+                        c
+                    },
                     Err(e) => {
-                        trace!(error = %e, data = %data, "Failed to parse chunk");
+                        tracing::info!(error = %e, data_preview = %data.chars().take(100).collect::<String>(), "❌ OPENAI: Failed to parse chunk");
                         continue;
                     }
                 };
@@ -415,9 +418,11 @@ impl LanguageModel for OpenAIProvider {
                     if let Some(content) = &choice.delta.content {
                         if !content.is_empty() {
                             if !text_started {
+                                tracing::info!("🎬 OPENAI: Starting text stream");
                                 yield StreamChunk::TextStart;
                                 text_started = true;
                             }
+                            tracing::info!(text_len = content.len(), text_preview = %content.chars().take(20).collect::<String>(), "📝 OPENAI: Yielding TextDelta");
                             yield StreamChunk::TextDelta(content.clone());
                         }
                     }

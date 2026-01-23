@@ -976,13 +976,13 @@ impl Runner {
             match action {
                 AppAction::SendPrompt(text) => {
                     debug!(prompt_text = %text, "Received SendPrompt action");
-                    
+
                     // Handle slash commands
                     if let Some(response) = self.handle_slash_command(&text).await {
                         send_update(&update_tx, AppUpdate::SystemMessage(response));
                         continue;
                     }
-                    
+
                     // Reset cancellation token for new prompt
                     self.reset_cancel_token().await;
 
@@ -996,7 +996,12 @@ impl Runner {
                     let cancel_token = self.get_cancel_token().await;
 
                     // Use a loop to process Cancel actions while the prompt runs
-                    let prompt_future = self.run_prompt(&text, &cwd, &update_tx);
+                    // Add timeout for prompt operation to prevent indefinite "thinking" state
+                    let prompt_timeout = tokio::time::Duration::from_secs(86400); // 24 hours - effectively no timeout
+                    let prompt_future = tokio::time::timeout(
+                        prompt_timeout,
+                        self.run_prompt(&text, &cwd, &update_tx),
+                    );
                     tokio::pin!(prompt_future);
 
                     let result = loop {
@@ -1042,7 +1047,15 @@ impl Runner {
 
                             // Wait for prompt to complete
                             res = &mut prompt_future => {
-                                break res;
+                                let inner_result = match res {
+                                    Ok(inner_result) => inner_result,
+                                    Err(_timeout_error) => {
+                                        warn!("Prompt operation timed out after 5 minutes");
+                                        // Send error to prevent TUI from being stuck in thinking
+                                        Err("Operation timed out after 5 minutes".into())
+                                    }
+                                };
+                                break inner_result;
                             }
                         }
                     };
@@ -1053,6 +1066,9 @@ impl Runner {
                                 result_len = result_text.len(),
                                 "Prompt completed successfully"
                             );
+
+                            // Send completion signal to TUI - this is critical to exit "thinking" state
+                            debug!("Sending AppUpdate::Completed to TUI to exit thinking state");
                             send_update(&update_tx, AppUpdate::Completed { text: result_text });
 
                             // Sync todos to TUI
@@ -1063,6 +1079,9 @@ impl Runner {
                             if err_str.contains("Cancelled") {
                                 info!("Prompt was cancelled");
                                 send_update(&update_tx, AppUpdate::Error("Cancelled".to_string()));
+                            } else if err_str.contains("timed out") {
+                                error!("Prompt operation timed out - this prevents UI from getting stuck");
+                                send_update(&update_tx, AppUpdate::Error("Operation timed out. Please try a shorter prompt or check your connection.".to_string()));
                             } else {
                                 error!("Prompt error: {}", e);
                                 send_update(&update_tx, AppUpdate::Error(err_str));
@@ -2175,6 +2194,7 @@ impl Runner {
 
             // Process stream
             let mut chunk_count = 0u32;
+            let mut stream_completed = false;
             while let Some(chunk_result) = stream.next().await {
                 if cancel.is_cancelled() {
                     // Save partial text collected so far and return it (not an error)
@@ -2365,6 +2385,7 @@ impl Runner {
                     } => {
                         step_usage.merge(&usage);
                         finish_reason = reason;
+                        stream_completed = true; // Mark stream as properly completed
 
                         // Calculate cost and get context limit
                         let (cost, context_limit) = {
@@ -2392,6 +2413,18 @@ impl Runner {
                         warn!("Stream error: {}", e);
                     }
                 }
+            }
+
+            // Check if stream ended without proper FinishStep signal
+            if !stream_completed && chunk_count > 0 {
+                warn!(
+                    step = steps,
+                    chunks = chunk_count,
+                    "Stream ended without FinishStep signal - this may indicate a provider issue"
+                );
+                // Send a completion signal immediately to prevent UI getting stuck
+                info!("Forcing completion signal to prevent UI from staying in 'thinking' state");
+                break; // Exit the step loop to trigger completion
             }
 
             // Accumulate usage for this step
@@ -3322,7 +3355,10 @@ impl Runner {
         match parts[0] {
             "tools" => Some(self.format_tools_list().await),
             "help" => Some(self.format_help()),
-            _ => Some(format!("Unknown command: /{}\nType /help for available commands.", parts[0])),
+            _ => Some(format!(
+                "Unknown command: /{}\nType /help for available commands.",
+                parts[0]
+            )),
         }
     }
 
@@ -3338,19 +3374,20 @@ impl Runner {
         output.push('\n');
 
         // Group tools by prefix to identify duplicates
-        let mut tool_groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-        
+        let mut tool_groups: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+
         for tool in &tools_vec {
             let id = tool.id().to_string();
             let base_name = if let Some(pos) = id.rfind('_') {
                 id[..pos].to_string()
-            } else if id.starts_with("mcp_") {
-                id[4..].to_string()
+            } else if let Some(stripped) = id.strip_prefix("mcp_") {
+                stripped.to_string()
             } else {
                 id.clone()
             };
-            
-            tool_groups.entry(base_name).or_insert_with(Vec::new).push(id);
+
+            tool_groups.entry(base_name).or_default().push(id);
         }
 
         // Show duplicates first if any
@@ -3384,14 +3421,14 @@ impl Runner {
         for tool in tools_vec {
             let id = tool.id();
             let description = tool.description();
-            
+
             // Truncate long descriptions
             let short_desc = if description.len() > 80 {
                 format!("{}...", &description[..77])
             } else {
                 description.to_string()
             };
-            
+
             output.push_str(&format!("{}\n  {}\n\n", id, short_desc));
         }
 
@@ -3786,7 +3823,7 @@ fn create_provider(
     _sandbox_enabled: Option<bool>,
     _allow_all: bool,
 ) -> Result<BoxedLanguageModel, Box<dyn std::error::Error + Send + Sync>> {
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     let model_info = get_model_info(&config.model_id, &config.provider);
 
@@ -3902,6 +3939,10 @@ fn create_provider(
             let provider = together::TogetherProvider::new(&config.api_key, model_info)?;
             Ok(Arc::new(provider))
         }
+        "compoundcoder" => {
+            let provider = compoundcoder::CompoundCoderProvider::new(&config.api_key, model_info)?;
+            Ok(Arc::new(provider))
+        }
         "test" => {
             // Test provider for UI/UX testing - no API key required
             let provider = wonopcode_provider::test::TestProvider::new(model_info);
@@ -3913,7 +3954,7 @@ fn create_provider(
 
 /// Get model info for a model ID.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     // Check built-in models
     match model_id {
@@ -3998,6 +4039,10 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo" => together::models::llama_3_3_70b(),
         "Qwen/Qwen2.5-72B-Instruct-Turbo" => together::models::qwen_2_5_72b(),
         "Qwen/Qwen2.5-Coder-32B-Instruct" => together::models::qwen_2_5_coder(),
+        // CompoundCoder
+        "wonop/gpt" => compoundcoder::models::wonop_gpt(),
+        "wonop/qwen" => compoundcoder::models::wonop_qwen(),
+        "wonop/devstral2" => compoundcoder::models::wonop_devstral2(),
         // Test provider
         "test-128b" => wonopcode_provider::test::TestProvider::test_128b(),
         _ => ModelInfo::new(model_id, provider).with_name(model_id),

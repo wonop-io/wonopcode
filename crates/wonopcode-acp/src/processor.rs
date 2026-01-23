@@ -606,7 +606,7 @@ fn create_provider(
     use wonopcode_provider::google::GoogleProvider;
     use wonopcode_provider::openai::OpenAIProvider;
     use wonopcode_provider::openrouter::OpenRouterProvider;
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     let model_info = get_model_info(&config.model_id, &config.provider);
 
@@ -639,6 +639,10 @@ fn create_provider(
             &config.api_key,
             model_info,
         )?),
+        "compoundcoder" => Arc::new(compoundcoder::CompoundCoderProvider::new(
+            &config.api_key,
+            model_info,
+        )?),
         _ => {
             return Err(format!("Unknown provider: {}", config.provider).into());
         }
@@ -649,7 +653,7 @@ fn create_provider(
 
 /// Get model info for a model ID.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     // Check built-in models
     match model_id {
@@ -734,6 +738,10 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo" => together::models::llama_3_3_70b(),
         "Qwen/Qwen2.5-72B-Instruct-Turbo" => together::models::qwen_2_5_72b(),
         "Qwen/Qwen2.5-Coder-32B-Instruct" => together::models::qwen_2_5_coder(),
+        // CompoundCoder
+        "wonop/gpt" => compoundcoder::models::wonop_gpt(),
+        "wonop/qwen" => compoundcoder::models::wonop_qwen(),
+        "wonop/devstral2" => compoundcoder::models::wonop_devstral2(),
         // Fallback for unknown models
         _ => ModelInfo::new(model_id, provider).with_name(model_id),
     }

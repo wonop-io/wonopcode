@@ -777,11 +777,12 @@ impl LanguageModel for ClaudeCliProvider {
                     continue;
                 }
 
-                debug!(line_len = line.len(), "Received line from Claude CLI");
+                tracing::info!(line_len = line.len(), line_preview = %line.chars().take(100).collect::<String>(), "🔄 CLAUDE CLI: Received line from CLI");
 
                 // Try to parse as our message type
                 match serde_json::from_str::<CliMessage>(&line) {
                     Ok(CliMessage::Assistant { message, session_id }) => {
+                        tracing::info!(content_blocks = message.content.len(), session_id = ?session_id, "✅ CLAUDE CLI: Parsed assistant message");
                         // Capture session ID if we haven't already
                         if captured_session_id.is_none() {
                             if let Some(sid) = session_id {
@@ -795,10 +796,11 @@ impl LanguageModel for ClaudeCliProvider {
                                 ContentBlock::Text { text } => {
                                     if !text.is_empty() {
                                         if !text_started {
+                                            tracing::info!("🎬 CLAUDE CLI: Starting text stream");
                                             yield StreamChunk::TextStart;
                                             text_started = true;
                                         }
-                                        debug!(text_len = text.len(), "Got text from assistant");
+                                        tracing::info!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "📝 CLAUDE CLI: Yielding TextDelta");
                                         total_text.push_str(&text);
                                         yield StreamChunk::TextDelta(text);
                                     }
@@ -940,8 +942,7 @@ impl LanguageModel for ClaudeCliProvider {
                     }
                     Err(e) => {
                         // Not all lines are valid JSON messages (could be debug output)
-                        // Log at debug level to avoid noise
-                        debug!(error = %e, line_preview = %line.chars().take(100).collect::<String>(), "Failed to parse line");
+                        tracing::info!(error = %e, line_preview = %line.chars().take(100).collect::<String>(), "❌ CLAUDE CLI: Failed to parse JSON line");
                     }
                 }
             }

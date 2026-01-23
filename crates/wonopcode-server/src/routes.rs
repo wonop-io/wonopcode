@@ -2700,6 +2700,11 @@ pub fn get_providers() -> Vec<ProviderInfo> {
             env: vec!["TOGETHER_API_KEY".to_string()],
         },
         ProviderInfo {
+            id: "compoundcoder".to_string(),
+            name: "CompoundCoder".to_string(),
+            env: vec!["COMPOUNDCODER_API_KEY".to_string()],
+        },
+        ProviderInfo {
             id: "copilot".to_string(),
             name: "GitHub Copilot".to_string(),
             env: vec!["GITHUB_TOKEN".to_string()],
