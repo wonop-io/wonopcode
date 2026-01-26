@@ -148,6 +148,9 @@ pub struct ClaudeCliProvider {
     /// Captured session ID from the CLI for resumption.
     /// Protected by RwLock for interior mutability.
     session_id: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+    /// Working directory for the CLI process.
+    /// If not set, inherits from the parent process.
+    working_directory: Option<PathBuf>,
 }
 
 impl ClaudeCliProvider {
@@ -166,6 +169,7 @@ impl ClaudeCliProvider {
             model,
             mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            working_directory: None,
         })
     }
 
@@ -183,6 +187,34 @@ impl ClaudeCliProvider {
             model,
             mcp_config: Some(mcp_config),
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            working_directory: None,
+        })
+    }
+
+    /// Set the working directory for the CLI process.
+    ///
+    /// This sets the current working directory when spawning the Claude CLI,
+    /// which affects where the CLI and any tools it invokes execute.
+    pub fn set_working_directory(&mut self, dir: PathBuf) {
+        info!(working_directory = %dir.display(), "Set working directory for Claude CLI");
+        self.working_directory = Some(dir);
+    }
+
+    /// Create a new CLI provider with a specific working directory.
+    pub fn with_working_directory(model: ModelInfo, working_directory: PathBuf) -> ProviderResult<Self> {
+        Self::check_cli_available()?;
+
+        info!(
+            model = %model.id, 
+            working_directory = %working_directory.display(),
+            "Created Claude CLI provider with working directory"
+        );
+
+        Ok(Self {
+            model,
+            mcp_config: None,
+            session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+            working_directory: Some(working_directory),
         })
     }
 
@@ -724,15 +756,22 @@ impl LanguageModel for ClaudeCliProvider {
         info!(
             command = "claude",
             args = ?args,
+            working_directory = ?self.working_directory,
             "Spawning Claude CLI"
         );
 
         // Spawn the Claude CLI process with streaming JSON output
-        let mut child = TokioCommand::new("claude")
-            .args(&args)
+        let mut cmd = TokioCommand::new("claude");
+        cmd.args(&args)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
+            .stderr(std::process::Stdio::piped());
+        
+        // Set working directory if configured
+        if let Some(ref workdir) = self.working_directory {
+            cmd.current_dir(workdir);
+        }
+        
+        let mut child = cmd.spawn()
             .map_err(|e| ProviderError::internal(format!("Failed to spawn Claude CLI: {e}")))?;
 
         let stdout = child

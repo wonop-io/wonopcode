@@ -208,6 +208,9 @@ pub struct RunnerConfig {
     /// External MCP servers (local/stdio) to pass to Claude CLI.
     /// These are servers configured in .mcp.json that use command/args format.
     pub external_mcp_servers: HashMap<String, (Vec<String>, HashMap<String, String>)>,
+    /// Working directory for the provider (used by Claude CLI).
+    /// This sets the current working directory when spawning external processes.
+    pub working_directory: Option<std::path::PathBuf>,
 }
 
 impl Default for RunnerConfig {
@@ -226,6 +229,7 @@ impl Default for RunnerConfig {
             mcp_url: None,
             mcp_secret: None,
             external_mcp_servers: HashMap::new(),
+            working_directory: None,
         }
     }
 }
@@ -850,6 +854,7 @@ impl Runner {
                 mcp_url: old_config.mcp_url.clone(),
                 mcp_secret: old_config.mcp_secret.clone(),
                 external_mcp_servers: old_config.external_mcp_servers.clone(),
+                working_directory: old_config.working_directory.clone(),
             }
         };
 
@@ -916,6 +921,11 @@ impl Runner {
         update_tx: mpsc::UnboundedSender<AppUpdate>,
     ) {
         let cwd = self.instance.directory().to_path_buf();
+        
+        info!(
+            working_directory = %cwd.display(),
+            "Runner started with working directory"
+        );
 
         // Subscribe to permission requests from the bus and forward to TUI
         let mut permission_rx = self.bus.subscribe::<BusPermissionRequest>().await;
@@ -3991,16 +4001,24 @@ fn create_provider(
                                 }
                             }
 
-                            let provider =
+                            let mut provider =
                                 wonopcode_provider::claude_cli::ClaudeCliProvider::with_mcp_config(
                                     model_info, mcp_config,
                                 )?;
+                            // Set working directory if configured
+                            if let Some(ref workdir) = config.working_directory {
+                                provider.set_working_directory(workdir.clone());
+                            }
                             Ok(Arc::new(provider))
                         } else {
                             // No MCP URL provided - use Claude CLI without custom tools
                             info!("No MCP URL provided, using Claude CLI without custom tools");
-                            let provider =
+                            let mut provider =
                                 wonopcode_provider::claude_cli::ClaudeCliProvider::new(model_info)?;
+                            // Set working directory if configured
+                            if let Some(ref workdir) = config.working_directory {
+                                provider.set_working_directory(workdir.clone());
+                            }
                             Ok(Arc::new(provider))
                         }
                     } else {

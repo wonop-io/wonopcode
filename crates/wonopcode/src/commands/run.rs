@@ -177,6 +177,8 @@ pub async fn run_command(
         mcp_url, // Use background MCP server for custom tools
         mcp_secret: secret,
         external_mcp_servers: std::collections::HashMap::new(),
+        // Use instance directory as working directory for Claude CLI
+        working_directory: Some(instance.directory().to_path_buf()),
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)
@@ -186,6 +188,7 @@ pub async fn run_command(
         None,
         Some(shared_bus),
         Some(shared_permission_manager),
+        None, // No session service in run command
     )
     .await
     {

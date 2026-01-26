@@ -556,6 +556,8 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         mcp_url,          // Use background MCP server for custom tools
         mcp_secret: None, // No auth needed for local MCP server in TUI mode
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
+        // Use instance directory as working directory for Claude CLI
+        working_directory: Some(instance.directory().to_path_buf()),
     };
 
     // Get MCP config from config file
@@ -632,13 +634,17 @@ async fn run_basic_mode(
     println!("Provider: {} / {}", config.provider, config.model_id);
     println!();
 
-    // Create runner with shared permission manager
+    // Create runner with shared permission manager and session service for history persistence
+    let session_service = std::sync::Arc::new(
+        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+    );
     let runner = match Runner::new_with_shared(
         config.clone(),
         instance.clone(),
         mcp_configs,
         Some(shared_bus),
         Some(shared_permission_manager),
+        Some(session_service),
     )
     .await
     {
@@ -800,12 +806,16 @@ async fn run_tui_mode(
 
     // Create runner with shared Bus and PermissionManager
     // This allows MCP tools to send permission requests to the TUI for user prompts
+    let session_service_web = std::sync::Arc::new(
+        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+    );
     let runner = match Runner::new_with_shared(
         config,
         instance.clone(),
         mcp_configs,
         Some(shared_bus),
         Some(shared_permission_manager),
+        Some(session_service_web),
     )
     .await
     {
@@ -920,6 +930,8 @@ async fn run_headless(
         mcp_url: Some(mcp_sse_url), // Use HTTP transport for MCP
         mcp_secret: secret.clone(),
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
+        // Use instance directory as working directory for Claude CLI
+        working_directory: Some(instance.directory().to_path_buf()),
     };
 
     // Get MCP config
@@ -1152,12 +1164,16 @@ async fn run_headless(
     }
 
     // Create runner with shared bus and permission manager
+    let session_service_headless = std::sync::Arc::new(
+        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+    );
     let runner = match Runner::new_with_shared(
         config,
         instance.clone(),
         mcp_configs,
         Some(shared_bus),
         Some(shared_permission_manager.clone()),
+        Some(session_service_headless),
     )
     .await
     {
