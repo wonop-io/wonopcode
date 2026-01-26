@@ -13,6 +13,10 @@ pub enum CoreError {
     #[error("session error: {0}")]
     Session(#[from] SessionError),
 
+    /// Workstream error.
+    #[error("workstream error: {0}")]
+    Workstream(#[from] WorkstreamError),
+
     /// Storage error.
     #[error("storage error: {0}")]
     Storage(#[from] wonopcode_storage::StorageError),
@@ -80,6 +84,38 @@ pub enum SessionError {
     /// Session is locked (being compacted, etc.).
     #[error("session is locked: {id}")]
     Locked { id: String },
+}
+
+/// Workstream-specific errors.
+#[derive(Debug, Error)]
+pub enum WorkstreamError {
+    /// Workstream not found.
+    #[error("workstream not found: {0}")]
+    NotFound(String),
+
+    /// Workstream already exists.
+    #[error("workstream already exists: {0}")]
+    AlreadyExists(String),
+
+    /// Workstream is not active.
+    #[error("workstream is not active: {0}")]
+    NotActive(String),
+
+    /// Workstream has connected clients.
+    #[error("workstream has {1} connected clients: {0}")]
+    HasClients(String, u32),
+
+    /// Cannot delete direct workstream.
+    #[error("cannot delete direct (main) workstream")]
+    CannotDeleteDirect,
+
+    /// Git operation failed.
+    #[error("git error: {0}")]
+    Git(String),
+
+    /// Not a git repository.
+    #[error("not a git repository: {0}")]
+    NotGitRepo(String),
 }
 
 /// Result type for core operations.

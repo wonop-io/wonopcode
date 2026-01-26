@@ -30,13 +30,14 @@ pub mod session;
 pub mod share;
 pub mod system_prompt;
 pub mod version;
+pub mod workstream;
 
 pub use agent::{Agent, AgentMode, AgentPermission, AgentRegistry};
 // Re-export bash permission types from util to maintain backwards compatibility
 pub use bus::{Bus, SandboxState, SandboxStatusChanged, SandboxToolExecution};
 pub use command::{Command, CommandRegistry};
 pub use config::{Config, McpConfig, McpJsonFile, McpJsonServer, McpLocalConfig, McpRemoteConfig};
-pub use error::{CoreError, CoreResult};
+pub use error::{CoreError, CoreResult, WorkstreamError};
 pub use format::{Formatter, FormatterRegistry};
 pub use hook::{Hook, HookContext, HookEvent, HookRegistry};
 pub use instance::Instance;
@@ -53,3 +54,7 @@ pub use revert::{RevertInput, SessionRevert};
 pub use session::Session;
 pub use share::{ShareClient, ShareError, ShareInfo};
 pub use wonopcode_util::{BashPermission, BashPermissionConfig};
+pub use workstream::{
+    WorkstreamId, PassiveWorkstream, ActiveWorkstream, WorkstreamInfo,
+    WorkstreamStatus, WorkstreamEvent, WorkstreamService, WorkstreamServiceConfig,
+};
