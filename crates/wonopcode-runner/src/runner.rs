@@ -15,6 +15,7 @@ use wonopcode_core::bus::{
 use wonopcode_core::config::{McpConfig, McpRemoteConfig, SandboxConfig as CoreSandboxConfig};
 use wonopcode_core::permission::{Decision, PermissionCheck, PermissionManager};
 use wonopcode_core::system_prompt;
+use wonopcode_core::SessionService;
 use wonopcode_core::Instance;
 use wonopcode_mcp::{McpClient, ServerConfig as McpServerConfig};
 use wonopcode_provider::{
@@ -266,6 +267,11 @@ pub struct Runner {
     lsp_client: Arc<wonopcode_lsp::LspClient>,
     /// MCP TODO adapter for bridging MCP TODO tools to native events.
     mcp_todo_adapter: Option<mcp_todo_adapter::McpTodoAdapter>,
+    /// Session service for history persistence.
+    /// Optional for backward compatibility - if None, uses in-memory only.
+    session_service: Option<Arc<SessionService>>,
+    /// Last saved user message ID (for linking assistant responses).
+    last_user_message_id: RwLock<Option<String>>,
 }
 
 impl Runner {
@@ -345,6 +351,8 @@ impl Runner {
             todo_store,
             lsp_client,
             mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
+            session_service: None,  // Will be set by new_with_session
+            last_user_message_id: RwLock::new(None),
         })
     }
 
@@ -364,20 +372,27 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None).await
     }
 
-    /// Create a new runner with optional shared Bus and PermissionManager.
-    /// This allows sharing permission state with external components like MCP servers.
+    /// Create a new runner with optional shared Bus, PermissionManager, and SessionService.
+    /// This allows sharing permission state with external components like MCP servers
+    /// and persisting conversation history.
     ///
     /// When using a shared PermissionManager, the caller is responsible for initializing
     /// permission rules before calling this function. The runner will skip rule initialization.
+    ///
+    /// When providing a SessionService, the runner will:
+    /// - Load existing conversation history on startup
+    /// - Persist user messages when prompts are received
+    /// - Persist assistant messages when responses complete
     pub async fn new_with_shared(
         mut config: RunnerConfig,
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
         shared_bus: Option<Bus>,
         shared_permission_manager: Option<Arc<PermissionManager>>,
+        session_service: Option<Arc<SessionService>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -590,6 +605,24 @@ impl Runner {
             }
         }
 
+        // Set up session service for history persistence
+        if let Some(ref svc) = session_service {
+            // Load existing history from session service
+            match svc.load_history().await {
+                Ok(history) => {
+                    if !history.is_empty() {
+                        info!(message_count = history.len(), "Loaded conversation history from session");
+                        let mut runner_history = runner.history.write().await;
+                        *runner_history = history;
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to load conversation history from session");
+                }
+            }
+            runner.session_service = session_service;
+        }
+
         Ok(runner)
     }
 
@@ -741,6 +774,13 @@ impl Runner {
     async fn reset_cancel_token(&self) {
         let mut guard = self.cancel.write().await;
         *guard = CancellationToken::new();
+    }
+
+    /// Get the session service, if configured.
+    ///
+    /// Used by Workstream to access conversation history for client queries.
+    pub fn session_service(&self) -> Option<Arc<SessionService>> {
+        self.session_service.clone()
     }
 
     /// Send LSP status updates to the UI.
@@ -2082,7 +2122,20 @@ impl Runner {
         // Store user message in history
         {
             let mut history = self.history.write().await;
-            history.push(user_msg);
+            history.push(user_msg.clone());
+        }
+
+        // Persist user message to session service
+        if let Some(ref svc) = self.session_service {
+            match svc.save_user_message(&user_msg).await {
+                Ok(msg_id) => {
+                    debug!(message_id = %msg_id, "Persisted user message to session");
+                    *self.last_user_message_id.write().await = Some(msg_id);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to persist user message to session");
+                }
+            }
         }
 
         // Build tool definitions
@@ -2101,8 +2154,20 @@ impl Runner {
             if cancel.is_cancelled() {
                 // Save partial history before returning
                 if !final_text.is_empty() {
-                    let mut history = self.history.write().await;
-                    history.push(ProviderMessage::assistant(&final_text));
+                    let assistant_msg = ProviderMessage::assistant(&final_text);
+                    {
+                        let mut history = self.history.write().await;
+                        history.push(assistant_msg.clone());
+                    }
+                    // Persist partial assistant message to session service
+                    if let Some(ref svc) = self.session_service {
+                        let parent_id = self.last_user_message_id.read().await.clone();
+                        if let Some(parent_id) = parent_id {
+                            if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                                warn!(error = %e, "Failed to persist partial assistant message to session");
+                            }
+                        }
+                    }
                 }
                 info!(
                     partial_text_len = final_text.len(),
@@ -2199,8 +2264,20 @@ impl Runner {
                 if cancel.is_cancelled() {
                     // Save partial text collected so far and return it (not an error)
                     if !current_text.is_empty() {
-                        let mut history = self.history.write().await;
-                        history.push(ProviderMessage::assistant(&current_text));
+                        let assistant_msg = ProviderMessage::assistant(&current_text);
+                        {
+                            let mut history = self.history.write().await;
+                            history.push(assistant_msg.clone());
+                        }
+                        // Persist partial assistant message to session service
+                        if let Some(ref svc) = self.session_service {
+                            let parent_id = self.last_user_message_id.read().await.clone();
+                            if let Some(parent_id) = parent_id {
+                                if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                                    warn!(error = %e, "Failed to persist partial assistant message to session");
+                                }
+                            }
+                        }
                     }
                     info!(
                         partial_text_len = current_text.len(),
@@ -2983,8 +3060,20 @@ impl Runner {
                 if cancelled {
                     // Save the assistant message with tool calls to history
                     if !current_text.is_empty() {
-                        let mut history = self.history.write().await;
-                        history.push(ProviderMessage::assistant(&current_text));
+                        let assistant_msg = ProviderMessage::assistant(&current_text);
+                        {
+                            let mut history = self.history.write().await;
+                            history.push(assistant_msg.clone());
+                        }
+                        // Persist partial assistant message to session service
+                        if let Some(ref svc) = self.session_service {
+                            let parent_id = self.last_user_message_id.read().await.clone();
+                            if let Some(parent_id) = parent_id {
+                                if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                                    warn!(error = %e, "Failed to persist partial assistant message to session");
+                                }
+                            }
+                        }
                     }
                     info!(
                         tool_results_completed = tool_results.len(),
@@ -3013,8 +3102,23 @@ impl Runner {
 
             // Done - store final assistant message in history
             if !final_text.is_empty() {
-                let mut history = self.history.write().await;
-                history.push(ProviderMessage::assistant(&final_text));
+                let assistant_msg = ProviderMessage::assistant(&final_text);
+                {
+                    let mut history = self.history.write().await;
+                    history.push(assistant_msg.clone());
+                }
+
+                // Persist assistant message to session service
+                if let Some(ref svc) = self.session_service {
+                    let parent_id = self.last_user_message_id.read().await.clone();
+                    if let Some(parent_id) = parent_id {
+                        if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                            warn!(error = %e, "Failed to persist assistant message to session");
+                        } else {
+                            debug!("Persisted assistant message to session");
+                        }
+                    }
+                }
             }
             break;
         }

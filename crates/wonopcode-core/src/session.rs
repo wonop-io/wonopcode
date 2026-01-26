@@ -152,6 +152,7 @@ impl Session {
 }
 
 /// Session repository for CRUD operations.
+#[derive(Clone)]
 pub struct SessionRepository {
     storage: JsonStorage,
     bus: Bus,
