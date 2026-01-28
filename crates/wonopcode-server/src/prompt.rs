@@ -372,7 +372,7 @@ impl ServerPromptRunner {
                         serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
 
                     // Intercept todowrite calls to update the shared todo store
-                    let base_name = name.split("__").next_back().unwrap_or(&name);
+                    let base_name = name.rsplit("__").next().unwrap_or(&name);
                     if base_name == "todowrite" {
                         if let Some(store) = &self.todo_store {
                             if let Some(todos_array) =
