@@ -1901,7 +1901,7 @@ async fn list_models() -> impl IntoResponse {
                 all_models.push(ModelListInfo {
                     id: model.name.clone(),
                     name: format!("{} ({})", 
-                        model.name.split('/').last().unwrap_or(&model.name),
+                        model.name.split('/').next_back().unwrap_or(&model.name),
                         model.provider
                     ),
                     provider: model.provider,
