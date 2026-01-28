@@ -58,6 +58,10 @@ wonopcode-discover = { path = "crates/wonopcode-discover" }
 wonopcode-test-utils = { path = "crates/wonopcode-test-utils" }
 wonopcode-runner = { path = "crates/wonopcode-runner" }
 
+# External crates
+wonop-providers = { path = "../../../crates/wonop-providers" }
+wonop-types = { path = "../../../crates/wonop-types" }
+
 # TUI sub-crates
 wonopcode-tui-core = { path = "crates/wonopcode-tui-core" }
 wonopcode-tui-render = { path = "crates/wonopcode-tui-render" }

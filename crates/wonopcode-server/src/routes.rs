@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::{Any, CorsLayer};
 use wonopcode_core::AgentRegistry;
+use wonop_providers;
 
 /// Create the router with all routes.
 pub fn create_router(state: AppState) -> Router {
@@ -1702,6 +1703,7 @@ async fn config_providers() -> impl IntoResponse {
         "groq": { "name": "Groq", "env": ["GROQ_API_KEY"] },
         "deepinfra": { "name": "DeepInfra", "env": ["DEEPINFRA_API_KEY"] },
         "together": { "name": "Together AI", "env": ["TOGETHER_API_KEY"] },
+        "compoundcoder": { "name": "CompoundCoder", "env": ["COMPOUNDCODER_API_KEY"] },
         "copilot": { "name": "GitHub Copilot", "env": ["GITHUB_TOKEN"] }
     }))
 }
@@ -1886,88 +1888,140 @@ struct ModelListInfo {
 }
 
 async fn list_models() -> impl IntoResponse {
-    // Try to get models from models.dev, fall back to static definitions
+    let mut all_models: Vec<ModelListInfo> = Vec::new();
+    
+    // First, try to get models from the local provider registry
+    match wonop_providers::create_default_registry().await {
+        Ok(registry) => {
+            let provider_models = registry.list_models().await;
+            tracing::debug!("Found {} models from local provider registry", provider_models.len());
+            
+            // Convert provider models to ModelListInfo
+            for model in provider_models {
+                all_models.push(ModelListInfo {
+                    id: model.name.clone(),
+                    name: format!("{} ({})", 
+                        model.name.split('/').last().unwrap_or(&model.name),
+                        model.provider
+                    ),
+                    provider: model.provider,
+                    context: model.context_window.try_into().ok(),
+                    output: model.max_output_tokens.map(|t| t.try_into().unwrap_or(0)),
+                });
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to create provider registry: {}", e);
+        }
+    }
+    
+    // Next, try to get models from models.dev and merge them
     match wonopcode_provider::models_dev::get_all_models().await {
         Ok(models) => {
-            let model_list: Vec<ModelListInfo> = models
-                .into_iter()
-                .map(|m| ModelListInfo {
-                    id: m.id,
-                    name: m.name,
-                    provider: m.provider_id,
-                    context: Some(m.limit.context),
-                    output: Some(m.limit.output),
-                })
-                .collect();
-            Json(model_list)
+            tracing::debug!("Found {} models from models.dev", models.len());
+            
+            // Add models.dev models, avoiding duplicates
+            for model in models {
+                let model_id = &model.id;
+                if !all_models.iter().any(|m| m.id == *model_id) {
+                    all_models.push(ModelListInfo {
+                        id: model.id,
+                        name: model.name,
+                        provider: model.provider_id,
+                        context: Some(model.limit.context),
+                        output: Some(model.limit.output),
+                    });
+                }
+            }
         }
         Err(e) => {
             tracing::warn!(
-                "Failed to fetch models from models.dev: {}, using static fallback",
+                "Failed to fetch models from models.dev: {}, will use static fallback if no provider models found",
                 e
             );
-            // Fallback to static models
-            let models = vec![
-                ModelListInfo {
-                    id: "claude-sonnet-4-5-20250929".to_string(),
-                    name: "Claude Sonnet 4.5".to_string(),
-                    provider: "anthropic".to_string(),
-                    context: Some(200_000),
-                    output: Some(64_000),
-                },
-                ModelListInfo {
-                    id: "claude-haiku-4-5-20251001".to_string(),
-                    name: "Claude Haiku 4.5".to_string(),
-                    provider: "anthropic".to_string(),
-                    context: Some(200_000),
-                    output: Some(64_000),
-                },
-                ModelListInfo {
-                    id: "claude-3-haiku-20240307".to_string(),
-                    name: "Claude 3 Haiku".to_string(),
-                    provider: "anthropic".to_string(),
-                    context: Some(200_000),
-                    output: Some(4_096),
-                },
-                ModelListInfo {
-                    id: "gpt-5.2".to_string(),
-                    name: "GPT-5.2".to_string(),
-                    provider: "openai".to_string(),
-                    context: Some(256_000),
-                    output: Some(32_768),
-                },
-                ModelListInfo {
-                    id: "gpt-4o".to_string(),
-                    name: "GPT-4o".to_string(),
-                    provider: "openai".to_string(),
-                    context: Some(128_000),
-                    output: Some(16_384),
-                },
-                ModelListInfo {
-                    id: "o3".to_string(),
-                    name: "o3".to_string(),
-                    provider: "openai".to_string(),
-                    context: Some(200_000),
-                    output: Some(100_000),
-                },
-                ModelListInfo {
-                    id: "gemini-2.0-flash".to_string(),
-                    name: "Gemini 2.0 Flash".to_string(),
-                    provider: "google".to_string(),
-                    context: Some(1_000_000),
-                    output: Some(8_192),
-                },
-                ModelListInfo {
-                    id: "gemini-1.5-pro".to_string(),
-                    name: "Gemini 1.5 Pro".to_string(),
-                    provider: "google".to_string(),
-                    context: Some(2_000_000),
-                    output: Some(8_192),
-                },
-            ];
-            Json(models)
         }
     }
+    
+    // If we still don't have any models, use static fallback
+    if all_models.is_empty() {
+        tracing::info!("No models found from providers or models.dev, using static fallback");
+        all_models = vec![
+            ModelListInfo {
+                id: "claude-sonnet-4-5-20250929".to_string(),
+                name: "Claude Sonnet 4.5".to_string(),
+                provider: "anthropic".to_string(),
+                context: Some(200_000),
+                output: Some(64_000),
+            },
+            ModelListInfo {
+                id: "claude-haiku-4-5-20251001".to_string(),
+                name: "Claude Haiku 4.5".to_string(),
+                provider: "anthropic".to_string(),
+                context: Some(200_000),
+                output: Some(64_000),
+            },
+            ModelListInfo {
+                id: "claude-3-haiku-20240307".to_string(),
+                name: "Claude 3 Haiku".to_string(),
+                provider: "anthropic".to_string(),
+                context: Some(200_000),
+                output: Some(4_096),
+            },
+            ModelListInfo {
+                id: "gpt-5.2".to_string(),
+                name: "GPT-5.2".to_string(),
+                provider: "openai".to_string(),
+                context: Some(256_000),
+                output: Some(32_768),
+            },
+            ModelListInfo {
+                id: "gpt-5".to_string(),
+                name: "GPT-5".to_string(),
+                provider: "openai".to_string(),
+                context: Some(256_000),
+                output: Some(32_768),
+            },
+            ModelListInfo {
+                id: "gpt-4o".to_string(),
+                name: "GPT-4o".to_string(),
+                provider: "openai".to_string(),
+                context: Some(128_000),
+                output: Some(100_000),
+            },
+            ModelListInfo {
+                id: "gemini-2.0-flash".to_string(),
+                name: "Gemini 2.0 Flash".to_string(),
+                provider: "google".to_string(),
+                context: Some(1_000_000),
+                output: Some(8_192),
+            },
+            ModelListInfo {
+                id: "gemini-1.5-pro".to_string(),
+                name: "Gemini 1.5 Pro".to_string(),
+                provider: "google".to_string(),
+                context: Some(2_000_000),
+                output: Some(8_192),
+            },
+            // Add CompoundCoder models to static fallback
+            ModelListInfo {
+                id: "wonop/gpt".to_string(),
+                name: "Wonop GPT (compoundcoder)".to_string(),
+                provider: "compoundcoder".to_string(),
+                context: Some(128_000),
+                output: Some(8_192),
+            },
+            ModelListInfo {
+                id: "wonop/qwen".to_string(),
+                name: "Wonop Qwen (compoundcoder)".to_string(),
+                provider: "compoundcoder".to_string(),
+                context: Some(200_000),
+                output: Some(8_192),
+            },
+        ];
+    }
+    
+    tracing::info!("Returning {} total models", all_models.len());
+    Json(all_models)
 }
 
 // =============================================================================

@@ -25,23 +25,28 @@ pub fn parse_release_channel(s: &str) -> Option<wonopcode_core::version::Release
 
 /// Parse model specification in provider/model format.
 ///
-/// If the spec contains a '/', it's treated as "provider/model".
-/// Otherwise, tries to infer the provider from well-known model names,
-/// falling back to the provided default_provider.
+/// First tries to infer the provider from well-known model names.
+/// If the spec contains a '/' and inference fails, it's treated as "provider/model".
+/// Otherwise, falls back to the provided default_provider.
 ///
 /// # Arguments
-/// * `spec` - Model specification (e.g., "openai/gpt-4o" or just "claude-sonnet-4-5-20250929")
+/// * `spec` - Model specification (e.g., "openai/gpt-4o", "claude-sonnet-4-5-20250929", or "wonop/gpt")
 /// * `default_provider` - Provider to use if inference fails
 ///
 /// # Returns
 /// A tuple of (provider, model)
 pub fn parse_model_spec(spec: &str, default_provider: &str) -> (String, String) {
+    // First try to infer provider from the full model name (this handles cases like "wonop/gpt")
+    if let Some(inferred_provider) = infer_provider_from_model(spec) {
+        return (inferred_provider.to_string(), spec.to_string());
+    }
+
+    // If inference fails and the spec contains a '/', treat it as "provider/model"
     if let Some((provider, model)) = spec.split_once('/') {
         (provider.to_string(), model.to_string())
     } else {
-        // Try to infer provider from model name
-        let provider = infer_provider_from_model(spec).unwrap_or(default_provider);
-        (provider.to_string(), spec.to_string())
+        // Fall back to default provider
+        (default_provider.to_string(), spec.to_string())
     }
 }
 
@@ -75,6 +80,11 @@ pub fn infer_provider_from_model(model: &str) -> Option<&'static str> {
         return Some("google");
     }
 
+    // CompoundCoder models
+    if model_lower.starts_with("wonop/") {
+        return Some("compoundcoder");
+    }
+
     None
 }
 
@@ -84,12 +94,14 @@ pub fn infer_provider_from_model(model: &str) -> Option<&'static str> {
 /// - anthropic: claude-sonnet-4-5-20250929
 /// - openai: gpt-4o
 /// - openrouter: anthropic/claude-sonnet-4-5
+/// - compoundcoder: wonop/gpt
 /// - others: claude-sonnet-4-5-20250929
 pub fn get_default_model(provider: &str) -> String {
     match provider {
         "anthropic" => "claude-sonnet-4-5-20250929".to_string(),
         "openai" => "gpt-4o".to_string(),
         "openrouter" => "anthropic/claude-sonnet-4-5".to_string(),
+        "compoundcoder" => "wonop/gpt".to_string(),
         _ => "claude-sonnet-4-5-20250929".to_string(),
     }
 }
@@ -139,4 +151,8 @@ pub fn list_models() {
     println!();
     println!("OpenRouter:");
     println!("  Use any model ID from https://openrouter.ai/models");
+    println!();
+    println!("CompoundCoder:");
+    println!("  wonop/gpt                   Wonop GPT (via CompoundCoder API)");
+    println!("  wonop/qwen                  Wonop Qwen (via CompoundCoder API)");
 }

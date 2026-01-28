@@ -14,6 +14,7 @@
 //! - Groq
 //! - DeepInfra
 //! - Together AI
+//! - CompoundCoder
 //! - OpenAI-compatible custom providers
 
 pub mod error;
@@ -34,6 +35,7 @@ pub mod copilot;
 pub mod vertex;
 
 // Additional providers (OpenAI-compatible)
+pub mod compoundcoder;
 pub mod deepinfra;
 pub mod groq;
 pub mod mistral;

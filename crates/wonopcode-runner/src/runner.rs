@@ -3786,7 +3786,7 @@ fn create_provider(
     _sandbox_enabled: Option<bool>,
     _allow_all: bool,
 ) -> Result<BoxedLanguageModel, Box<dyn std::error::Error + Send + Sync>> {
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     let model_info = get_model_info(&config.model_id, &config.provider);
 
@@ -3902,6 +3902,10 @@ fn create_provider(
             let provider = together::TogetherProvider::new(&config.api_key, model_info)?;
             Ok(Arc::new(provider))
         }
+        "compoundcoder" => {
+            let provider = compoundcoder::CompoundCoderProvider::new(&config.api_key, model_info)?;
+            Ok(Arc::new(provider))
+        }
         "test" => {
             // Test provider for UI/UX testing - no API key required
             let provider = wonopcode_provider::test::TestProvider::new(model_info);
@@ -3913,7 +3917,7 @@ fn create_provider(
 
 /// Get model info for a model ID.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    use wonopcode_provider::{deepinfra, groq, mistral, together, xai};
+    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     // Check built-in models
     match model_id {
@@ -3998,6 +4002,9 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo" => together::models::llama_3_3_70b(),
         "Qwen/Qwen2.5-72B-Instruct-Turbo" => together::models::qwen_2_5_72b(),
         "Qwen/Qwen2.5-Coder-32B-Instruct" => together::models::qwen_2_5_coder(),
+        // CompoundCoder
+        "wonop/gpt" => compoundcoder::models::wonop_gpt(),
+        "wonop/qwen" => compoundcoder::models::wonop_qwen(),
         // Test provider
         "test-128b" => wonopcode_provider::test::TestProvider::test_128b(),
         _ => ModelInfo::new(model_id, provider).with_name(model_id),
@@ -4043,6 +4050,11 @@ fn infer_provider_from_model(model: &str) -> Option<&'static str> {
     // Groq-hosted models (Llama, Mixtral on Groq)
     if model_lower.contains("groq") {
         return Some("groq");
+    }
+
+    // CompoundCoder models
+    if model_lower.starts_with("wonop/") {
+        return Some("compoundcoder");
     }
 
     // Test provider
@@ -4207,6 +4219,7 @@ pub fn load_api_key(provider: &str) -> Option<String> {
         "groq" => "GROQ_API_KEY",
         "deepinfra" => "DEEPINFRA_API_KEY",
         "together" => "TOGETHER_API_KEY",
+        "compoundcoder" => "COMPOUNDCODER_API_KEY",
         _ => return None,
     };
 

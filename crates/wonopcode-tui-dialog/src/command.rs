@@ -309,6 +309,15 @@ impl ModelDialog {
             .with_description("Code-specialized")
             .with_category("Together"),
             // ══════════════════════════════════════════════════════════════
+            // CompoundCoder
+            // ══════════════════════════════════════════════════════════════
+            DialogItem::new("wonop/gpt", "Wonop GPT")
+                .with_description("Wonop GPT (via CompoundCoder API)")
+                .with_category("CompoundCoder"),
+            DialogItem::new("wonop/qwen", "Wonop Qwen")
+                .with_description("Wonop Qwen (via CompoundCoder API)")
+                .with_category("CompoundCoder"),
+            // ══════════════════════════════════════════════════════════════
             // OpenRouter (Multi-provider gateway)
             // ══════════════════════════════════════════════════════════════
             DialogItem::new(

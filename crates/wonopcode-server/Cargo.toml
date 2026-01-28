@@ -18,6 +18,7 @@ wonopcode-tools.workspace = true
 wonopcode-auth.workspace = true
 wonopcode-protocol.workspace = true
 wonopcode-mcp.workspace = true
+wonop-providers.workspace = true
 
 glob.workspace = true
 dirs.workspace = true
