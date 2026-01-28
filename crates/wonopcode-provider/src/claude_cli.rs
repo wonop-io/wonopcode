@@ -751,6 +751,9 @@ impl LanguageModel for ClaudeCliProvider {
                 "Using MCP config for custom tools"
             );
         }
+        // Note: We intentionally do NOT set --permission-mode here.
+        // Claude CLI will use its default permission behavior, which prompts for
+        // dangerous operations. The TUI should display these prompts to the user.
 
         // Log the full command for debugging
         info!(
