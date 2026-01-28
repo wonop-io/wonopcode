@@ -274,7 +274,9 @@ pub async fn delete_worktree(repo_root: &Path, worktree_path: &Path) -> CoreResu
                 std::fs::remove_dir_all(worktree_path)?;
             }
         } else {
-            return Err(WorkstreamError::Git(format!("git worktree remove failed: {}", stderr)).into());
+            return Err(
+                WorkstreamError::Git(format!("git worktree remove failed: {}", stderr)).into(),
+            );
         }
     }
 

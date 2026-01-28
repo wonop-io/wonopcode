@@ -81,8 +81,12 @@ impl EmbeddedIggy {
         info!("Using data directory: {:?}", data_path);
 
         // Generate configuration file
-        let config_content =
-            config.to_toml(tcp_port, http_port, quic_port, data_path.to_str().unwrap_or("."));
+        let config_content = config.to_toml(
+            tcp_port,
+            http_port,
+            quic_port,
+            data_path.to_str().unwrap_or("."),
+        );
 
         let config_path = data_path.join("server.toml");
         tokio::fs::write(&config_path, &config_content)
@@ -270,9 +274,9 @@ impl EmbeddedIggy {
     /// Check if the server is still running.
     pub fn is_running(&mut self) -> bool {
         match self.child.try_wait() {
-            Ok(None) => true,         // Still running
-            Ok(Some(_)) => false,     // Exited
-            Err(_) => false,          // Error checking status
+            Ok(None) => true,     // Still running
+            Ok(Some(_)) => false, // Exited
+            Err(_) => false,      // Error checking status
         }
     }
 

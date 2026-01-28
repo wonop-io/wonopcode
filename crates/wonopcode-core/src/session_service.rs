@@ -301,10 +301,7 @@ impl SessionService {
     ///
     /// Called when the user sends a prompt. Returns the message ID for
     /// linking the assistant's response.
-    pub async fn save_user_message(
-        &self,
-        provider_msg: &ProviderMessage,
-    ) -> CoreResult<String> {
+    pub async fn save_user_message(&self, provider_msg: &ProviderMessage) -> CoreResult<String> {
         let session = self.ensure_session().await?;
 
         let ctx = self.conversion_ctx.read().await;
@@ -371,12 +368,11 @@ impl SessionService {
         success: bool,
         metadata: Option<serde_json::Value>,
     ) -> CoreResult<()> {
-        let session_id = self
-            .current_session_id()
-            .await
-            .ok_or_else(|| crate::error::SessionError::NotFound {
+        let session_id = self.current_session_id().await.ok_or_else(|| {
+            crate::error::SessionError::NotFound {
                 id: "no active session".to_string(),
-            })?;
+            }
+        })?;
 
         // Get all parts for the message
         let parts = self.repo.parts(&session_id, message_id).await?;
@@ -422,7 +418,9 @@ impl SessionService {
             None => return Ok(Vec::new()),
         };
 
-        self.repo.messages(&self.project_id, &session_id, None).await
+        self.repo
+            .messages(&self.project_id, &session_id, None)
+            .await
     }
 
     /// Get recent history with a limit.

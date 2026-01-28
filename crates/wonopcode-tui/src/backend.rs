@@ -1120,7 +1120,10 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         // State payload contains full state - convert to session loaded
         ServerPayload::State(state) => {
             // For now, just send status - full state handling TBD
-            AppUpdate::Status(format!("State synchronized: {} sessions", state.sessions.len()))
+            AppUpdate::Status(format!(
+                "State synchronized: {} sessions",
+                state.sessions.len()
+            ))
         }
         // Workstream payloads - Pro edition only, ignore for now
         ServerPayload::WorkstreamList { .. }

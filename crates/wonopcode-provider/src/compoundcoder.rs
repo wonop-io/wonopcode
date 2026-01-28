@@ -13,7 +13,8 @@ pub struct CompoundCoderProvider {
 impl CompoundCoderProvider {
     /// Create a new CompoundCoder provider.
     pub fn new(api_key: &str, model: ModelInfo) -> ProviderResult<Self> {
-        let inner = OpenAIProvider::with_base_url(api_key, "https://api.compoundcoders.com/v1", model)?;
+        let inner =
+            OpenAIProvider::with_base_url(api_key, "https://api.compoundcoders.com/v1", model)?;
         Ok(Self { inner })
     }
 }

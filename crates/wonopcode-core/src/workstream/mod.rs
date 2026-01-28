@@ -9,16 +9,16 @@
 //! The "direct" workstream is a special passive workstream representing the main
 //! working tree (where `.git/` lives).
 
-mod types;
 mod discovery;
 mod service;
+mod types;
 
-pub use types::{
-    WorkstreamId, PassiveWorkstream, ActiveWorkstream, WorkstreamInfo,
-    WorkstreamStatus, WorkstreamEvent,
-};
 pub use discovery::{discover_worktrees, get_direct_workstream, get_repo_root};
 pub use service::{WorkstreamService, WorkstreamServiceConfig};
+pub use types::{
+    ActiveWorkstream, PassiveWorkstream, WorkstreamEvent, WorkstreamId, WorkstreamInfo,
+    WorkstreamStatus,
+};
 
 #[cfg(test)]
 mod tests;

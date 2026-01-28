@@ -27,10 +27,7 @@ fn test_workstream_id_display_name_strips_prefixes() {
         WorkstreamId::from_branch("refs/heads/main").display_name(),
         "main"
     );
-    assert_eq!(
-        WorkstreamId::from_branch("main").display_name(),
-        "main"
-    );
+    assert_eq!(WorkstreamId::from_branch("main").display_name(), "main");
 }
 
 #[test]
@@ -38,7 +35,7 @@ fn test_workstream_id_equality() {
     let id1 = WorkstreamId::from_branch("feature/test");
     let id2 = WorkstreamId::from_branch("feature/test");
     let id3 = WorkstreamId::from_branch("feature/other");
-    
+
     assert_eq!(id1, id2);
     assert_ne!(id1, id3);
 }
@@ -46,12 +43,12 @@ fn test_workstream_id_equality() {
 #[test]
 fn test_workstream_id_hash() {
     use std::collections::HashSet;
-    
+
     let mut set = HashSet::new();
     set.insert(WorkstreamId::from_branch("feature/test"));
     set.insert(WorkstreamId::from_branch("feature/test"));
     set.insert(WorkstreamId::from_branch("feature/other"));
-    
+
     assert_eq!(set.len(), 2);
 }
 
@@ -64,9 +61,9 @@ fn test_passive_workstream_to_info() {
         repo_root: std::path::PathBuf::from("/tmp/repo"),
         discovered_at: std::time::SystemTime::now(),
     };
-    
+
     let info = passive.to_info();
-    
+
     assert_eq!(info.id.branch(), "feature/test");
     assert_eq!(info.name, "feature/test");
     assert!(!info.is_active);
@@ -84,9 +81,9 @@ fn test_passive_workstream_direct() {
         repo_root: std::path::PathBuf::from("/tmp/repo"),
         discovered_at: std::time::SystemTime::now(),
     };
-    
+
     let info = passive.to_info();
-    
+
     assert!(info.is_direct);
     assert!(!info.is_active);
 }
@@ -96,7 +93,10 @@ fn test_workstream_status_display() {
     assert_eq!(format!("{}", WorkstreamStatus::Passive), "Passive");
     assert_eq!(format!("{}", WorkstreamStatus::Active), "Active");
     assert_eq!(format!("{}", WorkstreamStatus::Activating), "Activating");
-    assert_eq!(format!("{}", WorkstreamStatus::Deactivating), "Deactivating");
+    assert_eq!(
+        format!("{}", WorkstreamStatus::Deactivating),
+        "Deactivating"
+    );
     assert_eq!(format!("{}", WorkstreamStatus::Error), "Error");
 }
 
@@ -105,11 +105,11 @@ fn test_workstream_event_serialization() {
     let event = WorkstreamEvent::Activated {
         id: WorkstreamId::from_branch("feature/test"),
     };
-    
+
     let json = serde_json::to_string(&event).unwrap();
     assert!(json.contains("activated"));
     assert!(json.contains("feature/test"));
-    
+
     let deserialized: WorkstreamEvent = serde_json::from_str(&json).unwrap();
     match deserialized {
         WorkstreamEvent::Activated { id } => {
@@ -133,10 +133,10 @@ fn test_workstream_info_serialization() {
         last_activity: std::time::SystemTime::UNIX_EPOCH,
         connected_clients: 2,
     };
-    
+
     let json = serde_json::to_string(&info).unwrap();
     let deserialized: WorkstreamInfo = serde_json::from_str(&json).unwrap();
-    
+
     assert_eq!(deserialized.id.branch(), "feature/test");
     assert_eq!(deserialized.name, "feature/test");
     assert!(deserialized.is_active);

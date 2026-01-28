@@ -285,7 +285,7 @@ impl Transport {
                     None, // partition_id (None = auto-assigned by consumer group)
                     &consumer,
                     &PollingStrategy::next(),
-                    100, // batch size
+                    100,  // batch size
                     true, // auto-commit
                 )
                 .await;
@@ -411,7 +411,7 @@ impl Transport {
                     Some(0), // partition_id 0
                     &consumer,
                     &strategy,
-                    100, // batch size
+                    100,   // batch size
                     false, // no auto-commit (clients manage their own offsets)
                 )
                 .await;

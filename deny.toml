@@ -25,6 +25,9 @@ allow = [
     "Unicode-3.0",
     "CC0-1.0",
     "BSL-1.0",
+    # Iggy/rustls transitive dependencies
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
@@ -90,6 +93,7 @@ skip = [
     { crate = "unicode-width", reason = "transitive from ratatui ecosystem" },
     { crate = "linux-raw-sys", reason = "transitive from rustix version split" },
     { crate = "syn", reason = "v1 vs v2 split (zeroconf uses v1 via derive_builder)" },
+    { crate = "which", reason = "v4 vs v7 split (zeroconf bindgen vs wonopcode-iggy-embedded)" },
 ]
 skip-tree = []
 

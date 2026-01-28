@@ -21,12 +21,12 @@ pub mod instance;
 pub mod message;
 pub mod message_convert;
 pub mod permission;
-pub mod session_service;
 pub mod project;
 pub mod prompt;
 pub mod retry;
 pub mod revert;
 pub mod session;
+pub mod session_service;
 pub mod share;
 pub mod system_prompt;
 pub mod version;
@@ -43,7 +43,6 @@ pub use hook::{Hook, HookContext, HookEvent, HookRegistry};
 pub use instance::Instance;
 pub use message::{Message, MessagePart};
 pub use message_convert::{ConversionContext, ConvertedMessage};
-pub use session_service::SessionService;
 pub use permission::{Decision, PermissionCheck, PermissionManager, PermissionRule};
 pub use project::Project;
 pub use prompt::{PromptConfig, PromptLoop, PromptResult};
@@ -52,9 +51,10 @@ pub use retry::{
 };
 pub use revert::{RevertInput, SessionRevert};
 pub use session::Session;
+pub use session_service::SessionService;
 pub use share::{ShareClient, ShareError, ShareInfo};
 pub use wonopcode_util::{BashPermission, BashPermissionConfig};
 pub use workstream::{
-    WorkstreamId, PassiveWorkstream, ActiveWorkstream, WorkstreamInfo,
-    WorkstreamStatus, WorkstreamEvent, WorkstreamService, WorkstreamServiceConfig,
+    ActiveWorkstream, PassiveWorkstream, WorkstreamEvent, WorkstreamId, WorkstreamInfo,
+    WorkstreamService, WorkstreamServiceConfig, WorkstreamStatus,
 };

@@ -167,7 +167,7 @@ impl ActiveWorkstream {
     pub async fn to_info(&self) -> WorkstreamInfo {
         let client_count = *self.connected_clients.read().await;
         let last_activity = *self.last_activity.read().await;
-        
+
         WorkstreamInfo {
             id: self.id(),
             name: self.passive.branch.clone(),

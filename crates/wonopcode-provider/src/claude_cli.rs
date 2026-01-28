@@ -201,11 +201,14 @@ impl ClaudeCliProvider {
     }
 
     /// Create a new CLI provider with a specific working directory.
-    pub fn with_working_directory(model: ModelInfo, working_directory: PathBuf) -> ProviderResult<Self> {
+    pub fn with_working_directory(
+        model: ModelInfo,
+        working_directory: PathBuf,
+    ) -> ProviderResult<Self> {
         Self::check_cli_available()?;
 
         info!(
-            model = %model.id, 
+            model = %model.id,
             working_directory = %working_directory.display(),
             "Created Claude CLI provider with working directory"
         );
@@ -768,13 +771,14 @@ impl LanguageModel for ClaudeCliProvider {
         cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        
+
         // Set working directory if configured
         if let Some(ref workdir) = self.working_directory {
             cmd.current_dir(workdir);
         }
-        
-        let mut child = cmd.spawn()
+
+        let mut child = cmd
+            .spawn()
             .map_err(|e| ProviderError::internal(format!("Failed to spawn Claude CLI: {e}")))?;
 
         let stdout = child

@@ -97,17 +97,11 @@ pub enum WorkstreamEvent {
         info: WorkstreamInfo,
     },
     /// A workstream was activated.
-    Activated {
-        workstream_id: WorkstreamId,
-    },
+    Activated { workstream_id: WorkstreamId },
     /// A workstream was deactivated.
-    Deactivated {
-        workstream_id: WorkstreamId,
-    },
+    Deactivated { workstream_id: WorkstreamId },
     /// A workstream was removed.
-    Removed {
-        workstream_id: WorkstreamId,
-    },
+    Removed { workstream_id: WorkstreamId },
     /// A workstream's status changed.
     StatusChanged {
         workstream_id: WorkstreamId,
@@ -178,7 +172,7 @@ mod tests {
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("status_changed"));
-        
+
         let parsed: WorkstreamEvent = serde_json::from_str(&json).unwrap();
         if let WorkstreamEvent::StatusChanged { workstream_id, .. } = parsed {
             assert_eq!(workstream_id.as_str(), "test");

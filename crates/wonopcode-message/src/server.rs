@@ -1,10 +1,10 @@
 //! Server-to-client message types.
 
-use serde::{Deserialize, Serialize};
 use crate::info::*;
 use crate::state::AgentState;
-use crate::workstream::{WorkstreamId, WorkstreamInfo, WorkstreamEvent};
+use crate::workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo};
 use crate::{generate_message_id, timestamp_millis};
+use serde::{Deserialize, Serialize};
 
 /// Server-to-client message envelope.
 ///
@@ -42,7 +42,11 @@ impl ServerMessage {
     }
 
     /// Create a reply to a specific client message.
-    pub fn reply_to(message_id: String, workstream_id: WorkstreamId, payload: ServerPayload) -> Self {
+    pub fn reply_to(
+        message_id: String,
+        workstream_id: WorkstreamId,
+        payload: ServerPayload,
+    ) -> Self {
         Self {
             id: message_id,
             workstream_id,
@@ -71,20 +75,19 @@ impl ServerMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerPayload {
     // === Agent Updates ===
-    
     /// Processing started.
     Started,
-    
+
     /// Text delta from streaming response.
     TextDelta { delta: String },
-    
+
     /// Tool call started.
     ToolStarted {
         id: String,
         name: String,
         input: String,
     },
-    
+
     /// Tool call completed.
     ToolCompleted {
         id: String,
@@ -93,18 +96,17 @@ pub enum ServerPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<serde_json::Value>,
     },
-    
+
     /// Response completed.
     Completed { text: String },
-    
+
     /// Error occurred.
     Error { error: String },
-    
+
     /// Status message.
     Status { message: String },
 
     // === State Updates ===
-    
     /// Token usage update.
     TokenUsage {
         input: u32,
@@ -112,31 +114,31 @@ pub enum ServerPayload {
         cost: f64,
         context_limit: u32,
     },
-    
+
     /// Model info update.
     ModelInfo { context_limit: u32 },
-    
+
     /// Session list update.
     Sessions { sessions: Vec<SessionInfo> },
-    
+
     /// Todos updated.
     TodosUpdated {
         phases: Vec<PhaseInfo>,
         todos: Vec<TodoInfo>,
     },
-    
+
     /// LSP servers updated.
     LspUpdated { servers: Vec<LspInfo> },
-    
+
     /// MCP servers updated.
     McpUpdated { servers: Vec<McpInfo> },
-    
+
     /// Modified files updated.
     ModifiedFilesUpdated { files: Vec<ModifiedFileInfo> },
-    
+
     /// Permission pending count.
     PermissionsPending { count: usize },
-    
+
     /// Sandbox status updated.
     SandboxUpdated {
         state: String,
@@ -145,13 +147,13 @@ pub enum ServerPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    
+
     /// System message to display.
     SystemMessage { message: String },
-    
+
     /// Agent mode changed.
     AgentChanged { agent: String },
-    
+
     /// Permission request from the agent.
     PermissionRequest {
         id: String,
@@ -161,53 +163,51 @@ pub enum ServerPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },
-    
+
     /// Full state synchronization.
     State(Box<AgentState>),
 
     // === Workstream Updates (Pro Edition) ===
-    
     /// List of available workstreams.
     WorkstreamList { workstreams: Vec<WorkstreamInfo> },
-    
+
     /// A new workstream was created.
     WorkstreamCreated { info: WorkstreamInfo },
-    
+
     /// Connected to a workstream.
     WorkstreamConnected { info: WorkstreamInfo },
-    
+
     /// Disconnected from a workstream.
     WorkstreamDisconnected,
-    
+
     /// A workstream was removed.
     WorkstreamRemoved,
-    
+
     /// A workstream was activated.
     WorkstreamActivated { info: WorkstreamInfo },
-    
+
     /// A workstream was deactivated.
     WorkstreamDeactivated,
-    
+
     /// A worktree was created.
     WorktreeCreated { info: WorkstreamInfo },
-    
+
     /// A worktree was deleted.
     WorktreeDeleted,
-    
+
     /// Workstreams were refreshed.
     WorkstreamsRefreshed { count: usize },
-    
+
     /// Workstream lifecycle event.
     WorkstreamEvent { event: WorkstreamEvent },
-    
+
     /// Conversation history for a workstream.
     ConversationHistory { messages: Vec<ConversationMessage> },
 
     // === Control Updates ===
-    
     /// Pong response to ping.
     Pong,
-    
+
     /// Server status update.
     ServerStatus {
         workstream_count: usize,
@@ -294,10 +294,7 @@ mod tests {
 
     #[test]
     fn server_message_new() {
-        let msg = ServerMessage::new(
-            WorkstreamId::default(),
-            ServerPayload::Started,
-        );
+        let msg = ServerMessage::new(WorkstreamId::default(), ServerPayload::Started);
         assert!(!msg.id.is_empty());
         assert!(msg.workstream_id.is_default());
         assert!(msg.timestamp > 0);
@@ -306,10 +303,8 @@ mod tests {
 
     #[test]
     fn server_message_with_offset() {
-        let msg = ServerMessage::new(
-            WorkstreamId::default(),
-            ServerPayload::Started,
-        ).with_offset(42);
+        let msg =
+            ServerMessage::new(WorkstreamId::default(), ServerPayload::Started).with_offset(42);
         assert_eq!(msg.offset, 42);
     }
 
@@ -371,7 +366,10 @@ mod tests {
 
     #[test]
     fn workstream_updates_identification() {
-        assert!(ServerPayload::WorkstreamList { workstreams: vec![] }.is_workstream_update());
+        assert!(ServerPayload::WorkstreamList {
+            workstreams: vec![]
+        }
+        .is_workstream_update());
         assert!(ServerPayload::WorkstreamConnected {
             info: WorkstreamInfo {
                 id: WorkstreamId::default(),
@@ -382,7 +380,8 @@ mod tests {
                 is_active: true,
                 client_count: 1,
             }
-        }.is_workstream_update());
+        }
+        .is_workstream_update());
         assert!(!ServerPayload::Started.is_workstream_update());
     }
 
@@ -401,29 +400,63 @@ mod tests {
         let payloads = vec![
             ServerPayload::Started,
             ServerPayload::TextDelta { delta: "".into() },
-            ServerPayload::ToolStarted { id: "".into(), name: "".into(), input: "".into() },
-            ServerPayload::ToolCompleted { id: "".into(), success: true, output: "".into(), metadata: None },
+            ServerPayload::ToolStarted {
+                id: "".into(),
+                name: "".into(),
+                input: "".into(),
+            },
+            ServerPayload::ToolCompleted {
+                id: "".into(),
+                success: true,
+                output: "".into(),
+                metadata: None,
+            },
             ServerPayload::Completed { text: "".into() },
             ServerPayload::Error { error: "".into() },
             ServerPayload::Status { message: "".into() },
-            ServerPayload::TokenUsage { input: 0, output: 0, cost: 0.0, context_limit: 0 },
+            ServerPayload::TokenUsage {
+                input: 0,
+                output: 0,
+                cost: 0.0,
+                context_limit: 0,
+            },
             ServerPayload::ModelInfo { context_limit: 0 },
             ServerPayload::Sessions { sessions: vec![] },
-            ServerPayload::TodosUpdated { phases: vec![], todos: vec![] },
+            ServerPayload::TodosUpdated {
+                phases: vec![],
+                todos: vec![],
+            },
             ServerPayload::LspUpdated { servers: vec![] },
             ServerPayload::McpUpdated { servers: vec![] },
             ServerPayload::ModifiedFilesUpdated { files: vec![] },
             ServerPayload::PermissionsPending { count: 0 },
-            ServerPayload::SandboxUpdated { state: "".into(), runtime_type: None, error: None },
+            ServerPayload::SandboxUpdated {
+                state: "".into(),
+                runtime_type: None,
+                error: None,
+            },
             ServerPayload::SystemMessage { message: "".into() },
             ServerPayload::AgentChanged { agent: "".into() },
-            ServerPayload::PermissionRequest { id: "".into(), tool: "".into(), action: "".into(), description: "".into(), path: None },
+            ServerPayload::PermissionRequest {
+                id: "".into(),
+                tool: "".into(),
+                action: "".into(),
+                description: "".into(),
+                path: None,
+            },
             ServerPayload::Pong,
-            ServerPayload::ServerStatus { workstream_count: 0, uptime_secs: 0 },
+            ServerPayload::ServerStatus {
+                workstream_count: 0,
+                uptime_secs: 0,
+            },
         ];
 
         let event_types: HashSet<_> = payloads.iter().map(|p| p.event_type()).collect();
-        assert_eq!(event_types.len(), payloads.len(), "Some payloads share the same event_type");
+        assert_eq!(
+            event_types.len(),
+            payloads.len(),
+            "Some payloads share the same event_type"
+        );
     }
 
     #[test]
@@ -433,7 +466,8 @@ mod tests {
             ServerPayload::TextDelta {
                 delta: "Test delta".to_string(),
             },
-        ).with_offset(100);
+        )
+        .with_offset(100);
 
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ServerMessage = serde_json::from_str(&json).unwrap();

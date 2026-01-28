@@ -206,7 +206,10 @@ impl AgentServer {
             ClientPayload::RequestState => {
                 debug!("Received state request, sending current state");
                 let state = self.current_state.read().await.clone();
-                if let Err(e) = self.send_update(ServerPayload::State(Box::new(state))).await {
+                if let Err(e) = self
+                    .send_update(ServerPayload::State(Box::new(state)))
+                    .await
+                {
                     warn!("Failed to send state: {}", e);
                 }
                 return;
@@ -312,7 +315,10 @@ impl AgentServer {
             }
             ClientPayload::RequestState => {
                 let state = self.current_state.read().await.clone();
-                if let Err(e) = self.send_update(ServerPayload::State(Box::new(state))).await {
+                if let Err(e) = self
+                    .send_update(ServerPayload::State(Box::new(state)))
+                    .await
+                {
                     warn!("Failed to send state: {}", e);
                 }
                 return;
@@ -363,24 +369,24 @@ pub fn client_payload_to_app_action(payload: &ClientPayload) -> Option<wonopcode
         ClientPayload::SwitchSession { session_id } => {
             Some(wonopcode_tui::AppAction::SwitchSession(session_id.clone()))
         }
-        ClientPayload::RenameSession { title } => {
-            Some(wonopcode_tui::AppAction::RenameSession { title: title.clone() })
-        }
-        ClientPayload::ForkSession { message_id } => {
-            Some(wonopcode_tui::AppAction::ForkSession { message_id: message_id.clone() })
-        }
+        ClientPayload::RenameSession { title } => Some(wonopcode_tui::AppAction::RenameSession {
+            title: title.clone(),
+        }),
+        ClientPayload::ForkSession { message_id } => Some(wonopcode_tui::AppAction::ForkSession {
+            message_id: message_id.clone(),
+        }),
         ClientPayload::ShareSession => Some(wonopcode_tui::AppAction::ShareSession),
         ClientPayload::UnshareSession => Some(wonopcode_tui::AppAction::UnshareSession),
         ClientPayload::Undo => Some(wonopcode_tui::AppAction::Undo),
         ClientPayload::Redo => Some(wonopcode_tui::AppAction::Redo),
-        ClientPayload::Revert { message_id } => {
-            Some(wonopcode_tui::AppAction::Revert { message_id: message_id.clone() })
-        }
+        ClientPayload::Revert { message_id } => Some(wonopcode_tui::AppAction::Revert {
+            message_id: message_id.clone(),
+        }),
         ClientPayload::Unrevert => Some(wonopcode_tui::AppAction::Unrevert),
         ClientPayload::Compact => Some(wonopcode_tui::AppAction::Compact),
-        ClientPayload::GotoMessage { message_id } => {
-            Some(wonopcode_tui::AppAction::GotoMessage { message_id: message_id.clone() })
-        }
+        ClientPayload::GotoMessage { message_id } => Some(wonopcode_tui::AppAction::GotoMessage {
+            message_id: message_id.clone(),
+        }),
         ClientPayload::SandboxStart => Some(wonopcode_tui::AppAction::SandboxStart),
         ClientPayload::SandboxStop => Some(wonopcode_tui::AppAction::SandboxStop),
         ClientPayload::SandboxRestart => Some(wonopcode_tui::AppAction::SandboxRestart),
@@ -396,7 +402,9 @@ pub fn client_payload_to_app_action(payload: &ClientPayload) -> Option<wonopcode
                 wonopcode_message::SaveScope::Project => wonopcode_tui::SaveScope::Project,
                 wonopcode_message::SaveScope::Global => wonopcode_tui::SaveScope::Global,
             };
-            if let Ok(parsed_config) = serde_json::from_value::<wonopcode_core::config::Config>(config.clone()) {
+            if let Ok(parsed_config) =
+                serde_json::from_value::<wonopcode_core::config::Config>(config.clone())
+            {
                 Some(wonopcode_tui::AppAction::SaveSettings {
                     scope: app_scope,
                     config: Box::new(parsed_config),
@@ -455,9 +463,9 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             output: output.clone(),
             metadata: metadata.clone(),
         },
-        wonopcode_tui::AppUpdate::Completed { text } => ServerPayload::Completed {
-            text: text.clone(),
-        },
+        wonopcode_tui::AppUpdate::Completed { text } => {
+            ServerPayload::Completed { text: text.clone() }
+        }
         wonopcode_tui::AppUpdate::Error(error) => ServerPayload::Error {
             error: error.clone(),
         },
@@ -488,39 +496,37 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                 })
                 .collect(),
         },
-        wonopcode_tui::AppUpdate::TodosUpdated { phases, todos } => {
-            ServerPayload::TodosUpdated {
-                phases: phases
-                    .iter()
-                    .map(|p| wonopcode_message::PhaseInfo {
-                        id: p.id.clone(),
-                        name: p.name.clone(),
-                        status: p.status.clone(),
-                        todos: p
-                            .todos
-                            .iter()
-                            .map(|t| wonopcode_message::TodoInfo {
-                                id: t.id.clone(),
-                                content: t.content.clone(),
-                                status: t.status.clone(),
-                                priority: t.priority.clone(),
-                                phase_id: t.phase_id.clone(),
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-                todos: todos
-                    .iter()
-                    .map(|t| wonopcode_message::TodoInfo {
-                        id: t.id.clone(),
-                        content: t.content.clone(),
-                        status: t.status.clone(),
-                        priority: t.priority.clone(),
-                        phase_id: t.phase_id.clone(),
-                    })
-                    .collect(),
-            }
-        }
+        wonopcode_tui::AppUpdate::TodosUpdated { phases, todos } => ServerPayload::TodosUpdated {
+            phases: phases
+                .iter()
+                .map(|p| wonopcode_message::PhaseInfo {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    status: p.status.clone(),
+                    todos: p
+                        .todos
+                        .iter()
+                        .map(|t| wonopcode_message::TodoInfo {
+                            id: t.id.clone(),
+                            content: t.content.clone(),
+                            status: t.status.clone(),
+                            priority: t.priority.clone(),
+                            phase_id: t.phase_id.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            todos: todos
+                .iter()
+                .map(|t| wonopcode_message::TodoInfo {
+                    id: t.id.clone(),
+                    content: t.content.clone(),
+                    status: t.status.clone(),
+                    priority: t.priority.clone(),
+                    phase_id: t.phase_id.clone(),
+                })
+                .collect(),
+        },
         wonopcode_tui::AppUpdate::LspUpdated(servers) => ServerPayload::LspUpdated {
             servers: servers
                 .iter()
@@ -584,9 +590,13 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
         },
         wonopcode_tui::AppUpdate::GitOperationResult { success, message } => {
             if *success {
-                ServerPayload::Status { message: message.clone() }
+                ServerPayload::Status {
+                    message: message.clone(),
+                }
             } else {
-                ServerPayload::Error { error: message.clone() }
+                ServerPayload::Error {
+                    error: message.clone(),
+                }
             }
         }
         // Session loaded - convert to Status for now
@@ -604,33 +614,25 @@ pub fn client_payload_to_legacy_action(
     payload: &ClientPayload,
 ) -> Option<wonopcode_protocol::Action> {
     match payload {
-        ClientPayload::SendPrompt { prompt } => {
-            Some(wonopcode_protocol::Action::SendPrompt {
-                prompt: prompt.clone(),
-            })
-        }
+        ClientPayload::SendPrompt { prompt } => Some(wonopcode_protocol::Action::SendPrompt {
+            prompt: prompt.clone(),
+        }),
         ClientPayload::Cancel => Some(wonopcode_protocol::Action::Cancel),
-        ClientPayload::ChangeModel { model } => {
-            Some(wonopcode_protocol::Action::ChangeModel {
-                model: model.clone(),
-            })
-        }
-        ClientPayload::ChangeAgent { agent } => {
-            Some(wonopcode_protocol::Action::ChangeAgent {
-                agent: agent.clone(),
-            })
-        }
+        ClientPayload::ChangeModel { model } => Some(wonopcode_protocol::Action::ChangeModel {
+            model: model.clone(),
+        }),
+        ClientPayload::ChangeAgent { agent } => Some(wonopcode_protocol::Action::ChangeAgent {
+            agent: agent.clone(),
+        }),
         ClientPayload::NewSession => Some(wonopcode_protocol::Action::NewSession),
         ClientPayload::SwitchSession { session_id } => {
             Some(wonopcode_protocol::Action::SwitchSession {
                 session_id: session_id.clone(),
             })
         }
-        ClientPayload::RenameSession { title } => {
-            Some(wonopcode_protocol::Action::RenameSession {
-                title: title.clone(),
-            })
-        }
+        ClientPayload::RenameSession { title } => Some(wonopcode_protocol::Action::RenameSession {
+            title: title.clone(),
+        }),
         ClientPayload::ForkSession { message_id } => {
             Some(wonopcode_protocol::Action::ForkSession {
                 message_id: message_id.clone(),
@@ -653,13 +655,11 @@ pub fn client_payload_to_legacy_action(
         ClientPayload::SandboxStart => Some(wonopcode_protocol::Action::SandboxStart),
         ClientPayload::SandboxStop => Some(wonopcode_protocol::Action::SandboxStop),
         ClientPayload::SandboxRestart => Some(wonopcode_protocol::Action::SandboxRestart),
-        ClientPayload::McpToggle { name } => Some(wonopcode_protocol::Action::McpToggle {
-            name: name.clone(),
-        }),
+        ClientPayload::McpToggle { name } => {
+            Some(wonopcode_protocol::Action::McpToggle { name: name.clone() })
+        }
         ClientPayload::McpReconnect { name } => {
-            Some(wonopcode_protocol::Action::McpReconnect {
-                name: name.clone(),
-            })
+            Some(wonopcode_protocol::Action::McpReconnect { name: name.clone() })
         }
         ClientPayload::SaveSettings { scope, config } => {
             let legacy_scope = match scope {
@@ -720,9 +720,9 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             output: output.clone(),
             metadata: metadata.clone(),
         },
-        wonopcode_protocol::Update::Completed { text } => ServerPayload::Completed {
-            text: text.clone(),
-        },
+        wonopcode_protocol::Update::Completed { text } => {
+            ServerPayload::Completed { text: text.clone() }
+        }
         wonopcode_protocol::Update::Error { error } => ServerPayload::Error {
             error: error.clone(),
         },
@@ -753,39 +753,37 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
                 })
                 .collect(),
         },
-        wonopcode_protocol::Update::TodosUpdated { phases, todos } => {
-            ServerPayload::TodosUpdated {
-                phases: phases
-                    .iter()
-                    .map(|p| wonopcode_message::PhaseInfo {
-                        id: p.id.clone(),
-                        name: p.name.clone(),
-                        status: p.status.clone(),
-                        todos: p
-                            .todos
-                            .iter()
-                            .map(|t| wonopcode_message::TodoInfo {
-                                id: t.id.clone(),
-                                content: t.content.clone(),
-                                status: t.status.clone(),
-                                priority: t.priority.clone(),
-                                phase_id: None,
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-                todos: todos
-                    .iter()
-                    .map(|t| wonopcode_message::TodoInfo {
-                        id: t.id.clone(),
-                        content: t.content.clone(),
-                        status: t.status.clone(),
-                        priority: t.priority.clone(),
-                        phase_id: None,
-                    })
-                    .collect(),
-            }
-        }
+        wonopcode_protocol::Update::TodosUpdated { phases, todos } => ServerPayload::TodosUpdated {
+            phases: phases
+                .iter()
+                .map(|p| wonopcode_message::PhaseInfo {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    status: p.status.clone(),
+                    todos: p
+                        .todos
+                        .iter()
+                        .map(|t| wonopcode_message::TodoInfo {
+                            id: t.id.clone(),
+                            content: t.content.clone(),
+                            status: t.status.clone(),
+                            priority: t.priority.clone(),
+                            phase_id: None,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            todos: todos
+                .iter()
+                .map(|t| wonopcode_message::TodoInfo {
+                    id: t.id.clone(),
+                    content: t.content.clone(),
+                    status: t.status.clone(),
+                    priority: t.priority.clone(),
+                    phase_id: None,
+                })
+                .collect(),
+        },
         wonopcode_protocol::Update::LspUpdated { servers } => ServerPayload::LspUpdated {
             servers: servers
                 .iter()

@@ -109,7 +109,11 @@ impl EmbeddedIggyConfig {
     }
 
     /// Set authentication credentials.
-    pub fn with_credentials(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn with_credentials(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
         self.username = username.into();
         self.password = password.into();
         self
@@ -128,7 +132,13 @@ impl EmbeddedIggyConfig {
     }
 
     /// Generate TOML configuration for iggy-server.
-    pub fn to_toml(&self, tcp_port: u16, http_port: u16, quic_port: u16, data_path: &str) -> String {
+    pub fn to_toml(
+        &self,
+        tcp_port: u16,
+        http_port: u16,
+        quic_port: u16,
+        data_path: &str,
+    ) -> String {
         let http_enabled = if self.enable_http { "true" } else { "false" };
         let quic_enabled = if self.enable_quic { "true" } else { "false" };
         let web_ui = if self.enable_web_ui { "true" } else { "false" };

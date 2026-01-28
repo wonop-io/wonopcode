@@ -1,8 +1,8 @@
 //! Client-to-server message types.
 
-use serde::{Deserialize, Serialize};
 use crate::workstream::WorkstreamId;
 use crate::{generate_message_id, timestamp_millis};
+use serde::{Deserialize, Serialize};
 
 /// Client-to-server message envelope.
 ///
@@ -60,84 +60,79 @@ impl ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientPayload {
     // === Agent Actions ===
-    
     /// Send a prompt to the agent.
     SendPrompt { prompt: String },
-    
+
     /// Cancel the current operation.
     Cancel,
-    
+
     /// Change the AI model.
     ChangeModel { model: String },
-    
+
     /// Change the agent mode.
     ChangeAgent { agent: String },
 
     // === Session Actions ===
-    
     /// Create a new session.
     NewSession,
-    
+
     /// Switch to a different session.
     SwitchSession { session_id: String },
-    
+
     /// Rename the current session.
     RenameSession { title: String },
-    
+
     /// Fork the session from a specific message.
     ForkSession { message_id: Option<String> },
-    
+
     /// Share the current session.
     ShareSession,
-    
+
     /// Unshare the current session.
     UnshareSession,
-    
+
     /// Undo the last message.
     Undo,
-    
+
     /// Redo an undone message.
     Redo,
-    
+
     /// Revert to a specific message.
     Revert { message_id: String },
-    
+
     /// Cancel a pending revert.
     Unrevert,
-    
+
     /// Compact/summarize the conversation.
     Compact,
-    
+
     /// Go to a specific message.
     GotoMessage { message_id: String },
 
     // === Sandbox Actions ===
-    
     /// Start the sandbox.
     SandboxStart,
-    
+
     /// Stop the sandbox.
     SandboxStop,
-    
+
     /// Restart the sandbox.
     SandboxRestart,
 
     // === MCP Actions ===
-    
     /// Toggle an MCP server on/off.
     McpToggle { name: String },
-    
+
     /// Reconnect to an MCP server.
     McpReconnect { name: String },
 
     // === Settings ===
-    
     /// Save settings to the specified scope.
     SaveSettings {
         scope: SaveScope,
         config: serde_json::Value,
     },
-    
+
     /// Respond to a permission request.
     PermissionResponse {
         request_id: String,
@@ -146,42 +141,40 @@ pub enum ClientPayload {
     },
 
     // === Workstream Actions (Pro Edition) ===
-    
     /// List all available workstreams.
     ListWorkstreams,
-    
+
     /// Create a new git worktree (creates a passive workstream).
     CreateWorktree {
         branch_name: String,
         base_branch: String,
     },
-    
+
     /// Delete a git worktree (must be passive).
     DeleteWorktree,
-    
+
     /// Explicitly activate a passive workstream.
     ActivateWorkstream,
-    
+
     /// Explicitly deactivate an active workstream.
     DeactivateWorkstream,
-    
+
     /// Connect to a workstream (auto-activates if passive).
     ConnectWorkstream,
-    
+
     /// Disconnect from the current workstream.
     DisconnectWorkstream,
-    
+
     /// Refresh the workstream list.
     RefreshWorkstreams,
 
     // === Control Actions ===
-    
     /// Ping for keep-alive.
     Ping,
-    
+
     /// Request full state synchronization.
     RequestState,
-    
+
     /// Request to quit (for graceful shutdown).
     Quit,
 }

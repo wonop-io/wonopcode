@@ -1,7 +1,7 @@
 //! State types for initial sync and full state transfer.
 
-use serde::{Deserialize, Serialize};
 use crate::info::*;
+use serde::{Deserialize, Serialize};
 
 /// Full agent state for initial synchronization.
 ///
@@ -341,9 +341,16 @@ mod tests {
     #[test]
     fn message_segment_types() {
         let segments = vec![
-            MessageSegment::Text { text: "Hello".into() },
-            MessageSegment::Code { language: "rust".into(), code: "fn main() {}".into() },
-            MessageSegment::Thinking { text: "Let me think...".into() },
+            MessageSegment::Text {
+                text: "Hello".into(),
+            },
+            MessageSegment::Code {
+                language: "rust".into(),
+                code: "fn main() {}".into(),
+            },
+            MessageSegment::Thinking {
+                text: "Let me think...".into(),
+            },
             MessageSegment::Tool {
                 tool: ToolCall {
                     id: "tool_1".into(),

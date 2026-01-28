@@ -64,7 +64,8 @@ impl Browser {
         }
 
         // Extract results
-        let result: Vec<ServerInfo> = servers.lock()
+        let result: Vec<ServerInfo> = servers
+            .lock()
             .map(|servers| servers.values().cloned().collect())
             .unwrap_or_else(|e| {
                 warn!(error = %e, "Failed to acquire servers lock for result extraction");
@@ -280,14 +281,16 @@ pub fn build_server_info(
 
 #[allow(dead_code)]
 /// Normalize an IP address - converts 0.0.0.0 to 127.0.0.1.
-/// 
+///
 /// # Panics
-/// 
+///
 /// This function should not panic as "127.0.0.1" is a valid IP address,
 /// but if it does, it indicates a serious system issue.
 pub fn normalize_ip(ip: IpAddr) -> IpAddr {
     if ip.is_unspecified() {
-        "127.0.0.1".parse().expect("Failed to parse localhost IP - this should never happen")
+        "127.0.0.1"
+            .parse()
+            .expect("Failed to parse localhost IP - this should never happen")
     } else {
         ip
     }

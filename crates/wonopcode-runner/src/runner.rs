@@ -15,8 +15,8 @@ use wonopcode_core::bus::{
 use wonopcode_core::config::{McpConfig, McpRemoteConfig, SandboxConfig as CoreSandboxConfig};
 use wonopcode_core::permission::{Decision, PermissionCheck, PermissionManager};
 use wonopcode_core::system_prompt;
-use wonopcode_core::SessionService;
 use wonopcode_core::Instance;
+use wonopcode_core::SessionService;
 use wonopcode_mcp::{McpClient, ServerConfig as McpServerConfig};
 use wonopcode_provider::{
     anthropic::AnthropicProvider,
@@ -615,7 +615,10 @@ impl Runner {
             match svc.load_history().await {
                 Ok(history) => {
                     if !history.is_empty() {
-                        info!(message_count = history.len(), "Loaded conversation history from session");
+                        info!(
+                            message_count = history.len(),
+                            "Loaded conversation history from session"
+                        );
                         let mut runner_history = runner.history.write().await;
                         *runner_history = history;
                     }
@@ -921,7 +924,7 @@ impl Runner {
         update_tx: mpsc::UnboundedSender<AppUpdate>,
     ) {
         let cwd = self.instance.directory().to_path_buf();
-        
+
         info!(
             working_directory = %cwd.display(),
             "Runner started with working directory"
@@ -2173,7 +2176,9 @@ impl Runner {
                     if let Some(ref svc) = self.session_service {
                         let parent_id = self.last_user_message_id.read().await.clone();
                         if let Some(parent_id) = parent_id {
-                            if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                            if let Err(e) =
+                                svc.save_assistant_message(&assistant_msg, &parent_id).await
+                            {
                                 warn!(error = %e, "Failed to persist partial assistant message to session");
                             }
                         }
@@ -2283,7 +2288,9 @@ impl Runner {
                         if let Some(ref svc) = self.session_service {
                             let parent_id = self.last_user_message_id.read().await.clone();
                             if let Some(parent_id) = parent_id {
-                                if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                                if let Err(e) =
+                                    svc.save_assistant_message(&assistant_msg, &parent_id).await
+                                {
                                     warn!(error = %e, "Failed to persist partial assistant message to session");
                                 }
                             }
@@ -3079,7 +3086,9 @@ impl Runner {
                         if let Some(ref svc) = self.session_service {
                             let parent_id = self.last_user_message_id.read().await.clone();
                             if let Some(parent_id) = parent_id {
-                                if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                                if let Err(e) =
+                                    svc.save_assistant_message(&assistant_msg, &parent_id).await
+                                {
                                     warn!(error = %e, "Failed to persist partial assistant message to session");
                                 }
                             }
@@ -3122,7 +3131,8 @@ impl Runner {
                 if let Some(ref svc) = self.session_service {
                     let parent_id = self.last_user_message_id.read().await.clone();
                     if let Some(parent_id) = parent_id {
-                        if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await {
+                        if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await
+                        {
                             warn!(error = %e, "Failed to persist assistant message to session");
                         } else {
                             debug!("Persisted assistant message to session");

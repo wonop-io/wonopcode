@@ -657,7 +657,12 @@ async fn run_basic_mode(
 
     // Create runner with shared permission manager and session service for history persistence
     let session_service = std::sync::Arc::new(
-        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+        wonopcode_core::SessionService::from_instance(
+            &instance,
+            &config.model_id,
+            &config.provider,
+        )
+        .await,
     );
     let runner = match Runner::new_with_shared(
         config.clone(),
@@ -828,7 +833,12 @@ async fn run_tui_mode(
     // Create runner with shared Bus and PermissionManager
     // This allows MCP tools to send permission requests to the TUI for user prompts
     let session_service_web = std::sync::Arc::new(
-        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+        wonopcode_core::SessionService::from_instance(
+            &instance,
+            &config.model_id,
+            &config.provider,
+        )
+        .await,
     );
     let runner = match Runner::new_with_shared(
         config,
@@ -1186,7 +1196,12 @@ async fn run_headless(
 
     // Create runner with shared bus and permission manager
     let session_service_headless = std::sync::Arc::new(
-        wonopcode_core::SessionService::from_instance(&instance, &config.model_id, &config.provider).await
+        wonopcode_core::SessionService::from_instance(
+            &instance,
+            &config.model_id,
+            &config.provider,
+        )
+        .await,
     );
     let runner = match Runner::new_with_shared(
         config,

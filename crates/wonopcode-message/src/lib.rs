@@ -41,7 +41,7 @@ pub use client::{ClientMessage, ClientPayload, SaveScope};
 pub use info::*;
 pub use server::{ServerMessage, ServerPayload};
 pub use state::*;
-pub use workstream::{WorkstreamId, WorkstreamInfo, WorkstreamStatus, WorkstreamEvent};
+pub use workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo, WorkstreamStatus};
 
 /// Re-export common types for convenience.
 pub mod prelude {
@@ -49,7 +49,7 @@ pub mod prelude {
     pub use crate::info::*;
     pub use crate::server::{ServerMessage, ServerPayload};
     pub use crate::state::*;
-    pub use crate::workstream::{WorkstreamId, WorkstreamInfo, WorkstreamStatus, WorkstreamEvent};
+    pub use crate::workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo, WorkstreamStatus};
 }
 
 /// Error types for message handling.

@@ -241,7 +241,9 @@ impl WorkstreamService {
             .insert(id.clone(), active.clone());
 
         // Emit activation event
-        let _ = self.event_tx.send(WorkstreamEvent::Activated { id: id.clone() });
+        let _ = self
+            .event_tx
+            .send(WorkstreamEvent::Activated { id: id.clone() });
 
         info!(id = %id, "Workstream activated");
 
@@ -274,7 +276,9 @@ impl WorkstreamService {
         self.active_workstreams.write().await.remove(id);
 
         // Emit deactivation event
-        let _ = self.event_tx.send(WorkstreamEvent::Deactivated { id: id.clone() });
+        let _ = self
+            .event_tx
+            .send(WorkstreamEvent::Deactivated { id: id.clone() });
 
         info!(id = %id, "Workstream deactivated");
 
@@ -315,7 +319,9 @@ impl WorkstreamService {
             .insert(id.clone(), passive);
 
         // Emit event
-        let _ = self.event_tx.send(WorkstreamEvent::WorktreeCreated { info });
+        let _ = self
+            .event_tx
+            .send(WorkstreamEvent::WorktreeCreated { info });
 
         Ok(id)
     }
@@ -354,7 +360,9 @@ impl WorkstreamService {
         self.passive_workstreams.write().await.remove(id);
 
         // Emit event
-        let _ = self.event_tx.send(WorkstreamEvent::WorktreeDeleted { id: id.clone() });
+        let _ = self
+            .event_tx
+            .send(WorkstreamEvent::WorktreeDeleted { id: id.clone() });
 
         Ok(())
     }

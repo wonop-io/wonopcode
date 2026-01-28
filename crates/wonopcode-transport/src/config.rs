@@ -99,7 +99,11 @@ impl TransportConfig {
     }
 
     /// Set authentication credentials.
-    pub fn with_credentials(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn with_credentials(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
         self.username = username.into();
         self.password = password.into();
         self
