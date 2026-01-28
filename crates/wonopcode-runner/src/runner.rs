@@ -3344,13 +3344,13 @@ impl Runner {
             let id = tool.id().to_string();
             let base_name = if let Some(pos) = id.rfind('_') {
                 id[..pos].to_string()
-            } else if id.starts_with("mcp_") {
-                id[4..].to_string()
+            } else if let Some(stripped) = id.strip_prefix("mcp_") {
+                stripped.to_string()
             } else {
                 id.clone()
             };
             
-            tool_groups.entry(base_name).or_insert_with(Vec::new).push(id);
+            tool_groups.entry(base_name).or_default().push(id);
         }
 
         // Show duplicates first if any
