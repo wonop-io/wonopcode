@@ -18,6 +18,9 @@ wonopcode-tools.workspace = true
 wonopcode-auth.workspace = true
 wonopcode-protocol.workspace = true
 wonopcode-mcp.workspace = true
+wonopcode-message.workspace = true
+wonopcode-transport.workspace = true
+wonopcode-tui.workspace = true
 
 glob.workspace = true
 dirs.workspace = true

@@ -14,6 +14,8 @@ description = "Terminal UI for wonopcode"
 wonopcode-util.workspace = true
 wonopcode-core.workspace = true
 wonopcode-protocol.workspace = true
+wonopcode-message.workspace = true
+wonopcode-transport.workspace = true
 wonopcode-tui-core.workspace = true
 wonopcode-tui-render.workspace = true
 wonopcode-tui-widgets.workspace = true
@@ -38,6 +40,7 @@ arboard.workspace = true
 ignore.workspace = true
 once_cell.workspace = true
 chrono.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

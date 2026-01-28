@@ -20,6 +20,8 @@ default = ["discover"]
 github = []
 # mDNS service discovery (requires Bonjour SDK on Windows, libavahi on Linux)
 discover = ["dep:wonopcode-discover"]
+# Apache Iggy transport (experimental)
+iggy = ["dep:wonopcode-message", "dep:wonopcode-transport", "dep:wonopcode-iggy-embedded"]
 
 [dependencies]
 wonopcode-util.workspace = true
@@ -37,6 +39,9 @@ wonopcode-acp.workspace = true
 wonopcode-protocol.workspace = true
 wonopcode-runner.workspace = true
 wonopcode-discover = { workspace = true, optional = true }
+wonopcode-message = { workspace = true, optional = true }
+wonopcode-transport = { workspace = true, optional = true }
+wonopcode-iggy-embedded = { workspace = true, optional = true }
 
 thiserror.workspace = true
 anyhow.workspace = true

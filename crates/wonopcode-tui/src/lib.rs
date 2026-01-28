@@ -44,7 +44,7 @@ pub use app::{
     ModifiedFileUpdate, PermissionRequestUpdate, PhaseUpdate, Route, SandboxStatusUpdate,
     SaveScope, TerminalGuard, TodoUpdate,
 };
-pub use backend::{Backend, BackendError, BackendResult, LocalBackend, RemoteBackend};
+pub use backend::{Backend, BackendError, BackendResult, IggyBackend, LocalBackend, RemoteBackend};
 pub use widgets::{
     highlight_code, highlight_diff, is_diff, render_markdown, render_markdown_with_width,
     CommandPalette, ContextInfo, DialogItem, DiffHunk, DiffLine, DiffWidget, DisplayMessage,

@@ -744,3 +744,399 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
         }),
     }
 }
+
+// ============================================================================
+// IggyBackend - Apache Iggy-based transport for client-server communication
+// ============================================================================
+
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use wonopcode_message::{ClientMessage, ClientPayload, ServerPayload, WorkstreamId};
+use wonopcode_transport::{Transport, TransportConfig};
+
+/// Iggy-based backend for TUI communication via Apache Iggy message streaming.
+///
+/// This backend connects to an Iggy server and communicates with the agent
+/// server through message topics. It supports:
+/// - Reliable message delivery with persistence
+/// - Offset-based replay for reconnecting clients
+/// - Workstream routing for Pro edition
+pub struct IggyBackend {
+    /// The transport layer for Iggy communication.
+    transport: Arc<Transport>,
+    /// The workstream to communicate with (default for Community Edition).
+    workstream_id: WorkstreamId,
+    /// Update sender for forwarding server messages to the TUI.
+    update_tx: Option<mpsc::UnboundedSender<AppUpdate>>,
+    /// Last seen message offset for replay on reconnect.
+    last_offset: Arc<RwLock<u64>>,
+    /// Consumer ID for this client.
+    consumer_id: String,
+}
+
+impl IggyBackend {
+    /// Create a new Iggy backend connecting to the specified server.
+    ///
+    /// # Arguments
+    /// * `iggy_address` - The Iggy server address (e.g., "127.0.0.1:8090")
+    /// * `workstream_id` - Optional workstream ID (defaults to "default")
+    pub async fn connect(
+        iggy_address: &str,
+        workstream_id: Option<WorkstreamId>,
+    ) -> BackendResult<Self> {
+        let config = TransportConfig {
+            server_address: iggy_address.to_string(),
+            auto_create: false, // Server should create infrastructure
+            ..Default::default()
+        };
+
+        let transport = Transport::connect(config)
+            .await
+            .map_err(|e| BackendError::ConnectionFailed(e.to_string()))?;
+
+        let consumer_id = format!("tui-client-{}", uuid::Uuid::new_v4());
+
+        Ok(Self {
+            transport: Arc::new(transport),
+            workstream_id: workstream_id.unwrap_or_default(),
+            update_tx: None,
+            last_offset: Arc::new(RwLock::new(0)),
+            consumer_id,
+        })
+    }
+
+    /// Subscribe to server messages and forward them to the given sender.
+    ///
+    /// This spawns a background task that receives server messages from Iggy
+    /// and converts them to AppUpdate messages for the TUI.
+    pub fn subscribe_updates(
+        &mut self,
+        update_tx: mpsc::UnboundedSender<AppUpdate>,
+    ) -> tokio::task::JoinHandle<()> {
+        self.update_tx = Some(update_tx.clone());
+
+        let transport = Arc::clone(&self.transport);
+        let workstream_id = self.workstream_id.clone();
+        let last_offset = Arc::clone(&self.last_offset);
+        let consumer_id = self.consumer_id.clone();
+
+        tokio::spawn(async move {
+            // Get current offset for replay
+            let from_offset = {
+                let offset = last_offset.read().await;
+                if *offset > 0 {
+                    Some(*offset)
+                } else {
+                    None
+                }
+            };
+
+            // Subscribe to server messages
+            let rx = match transport
+                .subscribe_server_messages(&consumer_id, Some(workstream_id), from_offset)
+                .await
+            {
+                Ok(rx) => rx,
+                Err(e) => {
+                    tracing::error!("Failed to subscribe to server messages: {}", e);
+                    let _ = update_tx.send(AppUpdate::Error(format!(
+                        "Failed to connect to message stream: {}",
+                        e
+                    )));
+                    return;
+                }
+            };
+
+            Self::process_server_messages(rx, update_tx, last_offset).await;
+        })
+    }
+
+    /// Process incoming server messages and convert to AppUpdate.
+    async fn process_server_messages(
+        mut rx: mpsc::UnboundedReceiver<wonopcode_message::ServerMessage>,
+        update_tx: mpsc::UnboundedSender<AppUpdate>,
+        last_offset: Arc<RwLock<u64>>,
+    ) {
+        while let Some(server_msg) = rx.recv().await {
+            // Update last seen offset
+            {
+                let mut offset = last_offset.write().await;
+                if server_msg.offset > *offset {
+                    *offset = server_msg.offset;
+                }
+            }
+
+            // Convert ServerPayload to AppUpdate
+            if let Some(update) = server_payload_to_app_update(server_msg.payload) {
+                if update_tx.send(update).is_err() {
+                    tracing::info!("Update channel closed, stopping message processor");
+                    return;
+                }
+            }
+        }
+
+        tracing::info!("Server message stream ended");
+    }
+
+    /// Set the update sender for direct use.
+    pub fn set_update_sender(&mut self, update_tx: mpsc::UnboundedSender<AppUpdate>) {
+        self.update_tx = Some(update_tx);
+    }
+
+    /// Get the last seen message offset (for reconnection).
+    pub async fn last_offset(&self) -> u64 {
+        *self.last_offset.read().await
+    }
+}
+
+#[async_trait]
+impl Backend for IggyBackend {
+    async fn send_action(&self, action: AppAction) -> BackendResult<()> {
+        // Convert AppAction to ClientPayload
+        let payload = app_action_to_client_payload(action)?;
+
+        // Wrap in ClientMessage envelope
+        let message = ClientMessage::new(self.workstream_id.clone(), payload);
+
+        // Send via transport
+        self.transport
+            .send_client_message(message)
+            .await
+            .map_err(|e| BackendError::RequestFailed(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        self.transport.is_connected()
+    }
+
+    fn backend_type(&self) -> &'static str {
+        "iggy"
+    }
+}
+
+/// Convert AppAction to ClientPayload for Iggy transport.
+fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayload> {
+    Ok(match action {
+        AppAction::SendPrompt(prompt) => ClientPayload::SendPrompt { prompt },
+        AppAction::Cancel => ClientPayload::Cancel,
+        AppAction::Quit => ClientPayload::Quit,
+        AppAction::SwitchSession(session_id) => ClientPayload::SwitchSession { session_id },
+        AppAction::ChangeModel(model) => ClientPayload::ChangeModel { model },
+        AppAction::ChangeAgent(agent) => ClientPayload::ChangeAgent { agent },
+        AppAction::NewSession => ClientPayload::NewSession,
+        AppAction::Undo => ClientPayload::Undo,
+        AppAction::Redo => ClientPayload::Redo,
+        AppAction::Revert { message_id } => ClientPayload::Revert { message_id },
+        AppAction::Unrevert => ClientPayload::Unrevert,
+        AppAction::Compact => ClientPayload::Compact,
+        AppAction::RenameSession { title } => ClientPayload::RenameSession { title },
+        AppAction::McpToggle { name } => ClientPayload::McpToggle { name },
+        AppAction::McpReconnect { name } => ClientPayload::McpReconnect { name },
+        AppAction::ForkSession { message_id } => ClientPayload::ForkSession { message_id },
+        AppAction::ShareSession => ClientPayload::ShareSession,
+        AppAction::UnshareSession => ClientPayload::UnshareSession,
+        AppAction::GotoMessage { message_id } => ClientPayload::GotoMessage { message_id },
+        AppAction::SandboxStart => ClientPayload::SandboxStart,
+        AppAction::SandboxStop => ClientPayload::SandboxStop,
+        AppAction::SandboxRestart => ClientPayload::SandboxRestart,
+        AppAction::SaveSettings { scope, config } => {
+            let message_scope = match scope {
+                crate::SaveScope::Project => wonopcode_message::SaveScope::Project,
+                crate::SaveScope::Global => wonopcode_message::SaveScope::Global,
+            };
+            ClientPayload::SaveSettings {
+                scope: message_scope,
+                config: serde_json::to_value(&*config)
+                    .map_err(|e| BackendError::SerializationError(e.to_string()))?,
+            }
+        }
+        AppAction::PermissionResponse {
+            request_id,
+            allow,
+            remember,
+        } => ClientPayload::PermissionResponse {
+            request_id,
+            allow,
+            remember,
+        },
+        // OpenEditor is handled locally, not sent to server
+        AppAction::OpenEditor { .. } => {
+            return Err(BackendError::RequestFailed(
+                "OpenEditor is not supported for Iggy backend".to_string(),
+            ));
+        }
+        // UpdateTestProviderSettings not in the unified protocol yet
+        AppAction::UpdateTestProviderSettings { .. } => {
+            return Err(BackendError::RequestFailed(
+                "UpdateTestProviderSettings is not yet supported via Iggy".to_string(),
+            ));
+        }
+        // Git operations - not in the unified protocol yet, handle via Ping for now
+        // TODO: Add Git payloads to ClientPayload in wonopcode-message
+        AppAction::GitStatus
+        | AppAction::GitStage { .. }
+        | AppAction::GitUnstage { .. }
+        | AppAction::GitCheckout { .. }
+        | AppAction::GitCommit { .. }
+        | AppAction::GitHistory
+        | AppAction::GitPush
+        | AppAction::GitPull => {
+            return Err(BackendError::RequestFailed(
+                "Git operations are not yet supported via Iggy backend".to_string(),
+            ));
+        }
+    })
+}
+
+/// Convert ServerPayload to AppUpdate for the TUI.
+fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
+    Some(match payload {
+        ServerPayload::Started => AppUpdate::Started,
+        ServerPayload::TextDelta { delta } => AppUpdate::TextDelta(delta),
+        ServerPayload::ToolStarted { id, name, input } => {
+            AppUpdate::ToolStarted { name, id, input }
+        }
+        ServerPayload::ToolCompleted {
+            id,
+            success,
+            output,
+            metadata,
+        } => AppUpdate::ToolCompleted {
+            id,
+            success,
+            output,
+            metadata,
+        },
+        ServerPayload::Completed { text } => AppUpdate::Completed { text },
+        ServerPayload::Error { error } => AppUpdate::Error(error),
+        ServerPayload::Status { message } => AppUpdate::Status(message),
+        ServerPayload::TokenUsage {
+            input,
+            output,
+            cost,
+            context_limit,
+        } => AppUpdate::TokenUsage {
+            input,
+            output,
+            cost,
+            context_limit,
+        },
+        ServerPayload::ModelInfo { context_limit } => AppUpdate::ModelInfo { context_limit },
+        ServerPayload::Sessions { sessions } => AppUpdate::Sessions(
+            sessions
+                .into_iter()
+                .map(|s| (s.id, s.title, s.timestamp))
+                .collect(),
+        ),
+        ServerPayload::TodosUpdated { phases, todos } => AppUpdate::TodosUpdated {
+            phases: phases
+                .into_iter()
+                .map(|p| crate::PhaseUpdate {
+                    id: p.id,
+                    name: p.name,
+                    status: p.status,
+                    todos: p
+                        .todos
+                        .into_iter()
+                        .map(|t| crate::TodoUpdate {
+                            id: t.id,
+                            content: t.content,
+                            status: t.status,
+                            priority: t.priority,
+                            phase_id: t.phase_id,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            todos: todos
+                .into_iter()
+                .map(|t| crate::TodoUpdate {
+                    id: t.id,
+                    content: t.content,
+                    status: t.status,
+                    priority: t.priority,
+                    phase_id: t.phase_id,
+                })
+                .collect(),
+        },
+        ServerPayload::LspUpdated { servers } => AppUpdate::LspUpdated(
+            servers
+                .into_iter()
+                .map(|s| crate::LspStatusUpdate {
+                    id: s.id,
+                    name: s.name,
+                    root: s.root,
+                    connected: s.connected,
+                })
+                .collect(),
+        ),
+        ServerPayload::McpUpdated { servers } => AppUpdate::McpUpdated(
+            servers
+                .into_iter()
+                .map(|s| crate::McpStatusUpdate {
+                    name: s.name,
+                    connected: s.connected,
+                    error: s.error,
+                })
+                .collect(),
+        ),
+        ServerPayload::ModifiedFilesUpdated { files } => AppUpdate::ModifiedFilesUpdated(
+            files
+                .into_iter()
+                .map(|f| crate::ModifiedFileUpdate {
+                    path: f.path,
+                    added: f.added,
+                    removed: f.removed,
+                })
+                .collect(),
+        ),
+        ServerPayload::PermissionsPending { count } => AppUpdate::PermissionsPending(count),
+        ServerPayload::SandboxUpdated {
+            state,
+            runtime_type,
+            error,
+        } => AppUpdate::SandboxUpdated(crate::SandboxStatusUpdate {
+            state,
+            runtime_type,
+            error,
+        }),
+        ServerPayload::SystemMessage { message } => AppUpdate::SystemMessage(message),
+        ServerPayload::AgentChanged { agent } => AppUpdate::AgentChanged(agent),
+        ServerPayload::PermissionRequest {
+            id,
+            tool,
+            action,
+            description,
+            path,
+        } => AppUpdate::PermissionRequest(crate::PermissionRequestUpdate {
+            id,
+            tool,
+            action,
+            description,
+            path,
+        }),
+        // State payload contains full state - convert to session loaded
+        ServerPayload::State(state) => {
+            // For now, just send status - full state handling TBD
+            AppUpdate::Status(format!("State synchronized: {} sessions", state.sessions.len()))
+        }
+        // Workstream payloads - Pro edition only, ignore for now
+        ServerPayload::WorkstreamList { .. }
+        | ServerPayload::WorkstreamCreated { .. }
+        | ServerPayload::WorkstreamConnected { .. }
+        | ServerPayload::WorkstreamDisconnected
+        | ServerPayload::WorkstreamRemoved
+        | ServerPayload::WorkstreamActivated { .. }
+        | ServerPayload::WorkstreamDeactivated
+        | ServerPayload::WorktreeCreated { .. }
+        | ServerPayload::WorktreeDeleted
+        | ServerPayload::WorkstreamsRefreshed { .. }
+        | ServerPayload::WorkstreamEvent { .. }
+        | ServerPayload::ConversationHistory { .. } => return None,
+        // Control payloads
+        ServerPayload::Pong => return None, // Internal ping/pong, don't expose to UI
+        ServerPayload::ServerStatus { .. } => return None, // Internal status
+    })
+}

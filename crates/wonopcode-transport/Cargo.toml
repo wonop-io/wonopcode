@@ -1,0 +1,47 @@
+[package]
+name = "wonopcode-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Transport layer for Wonopcode using Apache Iggy message streaming"
+
+[lints]
+workspace = true
+
+[features]
+default = ["tcp"]
+tcp = []
+quic = []
+
+[dependencies]
+# Workspace crates
+wonopcode-message = { workspace = true }
+
+# Iggy client
+iggy = "0.8"
+iggy_common = "0.8"
+
+# Async runtime
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Utilities
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

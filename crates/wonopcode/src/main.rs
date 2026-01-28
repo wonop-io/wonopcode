@@ -101,6 +101,19 @@ struct Cli {
     #[arg(long, conflicts_with = "connect")]
     discover: bool,
 
+    /// Use Apache Iggy transport for communication (experimental).
+    /// In standalone mode, starts an embedded Iggy server.
+    /// In connect mode, connects to the specified Iggy server.
+    #[cfg(feature = "iggy")]
+    #[arg(long)]
+    iggy: bool,
+
+    /// Iggy server address (default: 127.0.0.1:8090).
+    /// Used with --iggy and --connect to specify the Iggy server address.
+    #[cfg(feature = "iggy")]
+    #[arg(long, default_value = "127.0.0.1:8090")]
+    iggy_address: String,
+
     /// Subcommand
     #[command(subcommand)]
     command: Option<Commands>,
@@ -387,11 +400,19 @@ async fn main() -> anyhow::Result<()> {
             if cli.headless {
                 run_headless(&cwd, cli.address, &cli).await
             } else if let Some(ref address) = cli.connect {
+                #[cfg(feature = "iggy")]
+                if cli.iggy {
+                    return run_connect_iggy(address, &cli.iggy_address, &cli).await;
+                }
                 run_connect(address, &cli).await
             } else {
                 #[cfg(feature = "discover")]
                 if cli.discover {
                     return run_discover(&cli).await;
+                }
+                #[cfg(feature = "iggy")]
+                if cli.iggy {
+                    return run_interactive_iggy(&cwd, cli).await;
                 }
                 // Default behavior: interactive mode
                 run_interactive(&cwd, cli).await
@@ -2260,4 +2281,39 @@ async fn handle_stats(
     stats::display_stats(&stats, tools);
 
     Ok(())
+}
+
+// ============================================================================
+// Iggy-based transport (experimental)
+// ============================================================================
+
+/// Run interactive mode with embedded Iggy server for transport.
+///
+/// NOTE: For interactive mode (TUI + Runner in same process), Iggy transport
+/// is not needed - direct channels are more efficient. This function is kept
+/// for future use cases like:
+/// - Starting a local Iggy server that external clients can connect to
+/// - Testing the Iggy infrastructure locally
+///
+/// For now, this just delegates to the standard interactive mode with a warning.
+#[cfg(feature = "iggy")]
+async fn run_interactive_iggy(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> {
+    warn!("--iggy flag in interactive mode is a no-op (Iggy is for remote communication)");
+    warn!("Using standard interactive mode with direct channels");
+    run_interactive(cwd, cli).await
+}
+
+/// Run in connect mode with Iggy transport.
+///
+/// NOTE: This is a placeholder for future implementation.
+/// The Iggy connect mode requires changes to the TUI architecture to support
+/// the IggyBackend trait. For now, it falls back to the HTTP/SSE connect mode.
+#[cfg(feature = "iggy")]
+async fn run_connect_iggy(
+    http_address: &str,
+    _iggy_address: &str,
+    cli: &Cli,
+) -> anyhow::Result<()> {
+    warn!("Iggy connect mode not yet fully implemented, falling back to HTTP/SSE");
+    run_connect(http_address, cli).await
 }
