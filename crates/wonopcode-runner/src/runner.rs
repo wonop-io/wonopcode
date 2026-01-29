@@ -8,6 +8,9 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+use wonopcode_agent_loop::{
+    BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopUpdate,
+};
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
 };
@@ -18,28 +21,19 @@ use wonopcode_core::Instance;
 use wonopcode_core::SessionService;
 use wonopcode_mcp::{McpClient, ServerConfig as McpServerConfig};
 use wonopcode_provider::{
-    anthropic::AnthropicProvider,
-    claude_cli::ClaudeCliProvider,
-    google::GoogleProvider,
-    model::ModelInfo,
-    openai::OpenAIProvider,
-    openrouter::OpenRouterProvider,
-    BoxedLanguageModel, Message as ProviderMessage, ToolDefinition,
+    anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider, google::GoogleProvider,
+    model::ModelInfo, openai::OpenAIProvider, openrouter::OpenRouterProvider, BoxedLanguageModel,
+    Message as ProviderMessage, ToolDefinition,
 };
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
 use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolRegistry};
 use wonopcode_tui::{
-    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate,
-    McpStatusUpdate, PermissionRequestUpdate, PhaseUpdate, SaveScope,
-    TodoUpdate,
+    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, McpStatusUpdate,
+    PermissionRequestUpdate, PhaseUpdate, SaveScope, TodoUpdate,
 };
 use wonopcode_util::FileTimeState;
-use wonopcode_agent_loop::{
-    BoxedAgentLoop, LoopConfig, LoopContext, LoopUpdate,
-    CompactionConfig as LoopCompactionConfig,
-};
 
 use crate::compaction;
 use crate::compaction::{CompactionConfig, CompactionResult};
@@ -221,14 +215,20 @@ impl Runner {
         shared_bus: Option<Bus>,
         shared_permission_manager: Option<Arc<PermissionManager>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_agent_loop(config, instance, shared_bus, shared_permission_manager, None)
+        Self::new_with_agent_loop(
+            config,
+            instance,
+            shared_bus,
+            shared_permission_manager,
+            None,
+        )
     }
 
     /// Create a new runner with optional shared Bus, PermissionManager, and custom AgentLoop.
-    /// 
+    ///
     /// This is the primary constructor that allows full customization of the agent loop.
     /// If `agent_loop` is None, a default `StandardLoop` is created.
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Runner configuration
     /// * `instance` - Project instance
@@ -282,10 +282,13 @@ impl Runner {
         let file_time = Arc::new(FileTimeState::new());
 
         // Use provided agent loop or create default StandardLoop
-        let agent_loop: BoxedAgentLoop = agent_loop
-            .unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::new()));
-        
-        info!(loop_name = agent_loop.name(), "Runner created with agent loop");
+        let agent_loop: BoxedAgentLoop =
+            agent_loop.unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::new()));
+
+        info!(
+            loop_name = agent_loop.name(),
+            "Runner created with agent loop"
+        );
 
         Ok(Self {
             agent_loop: tokio::sync::Mutex::new(agent_loop),
@@ -373,8 +376,13 @@ impl Runner {
             }
         }
 
-        let mut runner =
-            Self::new_with_agent_loop(config, instance, shared_bus, shared_permission_manager, agent_loop)?;
+        let mut runner = Self::new_with_agent_loop(
+            config,
+            instance,
+            shared_bus,
+            shared_permission_manager,
+            agent_loop,
+        )?;
 
         // Store external server names for status reporting
         runner.external_mcp_server_names = external_server_names;
@@ -854,7 +862,10 @@ impl Runner {
                     debug!("Compaction not needed or insufficient messages");
                 }
                 CompactionResult::Failed(err) => {
-                    warn!("Auto-compaction failed: {}, continuing without compaction", err);
+                    warn!(
+                        "Auto-compaction failed: {}, continuing without compaction",
+                        err
+                    );
                 }
             }
         }
@@ -889,15 +900,29 @@ impl Runner {
                     LoopUpdate::ToolStarted { id, name, input } => {
                         AppUpdate::ToolStarted { id, name, input }
                     }
-                    LoopUpdate::ToolCompleted { id, success, output, metadata } => {
-                        AppUpdate::ToolCompleted { id, success, output, metadata }
-                    }
-                    LoopUpdate::ResponseComplete { text } => {
-                        AppUpdate::Completed { text }
-                    }
-                    LoopUpdate::TokenUsage { input, output, cost, context_limit } => {
-                        AppUpdate::TokenUsage { input, output, cost, context_limit }
-                    }
+                    LoopUpdate::ToolCompleted {
+                        id,
+                        success,
+                        output,
+                        metadata,
+                    } => AppUpdate::ToolCompleted {
+                        id,
+                        success,
+                        output,
+                        metadata,
+                    },
+                    LoopUpdate::ResponseComplete { text } => AppUpdate::Completed { text },
+                    LoopUpdate::TokenUsage {
+                        input,
+                        output,
+                        cost,
+                        context_limit,
+                    } => AppUpdate::TokenUsage {
+                        input,
+                        output,
+                        cost,
+                        context_limit,
+                    },
                     LoopUpdate::Status(status) => AppUpdate::Status(status),
                     LoopUpdate::Error(error) => AppUpdate::Error(error),
                 };
@@ -2070,7 +2095,6 @@ impl Runner {
         }
     }
 
-
     /// Handle git status action.
     async fn handle_git_status(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
         let cwd = self.instance.directory();
@@ -2505,7 +2529,6 @@ impl Runner {
         help
     }
 }
-
 
 /// Create a provider from configuration.
 ///
@@ -3028,7 +3051,6 @@ fn convert_mcp_remote_config(name: &str, config: &McpRemoteConfig) -> McpServerC
     server_config
 }
 
-
 /// Convert core SandboxConfig to wonopcode-sandbox SandboxConfig.
 fn convert_sandbox_config(core_config: &CoreSandboxConfig) -> SandboxConfig {
     use wonopcode_sandbox::{MountConfig, NetworkPolicy, ResourceLimits};
@@ -3089,5 +3111,3 @@ fn convert_sandbox_config(core_config: &CoreSandboxConfig) -> SandboxConfig {
         startup_timeout_secs: 60,
     }
 }
-
-

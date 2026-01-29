@@ -21,6 +21,6 @@ pub use runner::{load_api_key, Runner, RunnerConfig, SandboxRuntimeWrapper};
 
 // Re-export agent loop types for convenience
 pub use wonopcode_agent_loop::{
-    AgentLoop, BoxedAgentLoop, LoopCapabilities, LoopConfig, LoopContext,
-    LoopError, LoopResult, LoopUpdate, StandardLoop,
+    AgentLoop, BoxedAgentLoop, LoopCapabilities, LoopConfig, LoopContext, LoopError, LoopResult,
+    LoopUpdate, StandardLoop,
 };
