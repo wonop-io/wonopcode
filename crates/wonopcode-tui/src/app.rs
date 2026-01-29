@@ -3337,12 +3337,33 @@ async function fetchUserData(userId) {
                 messages,
             } => {
                 // Load a session with its messages (from remote server)
-                tracing::info!(session_id = %id, title = %title, message_count = messages.len(), "Loading session");
-                self.messages.set_messages(messages);
-                self.session_title = title;
-                // Move to session view if we have messages
-                if self.messages.message_count() > 0 {
-                    self.route = Route::Session;
+                let current_count = self.messages.message_count();
+                let incoming_count = messages.len();
+                tracing::info!(
+                    session_id = %id,
+                    title = %title,
+                    incoming_message_count = incoming_count,
+                    current_message_count = current_count,
+                    "Received SessionLoaded"
+                );
+
+                // Protect against stale history from reconnection scenarios:
+                // If we're already in a session with more messages than the incoming history,
+                // don't replace our messages as this is likely stale data from a reconnection.
+                // This prevents the "messages disappear on cancel" issue in Pro mode.
+                if self.route == Route::Session && current_count > incoming_count {
+                    tracing::warn!(
+                        current_count = current_count,
+                        incoming_count = incoming_count,
+                        "Ignoring SessionLoaded with fewer messages than current session (likely stale reconnection data)"
+                    );
+                } else {
+                    self.messages.set_messages(messages);
+                    self.session_title = title;
+                    // Move to session view if we have messages
+                    if self.messages.message_count() > 0 {
+                        self.route = Route::Session;
+                    }
                 }
             }
             AppUpdate::GitStatusUpdated(status) => {

@@ -61,8 +61,8 @@ pub struct McpHttpState {
     pub tools: Arc<HashMap<String, McpServerTool>>,
     /// Active sessions (session_id -> session).
     sessions: Arc<RwLock<HashMap<String, McpSession>>>,
-    /// Tool execution context.
-    pub context: McpToolContext,
+    /// Tool execution context (wrapped in RwLock to allow updates when workstreams switch).
+    context: Arc<RwLock<McpToolContext>>,
     /// Base URL for message endpoint (used in endpoint event).
     pub message_url: String,
     /// Optional API key for authentication.
@@ -94,7 +94,7 @@ impl McpHttpState {
             version: version.into(),
             tools: Arc::new(tools),
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            context,
+            context: Arc::new(RwLock::new(context)),
             message_url: message_url.into(),
             api_key: None,
         }
@@ -113,6 +113,21 @@ impl McpHttpState {
     /// Check if authentication is enabled.
     pub fn has_auth(&self) -> bool {
         self.api_key.is_some()
+    }
+
+    /// Update the working directory for tool execution.
+    ///
+    /// This is called when switching workstreams to ensure tools execute
+    /// in the correct directory.
+    pub async fn update_working_directory(&self, cwd: std::path::PathBuf, root_dir: std::path::PathBuf) {
+        let mut ctx = self.context.write().await;
+        ctx.cwd = cwd;
+        ctx.root_dir = root_dir;
+    }
+
+    /// Get a snapshot of the current context.
+    pub async fn get_context(&self) -> McpToolContext {
+        self.context.read().await.clone()
     }
 
     /// Register a new session.
@@ -261,7 +276,8 @@ impl McpHttpState {
         let args = params
             .arguments
             .unwrap_or(Value::Object(serde_json::Map::new()));
-        let result = tool.executor.execute(args, &self.context).await;
+        let ctx = self.context.read().await.clone();
+        let result = tool.executor.execute(args, &ctx).await;
 
         let tool_result = match result {
             Ok(output) => {
