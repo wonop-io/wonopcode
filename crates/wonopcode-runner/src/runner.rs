@@ -980,7 +980,7 @@ impl Runner {
         let mut ctx = LoopContext {
             cwd,
             messages: &mut messages,
-            provider: &*provider,
+            provider: &provider,
             tools: &self.tools,
             tool_defs,
             cancel: &cancel,
