@@ -22,6 +22,7 @@ wonopcode-snapshot.workspace = true
 wonopcode-sandbox.workspace = true
 wonopcode-mcp.workspace = true
 wonopcode-lsp.workspace = true
+wonopcode-agent-loop.workspace = true
 
 # Async
 tokio.workspace = true

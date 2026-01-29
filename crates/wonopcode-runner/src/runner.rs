@@ -5,7 +5,6 @@ use futures::future::join_all;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -13,7 +12,7 @@ use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
 };
 use wonopcode_core::config::{McpConfig, McpRemoteConfig, SandboxConfig as CoreSandboxConfig};
-use wonopcode_core::permission::{Decision, PermissionCheck, PermissionManager};
+use wonopcode_core::permission::{Decision, PermissionManager};
 use wonopcode_core::system_prompt;
 use wonopcode_core::Instance;
 use wonopcode_core::SessionService;
@@ -25,20 +24,22 @@ use wonopcode_provider::{
     model::ModelInfo,
     openai::OpenAIProvider,
     openrouter::OpenRouterProvider,
-    stream::{FinishReason, StreamChunk},
-    BoxedLanguageModel, GenerateOptions, Message as ProviderMessage, ToolDefinition,
+    BoxedLanguageModel, Message as ProviderMessage, ToolDefinition,
 };
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
-use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, task, todo, ToolRegistry};
+use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolRegistry};
 use wonopcode_tui::{
-    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, LspStatusUpdate,
-    McpStatusUpdate, ModifiedFileUpdate, PermissionRequestUpdate, PhaseUpdate, SaveScope,
+    AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate,
+    McpStatusUpdate, PermissionRequestUpdate, PhaseUpdate, SaveScope,
     TodoUpdate,
 };
-use wonopcode_util::perf;
 use wonopcode_util::FileTimeState;
+use wonopcode_agent_loop::{
+    BoxedAgentLoop, LoopConfig, LoopContext, LoopUpdate,
+    CompactionConfig as LoopCompactionConfig,
+};
 
 use crate::compaction;
 use crate::compaction::{CompactionConfig, CompactionResult};
@@ -97,80 +98,6 @@ fn convert_phased_todos_to_updates(
 /// Wrapper to store `Arc<dyn SandboxRuntime>` as `Arc<dyn Any + Send + Sync>`.
 /// This allows sharing sandbox runtime through permission manager without circular deps.
 pub struct SandboxRuntimeWrapper(pub Arc<dyn SandboxRuntime>);
-
-/// Doom loop detection threshold - number of consecutive identical tool calls to trigger detection.
-const DOOM_LOOP_THRESHOLD: usize = 3;
-
-/// Maximum tool calls to keep in doom loop detector before pruning old ones.
-const DOOM_LOOP_MAX_RECORDS: usize = 100;
-
-/// Maximum messages before triggering automatic compaction (regardless of token count).
-const AUTO_COMPACT_MESSAGE_THRESHOLD: usize = 100;
-
-/// Target message count after automatic compaction.
-const AUTO_COMPACT_TARGET_MESSAGES: usize = 50;
-
-/// Represents a tool call for doom loop tracking.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ToolCallRecord {
-    /// Tool name.
-    name: String,
-    /// JSON-serialized arguments (for comparison).
-    args_json: String,
-}
-
-impl ToolCallRecord {
-    fn new(name: &str, args: &serde_json::Value) -> Self {
-        Self {
-            name: name.to_string(),
-            args_json: serde_json::to_string(args).unwrap_or_default(),
-        }
-    }
-}
-
-/// Doom loop detector tracks recent tool calls and detects repetitive patterns.
-#[derive(Debug, Default)]
-struct DoomLoopDetector {
-    /// Recent tool calls within the current prompt run.
-    recent_calls: Vec<ToolCallRecord>,
-}
-
-impl DoomLoopDetector {
-    /// Create a new doom loop detector.
-    fn new() -> Self {
-        Self {
-            recent_calls: Vec::new(),
-        }
-    }
-
-    /// Reset the detector (e.g., at the start of a new prompt).
-    fn reset(&mut self) {
-        self.recent_calls.clear();
-    }
-
-    /// Record a tool call and check if it triggers doom loop detection.
-    /// Returns true if a doom loop is detected.
-    fn record_and_check(&mut self, name: &str, args: &serde_json::Value) -> bool {
-        let record = ToolCallRecord::new(name, args);
-        self.recent_calls.push(record.clone());
-
-        // Prune old records to prevent unbounded growth
-        if self.recent_calls.len() > DOOM_LOOP_MAX_RECORDS {
-            let drain_count = self.recent_calls.len() - DOOM_LOOP_MAX_RECORDS / 2;
-            self.recent_calls.drain(0..drain_count);
-        }
-
-        // Check if the last N calls are identical
-        if self.recent_calls.len() >= DOOM_LOOP_THRESHOLD {
-            let last_n = &self.recent_calls[self.recent_calls.len() - DOOM_LOOP_THRESHOLD..];
-            if last_n.iter().all(|r| *r == record) {
-                return true;
-            }
-        }
-
-        false
-    }
-}
 
 /// Configuration for the runner.
 #[derive(Debug, Clone)]
@@ -236,6 +163,8 @@ impl Default for RunnerConfig {
 
 /// The runner connects the TUI to the AI.
 pub struct Runner {
+    /// The agent loop implementation that handles prompt execution.
+    agent_loop: tokio::sync::Mutex<BoxedAgentLoop>,
     config: Arc<RwLock<RunnerConfig>>,
     instance: Instance,
     provider: Arc<RwLock<BoxedLanguageModel>>,
@@ -255,8 +184,6 @@ pub struct Runner {
     external_mcp_server_names: Vec<String>,
     /// Unsupported/disabled MCP servers that should be shown in sidebar.
     unsupported_mcp_servers: Vec<(String, String)>, // (name, reason)
-    /// Doom loop detector for preventing infinite tool call loops.
-    doom_loop_detector: RwLock<DoomLoopDetector>,
     /// Permission manager for tool execution control.
     permission_manager: Arc<PermissionManager>,
     /// Event bus for permission and other events.
@@ -274,8 +201,6 @@ pub struct Runner {
     /// Session service for history persistence.
     /// Optional for backward compatibility - if None, uses in-memory only.
     session_service: Option<Arc<SessionService>>,
-    /// Last saved user message ID (for linking assistant responses).
-    last_user_message_id: RwLock<Option<String>>,
 }
 
 impl Runner {
@@ -295,6 +220,27 @@ impl Runner {
         instance: Instance,
         shared_bus: Option<Bus>,
         shared_permission_manager: Option<Arc<PermissionManager>>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_agent_loop(config, instance, shared_bus, shared_permission_manager, None)
+    }
+
+    /// Create a new runner with optional shared Bus, PermissionManager, and custom AgentLoop.
+    /// 
+    /// This is the primary constructor that allows full customization of the agent loop.
+    /// If `agent_loop` is None, a default `StandardLoop` is created.
+    /// 
+    /// # Arguments
+    /// * `config` - Runner configuration
+    /// * `instance` - Project instance
+    /// * `shared_bus` - Optional shared event bus
+    /// * `shared_permission_manager` - Optional shared permission manager
+    /// * `agent_loop` - Optional custom agent loop (e.g., WasmAgentLoop from Pro)
+    pub fn new_with_agent_loop(
+        config: RunnerConfig,
+        instance: Instance,
+        shared_bus: Option<Bus>,
+        shared_permission_manager: Option<Arc<PermissionManager>>,
+        agent_loop: Option<BoxedAgentLoop>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create provider (sandbox state not known yet, will be determined by MCP server config)
         // For initial creation, use allow_all=false since we don't know sandbox state yet.
@@ -335,7 +281,14 @@ impl Runner {
         // Create file time tracker
         let file_time = Arc::new(FileTimeState::new());
 
+        // Use provided agent loop or create default StandardLoop
+        let agent_loop: BoxedAgentLoop = agent_loop
+            .unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::new()));
+        
+        info!(loop_name = agent_loop.name(), "Runner created with agent loop");
+
         Ok(Self {
+            agent_loop: tokio::sync::Mutex::new(agent_loop),
             config: Arc::new(RwLock::new(config)),
             instance,
             provider: Arc::new(RwLock::new(provider)),
@@ -347,7 +300,6 @@ impl Runner {
             mcp_client: None,     // Will be initialized async if configured
             external_mcp_server_names: Vec::new(), // Will be populated by initialize_mcp
             unsupported_mcp_servers: Vec::new(), // Will be populated by initialize_mcp
-            doom_loop_detector: RwLock::new(DoomLoopDetector::new()),
             permission_manager,
             bus,
             file_time,
@@ -356,7 +308,6 @@ impl Runner {
             lsp_client,
             mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
             session_service: None,  // Will be set by new_with_session
-            last_user_message_id: RwLock::new(None),
         })
     }
 
@@ -376,12 +327,12 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None).await
     }
 
-    /// Create a new runner with optional shared Bus, PermissionManager, and SessionService.
-    /// This allows sharing permission state with external components like MCP servers
-    /// and persisting conversation history.
+    /// Create a new runner with optional shared Bus, PermissionManager, SessionService, and AgentLoop.
+    /// This allows sharing permission state with external components like MCP servers,
+    /// persisting conversation history, and using custom agent loop implementations.
     ///
     /// When using a shared PermissionManager, the caller is responsible for initializing
     /// permission rules before calling this function. The runner will skip rule initialization.
@@ -390,6 +341,9 @@ impl Runner {
     /// - Load existing conversation history on startup
     /// - Persist user messages when prompts are received
     /// - Persist assistant messages when responses complete
+    ///
+    /// When providing an AgentLoop, the runner will use that instead of the default StandardLoop.
+    /// This is how Pro injects WasmAgentLoop for WASM-based agent behavior.
     pub async fn new_with_shared(
         mut config: RunnerConfig,
         instance: Instance,
@@ -397,6 +351,7 @@ impl Runner {
         shared_bus: Option<Bus>,
         shared_permission_manager: Option<Arc<PermissionManager>>,
         session_service: Option<Arc<SessionService>>,
+        agent_loop: Option<BoxedAgentLoop>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -419,7 +374,7 @@ impl Runner {
         }
 
         let mut runner =
-            Self::new_with_bus(config, instance, shared_bus, shared_permission_manager)?;
+            Self::new_with_agent_loop(config, instance, shared_bus, shared_permission_manager, agent_loop)?;
 
         // Store external server names for status reporting
         runner.external_mcp_server_names = external_server_names;
@@ -790,20 +745,263 @@ impl Runner {
         self.session_service.clone()
     }
 
-    /// Send LSP status updates to the UI.
-    async fn send_lsp_status(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
-        let servers = self.lsp_client.status().await;
-        if !servers.is_empty() {
-            let lsp_updates: Vec<LspStatusUpdate> = servers
-                .iter()
-                .map(|s| LspStatusUpdate {
-                    id: s.id.clone(),
-                    name: s.name.clone(),
-                    root: s.root.clone(),
-                    connected: s.status == wonopcode_lsp::LspServerStatus::Connected,
-                })
-                .collect();
-            send_update(&update_tx, AppUpdate::LspUpdated(lsp_updates));
+    /// Set a custom agent loop implementation.
+    ///
+    /// This allows replacing the default StandardLoop with a custom implementation
+    /// (e.g., WasmAgentLoop for WASM-based loops).
+    ///
+    /// Must be called before `run()` to take effect.
+    pub async fn set_agent_loop(&self, agent_loop: BoxedAgentLoop) {
+        let mut guard = self.agent_loop.lock().await;
+        *guard = agent_loop;
+    }
+
+    /// Get the name of the current agent loop implementation.
+    pub async fn agent_loop_name(&self) -> String {
+        let guard = self.agent_loop.lock().await;
+        guard.name().to_string()
+    }
+
+    /// Run a prompt using the configured agent loop.
+    ///
+    /// This method delegates to the configured `AgentLoop` implementation. It handles:
+    /// - Pre-prompt compaction if context is too large
+    /// - Session persistence (user and assistant messages)
+    /// - Building the `LoopContext` from Runner's state
+    /// - Forwarding `LoopUpdate` events to `AppUpdate`
+    /// - Post-processing (history update, TODO sync)
+    async fn run_prompt_via_agent_loop(
+        &self,
+        user_input: &str,
+        cwd: &std::path::Path,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        use std::time::Instant;
+
+        // Get the cancellation token for this prompt
+        let cancel = self.get_cancel_token().await;
+
+        // Get mutable access to conversation history
+        let mut messages = {
+            let history = self.history.read().await;
+            history.clone()
+        };
+
+        // === PRE-PROMPT COMPACTION ===
+        // Check if compaction is needed before starting (message count or context limit)
+        let context_limit = {
+            let provider = self.provider.read().await;
+            provider.model_info().limit.context
+        };
+
+        const AUTO_COMPACT_MESSAGE_THRESHOLD: usize = 100;
+
+        if messages.len() > AUTO_COMPACT_MESSAGE_THRESHOLD {
+            info!(
+                messages = messages.len(),
+                threshold = AUTO_COMPACT_MESSAGE_THRESHOLD,
+                "Message count exceeds threshold, triggering automatic compaction"
+            );
+            send_update(
+                update_tx,
+                AppUpdate::Status(format!("Auto-compacting {} messages...", messages.len())),
+            );
+
+            let compact_start = Instant::now();
+            let messages_before = messages.len();
+            let estimated_tokens = compaction::estimate_token_usage(&messages);
+
+            let provider = self.provider.read().await;
+            match compaction::compact(
+                &mut messages,
+                &provider,
+                &self.compaction_config,
+                &estimated_tokens,
+                context_limit,
+                false,
+            )
+            .await
+            {
+                CompactionResult::Compacted {
+                    messages: new_messages,
+                    summary: _,
+                    messages_summarized,
+                } => {
+                    let duration = compact_start.elapsed();
+                    info!(
+                        messages_before = messages_before,
+                        messages_after = new_messages.len(),
+                        messages_summarized = messages_summarized,
+                        duration_ms = duration.as_millis(),
+                        "Auto-compaction successful"
+                    );
+                    messages = new_messages;
+
+                    // Update history with compacted messages
+                    {
+                        let mut history = self.history.write().await;
+                        *history = messages.clone();
+                    }
+
+                    let status = if messages_summarized > 0 {
+                        format!("Summarized {messages_summarized} messages to save context")
+                    } else {
+                        "Pruned old tool outputs to save context".to_string()
+                    };
+                    send_update(update_tx, AppUpdate::Status(status));
+                }
+                CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
+                    debug!("Compaction not needed or insufficient messages");
+                }
+                CompactionResult::Failed(err) => {
+                    warn!("Auto-compaction failed: {}, continuing without compaction", err);
+                }
+            }
+        }
+
+        // === SESSION PERSISTENCE: Save user message ===
+        let user_msg = ProviderMessage::user(user_input);
+        let user_msg_id = if let Some(ref svc) = self.session_service {
+            match svc.save_user_message(&user_msg).await {
+                Ok(msg_id) => {
+                    debug!(message_id = %msg_id, "Persisted user message to session");
+                    Some(msg_id)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to persist user message to session");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Create a channel for LoopUpdate events
+        let (loop_update_tx, mut loop_update_rx) = mpsc::unbounded_channel::<LoopUpdate>();
+
+        // Spawn a task to forward LoopUpdate events to AppUpdate
+        let update_tx_clone = update_tx.clone();
+        let forward_task = tokio::spawn(async move {
+            while let Some(update) = loop_update_rx.recv().await {
+                let app_update = match update {
+                    LoopUpdate::TextDelta(text) => AppUpdate::TextDelta(text),
+                    LoopUpdate::ThinkingDelta(_) => continue, // TUI doesn't have this variant yet
+                    LoopUpdate::ToolStarted { id, name, input } => {
+                        AppUpdate::ToolStarted { id, name, input }
+                    }
+                    LoopUpdate::ToolCompleted { id, success, output, metadata } => {
+                        AppUpdate::ToolCompleted { id, success, output, metadata }
+                    }
+                    LoopUpdate::ResponseComplete { text } => {
+                        AppUpdate::Completed { text }
+                    }
+                    LoopUpdate::TokenUsage { input, output, cost, context_limit } => {
+                        AppUpdate::TokenUsage { input, output, cost, context_limit }
+                    }
+                    LoopUpdate::Status(status) => AppUpdate::Status(status),
+                    LoopUpdate::Error(error) => AppUpdate::Error(error),
+                };
+                let _ = update_tx_clone.send(app_update);
+            }
+        });
+
+        // Build tool definitions
+        let tool_defs: Vec<ToolDefinition> = self
+            .tools
+            .all()
+            .map(|t| ToolDefinition {
+                name: t.id().to_string(),
+                description: t.description().to_string(),
+                parameters: t.parameters_schema(),
+            })
+            .collect();
+
+        // Build loop config
+        let loop_config = {
+            let config = self.config.read().await;
+            LoopConfig {
+                system_prompt: config.system_prompt.clone().or_else(|| {
+                    Some(build_system_prompt_for_session(
+                        &config.provider,
+                        &config.model_id,
+                        cwd,
+                    ))
+                }),
+                max_tokens: config.max_tokens,
+                temperature: config.temperature,
+                max_iterations: 50,
+                include_tool_docs: false,
+            }
+        };
+
+        // Build compaction config
+        let compaction_config = LoopCompactionConfig::default();
+
+        // Get sandbox runtime if available
+        let sandbox = if let Some(ref manager) = self.sandbox_manager {
+            if manager.is_ready().await {
+                manager.runtime().await.ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Get provider (read lock)
+        let provider = self.provider.read().await;
+
+        // Build LoopContext
+        let mut ctx = LoopContext {
+            cwd,
+            messages: &mut messages,
+            provider: &*provider,
+            tools: &self.tools,
+            tool_defs,
+            cancel: &cancel,
+            snapshot_store: self.snapshot_store.as_ref(),
+            file_time: self.file_time.clone(),
+            sandbox,
+            config: &loop_config,
+            compaction_config: &compaction_config,
+            update_tx: &loop_update_tx,
+            session_id: "default".to_string(),
+        };
+
+        // Run the agent loop
+        let result = {
+            let agent_loop = self.agent_loop.lock().await;
+            agent_loop.run_prompt(&mut ctx, user_input).await
+        };
+
+        // Drop the update channel to signal the forward task to stop
+        drop(loop_update_tx);
+        let _ = forward_task.await;
+
+        // Update history with the new messages
+        {
+            let mut history = self.history.write().await;
+            *history = messages;
+        }
+
+        // === SESSION PERSISTENCE: Save assistant message ===
+        if let Ok(ref response_text) = result {
+            if let Some(ref svc) = self.session_service {
+                if let Some(ref parent_id) = user_msg_id {
+                    let assistant_msg = ProviderMessage::assistant(response_text);
+                    if let Err(e) = svc.save_assistant_message(&assistant_msg, parent_id).await {
+                        warn!(error = %e, "Failed to persist assistant message to session");
+                    } else {
+                        debug!("Persisted assistant message to session");
+                    }
+                }
+            }
+        }
+
+        // Convert LoopError to Box<dyn Error>
+        match result {
+            Ok(text) => Ok(text),
+            Err(e) => Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
         }
     }
 
@@ -1053,7 +1251,7 @@ impl Runner {
                     let prompt_timeout = tokio::time::Duration::from_secs(86400); // 24 hours - effectively no timeout
                     let prompt_future = tokio::time::timeout(
                         prompt_timeout,
-                        self.run_prompt(&text, &cwd, &update_tx),
+                        self.run_prompt_via_agent_loop(&text, &cwd, &update_tx),
                     );
                     tokio::pin!(prompt_future);
 
@@ -1872,1279 +2070,6 @@ impl Runner {
         }
     }
 
-    /// Run a single prompt and return the response.
-    async fn run_prompt(
-        &self,
-        user_input: &str,
-        cwd: &Path,
-        update_tx: &mpsc::UnboundedSender<AppUpdate>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        use futures::StreamExt;
-
-        // Get the cancellation token for this prompt
-        let cancel = self.get_cancel_token().await;
-
-        // Reset doom loop detector for this prompt
-        {
-            let mut detector = self.doom_loop_detector.write().await;
-            detector.reset();
-        }
-
-        // Get existing history and check context limit
-        let mut messages: Vec<ProviderMessage> = {
-            let history = self.history.read().await;
-            history.clone()
-        };
-
-        // Log message history size for performance monitoring
-        let history_size: usize = messages
-            .iter()
-            .map(|m| {
-                m.content
-                    .iter()
-                    .map(|p| match p {
-                        wonopcode_provider::ContentPart::Text { text } => text.len(),
-                        wonopcode_provider::ContentPart::ToolUse { input, .. } => {
-                            input.to_string().len()
-                        }
-                        wonopcode_provider::ContentPart::ToolResult { content, .. } => {
-                            content.len()
-                        }
-                        wonopcode_provider::ContentPart::Thinking { text } => text.len(),
-                        wonopcode_provider::ContentPart::Image { .. } => 1000,
-                    })
-                    .sum::<usize>()
-            })
-            .sum();
-        perf::log_message_history("prompt_start", messages.len(), history_size);
-
-        // Get context limit from model
-        let context_limit = {
-            let provider = self.provider.read().await;
-            provider.model_info().limit.context
-        };
-
-        // Check if message-count-based compaction is needed (regardless of token count)
-        if messages.len() > AUTO_COMPACT_MESSAGE_THRESHOLD {
-            info!(
-                messages = messages.len(),
-                threshold = AUTO_COMPACT_MESSAGE_THRESHOLD,
-                "Message count exceeds threshold, triggering automatic compaction"
-            );
-            send_update(
-                &update_tx,
-                AppUpdate::Status(format!("Auto-compacting {} messages...", messages.len())),
-            );
-
-            let compact_start = Instant::now();
-            let messages_before = messages.len();
-
-            // Estimate token usage for compaction
-            let estimated_tokens = compaction::estimate_token_usage(&messages);
-
-            // Perform compaction
-            let provider = self.provider.read().await;
-            match compaction::compact(
-                &mut messages,
-                &provider,
-                &self.compaction_config,
-                &estimated_tokens,
-                context_limit,
-                false,
-            )
-            .await
-            {
-                CompactionResult::Compacted {
-                    messages: new_messages,
-                    summary: _,
-                    messages_summarized,
-                } => {
-                    let duration = compact_start.elapsed();
-                    info!(
-                        messages_before = messages_before,
-                        messages_after = new_messages.len(),
-                        messages_summarized = messages_summarized,
-                        duration_ms = duration.as_millis(),
-                        "Auto-compaction successful"
-                    );
-                    perf::log_compaction(messages_before, new_messages.len(), duration);
-
-                    messages = new_messages;
-
-                    // Update history
-                    {
-                        let mut history = self.history.write().await;
-                        *history = messages.clone();
-                    }
-
-                    send_update(
-                        &update_tx,
-                        AppUpdate::Status(format!(
-                            "Auto-compacted {} → {} messages",
-                            messages_before,
-                            messages.len()
-                        )),
-                    );
-                }
-                CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
-                    // If AI compaction not possible, do simple truncation
-                    if messages.len() > AUTO_COMPACT_TARGET_MESSAGES {
-                        let keep_first = 1;
-                        let keep_recent = AUTO_COMPACT_TARGET_MESSAGES - keep_first - 1;
-                        let first = messages[0].clone();
-                        let recent: Vec<_> = messages
-                            .drain(messages.len().saturating_sub(keep_recent)..)
-                            .collect();
-                        let dropped_count = messages.len() - 1;
-                        messages.clear();
-                        messages.push(first);
-                        messages.push(ProviderMessage::assistant(format!(
-                            "[Context auto-compacted: {dropped_count} earlier messages truncated to prevent memory growth]"
-                        )));
-                        messages.extend(recent);
-
-                        perf::log_compaction(
-                            messages_before,
-                            messages.len(),
-                            compact_start.elapsed(),
-                        );
-
-                        {
-                            let mut history = self.history.write().await;
-                            *history = messages.clone();
-                        }
-
-                        send_update(
-                            &update_tx,
-                            AppUpdate::Status(format!(
-                                "Truncated {} → {} messages",
-                                messages_before,
-                                messages.len()
-                            )),
-                        );
-                    }
-                }
-                CompactionResult::Failed(err) => {
-                    warn!(error = %err, "Auto-compaction failed");
-                }
-            }
-        }
-
-        // Check if compaction is needed
-        if compaction::needs_compaction(&messages, context_limit, &self.compaction_config) {
-            info!(
-                messages = messages.len(),
-                context_limit = context_limit,
-                "Context approaching limit, attempting smart compaction"
-            );
-            send_update(
-                &update_tx,
-                AppUpdate::Status("Compacting conversation...".to_string()),
-            );
-
-            // Estimate token usage for compaction decision
-            let estimated_tokens = compaction::estimate_token_usage(&messages);
-
-            // Perform full compaction: prune first, then summarize if still needed
-            let provider = self.provider.read().await;
-            match compaction::compact(
-                &mut messages,
-                &provider,
-                &self.compaction_config,
-                &estimated_tokens,
-                context_limit,
-                false, // Don't add auto-continue for pre-prompt compaction
-            )
-            .await
-            {
-                CompactionResult::Compacted {
-                    messages: new_messages,
-                    summary: _,
-                    messages_summarized,
-                } => {
-                    let action = if messages_summarized > 0 {
-                        "summarized"
-                    } else {
-                        "pruned tool outputs from"
-                    };
-                    info!(
-                        action = action,
-                        messages_summarized = messages_summarized,
-                        new_count = new_messages.len(),
-                        "Compaction successful"
-                    );
-                    messages = new_messages;
-
-                    // Update history
-                    {
-                        let mut history = self.history.write().await;
-                        *history = messages.clone();
-                    }
-
-                    let status = if messages_summarized > 0 {
-                        format!("Summarized {messages_summarized} messages to save context")
-                    } else {
-                        "Pruned old tool outputs to save context".to_string()
-                    };
-                    send_update(&update_tx, AppUpdate::Status(status));
-                }
-                CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
-                    debug!("Compaction not needed or insufficient messages");
-                }
-                CompactionResult::Failed(err) => {
-                    warn!(
-                        "Smart compaction failed: {}, falling back to simple truncation",
-                        err
-                    );
-                    // Fall back to simple truncation
-                    let keep_recent = self.compaction_config.preserve_turns * 2; // 2 messages per turn
-                    if messages.len() > keep_recent + 1 {
-                        let first = messages.remove(0);
-                        let recent: Vec<_> = messages
-                            .drain(messages.len().saturating_sub(keep_recent)..)
-                            .collect();
-                        let dropped_count = messages.len();
-                        messages.clear();
-                        messages.push(first);
-                        messages.push(ProviderMessage::assistant(format!(
-                            "[Context compacted: {dropped_count} earlier messages truncated due to context limits]"
-                        )));
-                        messages.extend(recent);
-
-                        {
-                            let mut history = self.history.write().await;
-                            *history = messages.clone();
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut final_text = String::new();
-        let mut steps = 0;
-        const MAX_STEPS: usize = 50;
-
-        // Track total token usage across steps
-        let mut total_input: u32 = 0;
-        let mut total_output: u32 = 0;
-
-        // Add user message
-        let user_msg = ProviderMessage::user(user_input);
-        messages.push(user_msg.clone());
-
-        // Store user message in history
-        {
-            let mut history = self.history.write().await;
-            history.push(user_msg.clone());
-        }
-
-        // Persist user message to session service
-        if let Some(ref svc) = self.session_service {
-            match svc.save_user_message(&user_msg).await {
-                Ok(msg_id) => {
-                    debug!(message_id = %msg_id, "Persisted user message to session");
-                    *self.last_user_message_id.write().await = Some(msg_id);
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to persist user message to session");
-                }
-            }
-        }
-
-        // Build tool definitions
-        let tool_defs: Vec<ToolDefinition> = self
-            .tools
-            .all()
-            .map(|t| ToolDefinition {
-                name: t.id().to_string(),
-                description: t.description().to_string(),
-                parameters: t.parameters_schema(),
-            })
-            .collect();
-
-        // Main loop
-        loop {
-            if cancel.is_cancelled() {
-                // Save partial history before returning
-                if !final_text.is_empty() {
-                    let assistant_msg = ProviderMessage::assistant(&final_text);
-                    {
-                        let mut history = self.history.write().await;
-                        history.push(assistant_msg.clone());
-                    }
-                    // Persist partial assistant message to session service
-                    if let Some(ref svc) = self.session_service {
-                        let parent_id = self.last_user_message_id.read().await.clone();
-                        if let Some(parent_id) = parent_id {
-                            if let Err(e) =
-                                svc.save_assistant_message(&assistant_msg, &parent_id).await
-                            {
-                                warn!(error = %e, "Failed to persist partial assistant message to session");
-                            }
-                        }
-                    }
-                }
-                info!(
-                    partial_text_len = final_text.len(),
-                    "Prompt cancelled, partial response preserved"
-                );
-                // Return partial text as success so it gets displayed
-                return Ok(final_text);
-            }
-
-            if steps >= MAX_STEPS {
-                warn!("Max steps reached");
-                break;
-            }
-
-            steps += 1;
-            debug!(
-                step = steps,
-                messages_count = messages.len(),
-                "Running prompt step"
-            );
-
-            // Build options
-            let options = {
-                let config = self.config.read().await;
-                GenerateOptions {
-                    temperature: config.temperature,
-                    max_tokens: config.max_tokens,
-                    system: config.system_prompt.clone().or_else(|| {
-                        Some(build_system_prompt_for_session(
-                            &config.provider,
-                            &config.model_id,
-                            cwd,
-                        ))
-                    }),
-                    tools: tool_defs.clone(),
-                    abort: Some(cancel.clone()),
-                    // Pass test provider settings if available
-                    provider_options: config
-                        .test_provider_settings
-                        .as_ref()
-                        .and_then(|s| serde_json::to_value(s).ok()),
-                    ..Default::default()
-                }
-            };
-
-            // Call provider
-            debug!(
-                step = steps,
-                message_count = messages.len(),
-                tool_count = tool_defs.len(),
-                "Calling provider"
-            );
-
-            // Log message summary for debugging
-            for (i, msg) in messages.iter().enumerate() {
-                debug!(
-                    index = i,
-                    role = ?msg.role,
-                    content_parts = msg.content.len(),
-                    "Message in request"
-                );
-            }
-
-            info!(
-                step = steps,
-                message_count = messages.len(),
-                tool_count = tool_defs.len(),
-                "Calling provider.generate()"
-            );
-
-            let stream = {
-                let provider = self.provider.read().await;
-                provider.generate(messages.clone(), options).await?
-            };
-
-            info!(
-                step = steps,
-                "Provider returned stream, starting to process"
-            );
-            tokio::pin!(stream);
-
-            let mut current_text = String::new();
-            let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
-            let mut finish_reason = FinishReason::EndTurn;
-            let mut step_usage = wonopcode_provider::stream::Usage::default();
-            // Track observed tools (from Claude CLI) to extract file modification info
-            let mut observed_tools: std::collections::HashMap<String, (String, String)> =
-                std::collections::HashMap::new(); // id -> (name, input)
-
-            // Process stream
-            let mut chunk_count = 0u32;
-            let mut stream_completed = false;
-            while let Some(chunk_result) = stream.next().await {
-                if cancel.is_cancelled() {
-                    // Save partial text collected so far and return it (not an error)
-                    if !current_text.is_empty() {
-                        let assistant_msg = ProviderMessage::assistant(&current_text);
-                        {
-                            let mut history = self.history.write().await;
-                            history.push(assistant_msg.clone());
-                        }
-                        // Persist partial assistant message to session service
-                        if let Some(ref svc) = self.session_service {
-                            let parent_id = self.last_user_message_id.read().await.clone();
-                            if let Some(parent_id) = parent_id {
-                                if let Err(e) =
-                                    svc.save_assistant_message(&assistant_msg, &parent_id).await
-                                {
-                                    warn!(error = %e, "Failed to persist partial assistant message to session");
-                                }
-                            }
-                        }
-                    }
-                    info!(
-                        partial_text_len = current_text.len(),
-                        "Stream cancelled, partial response preserved"
-                    );
-                    // Return the partial text as success so it gets displayed
-                    return Ok(current_text);
-                }
-
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        error!("Stream error (will be skipped): {}", e);
-                        continue;
-                    }
-                };
-
-                chunk_count += 1;
-                if chunk_count == 1 {
-                    info!(step = steps, "Received first chunk from provider");
-                }
-
-                // Log all chunks for debugging
-                debug!(chunk = ?chunk, "Received stream chunk");
-
-                match chunk {
-                    StreamChunk::TextStart => {}
-                    StreamChunk::TextDelta(delta) => {
-                        current_text.push_str(&delta);
-                        send_update(&update_tx, AppUpdate::TextDelta(delta));
-                    }
-                    StreamChunk::TextEnd => {}
-                    StreamChunk::ToolCallStart { id, name } => {
-                        debug!(id = %id, name = %name, "Tool call started");
-                        tool_calls.push((id.clone(), name.clone(), String::new()));
-                        // Don't send ToolStarted yet - wait until we have the input
-                    }
-                    StreamChunk::ToolCallDelta { delta, .. } => {
-                        if let Some(call) = tool_calls.last_mut() {
-                            call.2.push_str(&delta);
-                        }
-                    }
-                    StreamChunk::ToolCall {
-                        id,
-                        name,
-                        arguments,
-                    } => {
-                        debug!(id = %id, name = %name, "Tool call complete");
-                        if let Some(call) = tool_calls.iter_mut().find(|c| c.0 == id) {
-                            call.2 = arguments;
-                        } else {
-                            tool_calls.push((id, name, arguments));
-                        }
-                    }
-                    StreamChunk::ReasoningStart => {}
-                    StreamChunk::ReasoningDelta(_) => {}
-                    StreamChunk::ReasoningEnd => {}
-                    StreamChunk::ToolObserved { id, name, input } => {
-                        // Tool was observed being executed externally (e.g., by Claude CLI)
-                        // Store for later processing when result arrives
-                        debug!(id = %id, name = %name, "Tool observed (external execution)");
-                        observed_tools.insert(id.clone(), (name.clone(), input.clone()));
-                        // Notify the TUI
-                        send_update(&update_tx, AppUpdate::ToolStarted { name, id, input });
-                    }
-                    StreamChunk::ToolResultObserved {
-                        id,
-                        success,
-                        output,
-                    } => {
-                        // Tool result was observed (external execution completed)
-                        debug!(id = %id, success = %success, "Tool result observed");
-
-                        // Look up the observed tool info
-                        let tool_info = observed_tools.remove(&id);
-
-                        // Check if this was a file-modifying tool and send ModifiedFilesUpdated
-                        if success {
-                            if let Some((ref tool_name, ref input)) = tool_info {
-                                let base_tool_name =
-                                    tool_name.rsplit("__").next().unwrap_or(tool_name);
-
-                                // Send LSP status update if LSP tool was used (by MCP server)
-                                if base_tool_name == "lsp" {
-                                    // Parse the input to extract file path and send LSP status
-                                    if let Ok(input_json) =
-                                        serde_json::from_str::<serde_json::Value>(input)
-                                    {
-                                        if let Some(file_path) =
-                                            input_json.get("file").and_then(|v| v.as_str())
-                                        {
-                                            // Determine language server name from file extension
-                                            let server_name = if file_path.ends_with(".rs") {
-                                                "rust-analyzer"
-                                            } else if file_path.ends_with(".ts")
-                                                || file_path.ends_with(".tsx")
-                                                || file_path.ends_with(".js")
-                                                || file_path.ends_with(".jsx")
-                                            {
-                                                "typescript-language-server"
-                                            } else if file_path.ends_with(".py") {
-                                                "pyright"
-                                            } else if file_path.ends_with(".go") {
-                                                "gopls"
-                                            } else {
-                                                "lsp"
-                                            };
-
-                                            // Get the project root from the file path
-                                            let root = std::path::Path::new(file_path)
-                                                .parent()
-                                                .and_then(|p| p.to_str())
-                                                .unwrap_or(".")
-                                                .to_string();
-
-                                            let lsp_update = LspStatusUpdate {
-                                                id: server_name.to_string(),
-                                                name: server_name.to_string(),
-                                                root,
-                                                connected: true,
-                                            };
-                                            send_update(
-                                                &update_tx,
-                                                AppUpdate::LspUpdated(vec![lsp_update]),
-                                            );
-                                        }
-                                    }
-                                }
-
-                                // Sync todos if todowrite was executed (by MCP server)
-                                if base_tool_name == "todowrite" {
-                                    // Read todos from the shared file store
-                                    let phased =
-                                        todo::get_phased_todos(self.todo_store.as_ref(), cwd);
-                                    if !phased.is_empty() {
-                                        let (phases, todos) =
-                                            convert_phased_todos_to_updates(&phased);
-                                        send_update(
-                                            &update_tx,
-                                            AppUpdate::TodosUpdated { phases, todos },
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        if success {
-                            if let Some((ref tool_name, ref input)) = tool_info {
-                                if let Some(update) = extract_modified_file_from_observed_tool(
-                                    tool_name, input, &output,
-                                ) {
-                                    debug!(path = %update.path, added = update.added, removed = update.removed, "Sending ModifiedFilesUpdated for observed tool");
-                                    send_update(
-                                        &update_tx,
-                                        AppUpdate::ModifiedFilesUpdated(vec![update]),
-                                    );
-                                }
-                            }
-                        }
-
-                        // Extract metadata from output for tools that provide structured info
-                        let metadata = tool_info
-                            .as_ref()
-                            .and_then(|(name, _)| {
-                                extract_metadata_from_observed_tool(name, &output)
-                            })
-                            .map(serde_json::Value::Object);
-
-                        send_update(
-                            &update_tx,
-                            AppUpdate::ToolCompleted {
-                                id,
-                                success,
-                                output,
-                                metadata,
-                            },
-                        );
-                    }
-                    StreamChunk::FinishStep {
-                        usage,
-                        finish_reason: reason,
-                    } => {
-                        step_usage.merge(&usage);
-                        finish_reason = reason;
-                        stream_completed = true; // Mark stream as properly completed
-
-                        // Calculate cost and get context limit
-                        let (cost, context_limit) = {
-                            let provider = self.provider.read().await;
-                            let model_info = provider.model_info();
-                            let cost = model_info.cost.calculate(
-                                total_input + step_usage.input_tokens,
-                                total_output + step_usage.output_tokens,
-                            );
-                            (cost, model_info.limit.context)
-                        };
-
-                        // Send token usage update
-                        send_update(
-                            &update_tx,
-                            AppUpdate::TokenUsage {
-                                input: total_input + step_usage.input_tokens,
-                                output: total_output + step_usage.output_tokens,
-                                cost,
-                                context_limit,
-                            },
-                        );
-                    }
-                    StreamChunk::Error(e) => {
-                        warn!("Stream error: {}", e);
-                    }
-                }
-            }
-
-            // Check if stream ended without proper FinishStep signal
-            if !stream_completed && chunk_count > 0 {
-                warn!(
-                    step = steps,
-                    chunks = chunk_count,
-                    "Stream ended without FinishStep signal - this may indicate a provider issue"
-                );
-                // Send a completion signal immediately to prevent UI getting stuck
-                info!("Forcing completion signal to prevent UI from staying in 'thinking' state");
-                break; // Exit the step loop to trigger completion
-            }
-
-            // Accumulate usage for this step
-            total_input += step_usage.input_tokens;
-            total_output += step_usage.output_tokens;
-
-            info!(
-                step = steps,
-                chunks = chunk_count,
-                text_len = current_text.len(),
-                tool_calls = tool_calls.len(),
-                finish_reason = ?finish_reason,
-                "Step completed"
-            );
-
-            // Update final text
-            final_text = current_text.clone();
-
-            // Add assistant message to history
-            if !current_text.is_empty() || !tool_calls.is_empty() {
-                let mut content = vec![];
-                if !current_text.is_empty() {
-                    content.push(wonopcode_provider::ContentPart::text(&current_text));
-                }
-                for (id, name, args) in &tool_calls {
-                    let input: serde_json::Value =
-                        serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
-                    content.push(wonopcode_provider::ContentPart::tool_use(id, name, input));
-                }
-
-                messages.push(ProviderMessage {
-                    role: wonopcode_provider::Role::Assistant,
-                    content,
-                });
-            }
-
-            // Execute tool calls - ALL tools run in parallel
-            if !tool_calls.is_empty() {
-                info!("Executing {} tool calls in parallel", tool_calls.len());
-
-                // Check for doom loop on each tool call before executing
-                let doom_loop_permission = {
-                    let config = self.config.read().await;
-                    config.doom_loop
-                };
-
-                // Track which tools are blocked by doom loop or permissions
-                let mut doom_loop_blocked: Vec<(String, String, String)> = Vec::new();
-                let mut permission_blocked: Vec<(String, String, String)> = Vec::new();
-                let mut allowed_calls: Vec<(String, String, String)> = Vec::new();
-
-                for (call_id, tool_name, args_str) in tool_calls {
-                    let input: serde_json::Value =
-                        serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Null);
-
-                    // Check doom loop detector first
-                    let is_doom_loop = {
-                        let mut detector = self.doom_loop_detector.write().await;
-                        detector.record_and_check(&tool_name, &input)
-                    };
-
-                    if is_doom_loop {
-                        warn!(
-                            tool = %tool_name,
-                            "Doom loop detected: {} consecutive identical calls",
-                            DOOM_LOOP_THRESHOLD
-                        );
-
-                        match doom_loop_permission {
-                            Decision::Allow => {
-                                // Allow the tool to run despite doom loop
-                            }
-                            Decision::Deny => {
-                                // Block the tool and return error to the model
-                                doom_loop_blocked.push((call_id, tool_name, args_str));
-                                continue;
-                            }
-                            Decision::Ask => {
-                                // For now, treat Ask as Deny with a warning
-                                send_update(&update_tx, AppUpdate::Status(format!(
-                                    "Doom loop detected: '{tool_name}' called {DOOM_LOOP_THRESHOLD} times with identical args"
-                                )));
-                                doom_loop_blocked.push((call_id, tool_name, args_str));
-                                continue;
-                            }
-                        }
-                    }
-
-                    // Check tool permissions
-                    // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__read"
-                    let normalized_tool_name = tool_name.rsplit("__").next().unwrap_or(&tool_name);
-                    let path = extract_path_from_input(&input);
-                    let action = determine_tool_action(normalized_tool_name, &input);
-                    let description = format_tool_description(normalized_tool_name, &input);
-
-                    let check = PermissionCheck {
-                        id: call_id.clone(),
-                        tool: normalized_tool_name.to_string(),
-                        action: action.clone(),
-                        description,
-                        path: path.clone(),
-                        details: input.clone(),
-                    };
-
-                    // Check if sandbox is actually running and allow_all_in_sandbox is enabled
-                    let sandbox_running = if let Some(ref manager) = self.sandbox_manager {
-                        let config = self.config.read().await;
-                        config.allow_all_in_sandbox && manager.is_ready().await
-                    } else {
-                        false
-                    };
-
-                    let allowed = self
-                        .permission_manager
-                        .check_with_sandbox("default", check, sandbox_running)
-                        .await;
-
-                    if allowed {
-                        allowed_calls.push((call_id, tool_name, args_str));
-                    } else {
-                        warn!(tool = %tool_name, action = %action, "Tool execution denied by permission manager");
-                        permission_blocked.push((call_id, tool_name, args_str));
-                    }
-                }
-
-                // Handle doom loop blocked tools - add error responses to messages
-                for (call_id, tool_name, _args_str) in &doom_loop_blocked {
-                    let error_msg = format!(
-                        "Tool execution blocked: doom loop detected. \
-                        You have called '{tool_name}' {DOOM_LOOP_THRESHOLD} times in a row with identical arguments. \
-                        Please try a different approach or use different arguments."
-                    );
-
-                    send_update(
-                        &update_tx,
-                        AppUpdate::ToolStarted {
-                            name: tool_name.clone(),
-                            id: call_id.clone(),
-                            input: "{}".to_string(),
-                        },
-                    );
-                    send_update(
-                        &update_tx,
-                        AppUpdate::ToolCompleted {
-                            id: call_id.clone(),
-                            success: false,
-                            output: error_msg.clone(),
-                            metadata: None,
-                        },
-                    );
-
-                    messages.push(ProviderMessage::tool_result(call_id, &error_msg));
-                }
-
-                // Handle permission blocked tools - add error responses to messages
-                for (call_id, tool_name, _args_str) in &permission_blocked {
-                    let error_msg = format!(
-                        "Tool execution denied: permission not granted for '{tool_name}'. \
-                        The user has declined to allow this tool execution."
-                    );
-
-                    send_update(
-                        &update_tx,
-                        AppUpdate::ToolStarted {
-                            name: tool_name.clone(),
-                            id: call_id.clone(),
-                            input: "{}".to_string(),
-                        },
-                    );
-                    send_update(
-                        &update_tx,
-                        AppUpdate::ToolCompleted {
-                            id: call_id.clone(),
-                            success: false,
-                            output: error_msg.clone(),
-                            metadata: None,
-                        },
-                    );
-
-                    messages.push(ProviderMessage::tool_result(call_id, &error_msg));
-                }
-
-                // Replace tool_calls with allowed_calls
-                let tool_calls = allowed_calls;
-
-                if tool_calls.is_empty() {
-                    // All tools were blocked, continue to get model response
-                    debug!("All tool calls blocked by doom loop or permission checks");
-                    continue;
-                }
-
-                // Send ToolStarted for allowed tools and log invocations
-                for (call_id, tool_name, args_str) in &tool_calls {
-                    // Log tool invocation for all providers
-                    info!(
-                        tool = %tool_name,
-                        call_id = %call_id,
-                        args_preview = %args_str.chars().take(200).collect::<String>(),
-                        "Tool invoked"
-                    );
-
-                    send_update(
-                        &update_tx,
-                        AppUpdate::ToolStarted {
-                            name: tool_name.clone(),
-                            id: call_id.clone(),
-                            input: args_str.clone(),
-                        },
-                    );
-                }
-
-                if tool_calls.len() > 1 {
-                    send_update(
-                        &update_tx,
-                        AppUpdate::Status(format!(
-                            "Running {} tools in parallel",
-                            tool_calls.len()
-                        )),
-                    );
-                }
-
-                // Spawn all tools concurrently (Box::pin for select_all compatibility)
-                let tool_futures: Vec<_> = tool_calls
-                    .into_iter()
-                    .map(|(call_id, tool_name, args_str)| {
-                        let update_tx = update_tx.clone();
-                        let cwd = cwd.to_path_buf();
-                        let provider = self.provider.clone();
-                        let config = self.config.clone();
-                        let tools = self.tools.clone();
-                        let cancel = cancel.clone();
-                        let snapshot_store = self.snapshot_store.clone();
-                        let file_time = self.file_time.clone();
-                        let sandbox_manager = self.sandbox_manager.clone();
-                        let todo_store = self.todo_store.clone();
-                        // Create event channel for immediate tool event notifications
-                        let (tool_event_tx, mut tool_event_rx) = tokio::sync::mpsc::unbounded_channel();
-                        let update_tx_for_events = update_tx.clone();
-
-                        // Spawn task to forward tool events to TUI updates
-                        tokio::spawn(async move {
-                            debug!("Tool event receiver task started");
-                            while let Some(event) = tool_event_rx.recv().await {
-                                match event {
-                                    wonopcode_tools::ToolEvent::TodosUpdated(phased) => {
-                                        debug!(
-                                            phase_count = phased.phases.len(),
-                                            todo_count = phased.total_todos(),
-                                            "Received TodosUpdated event via event_tx"
-                                        );
-                                        // Convert and send to TUI immediately
-                                        let (phases, todos) = convert_phased_todos_to_updates(&phased);
-                                        debug!(
-                                            phase_count = phases.len(),
-                                            update_count = todos.len(),
-                                            "Sending TodosUpdated from event_tx path"
-                                        );
-                                        send_update(&update_tx_for_events, AppUpdate::TodosUpdated { phases, todos });
-                                    }
-                                }
-                            }
-                            debug!("Tool event receiver task ended");
-                        });
-
-                        Box::pin(async move {
-                            let tool_start = Instant::now();
-                            let input: serde_json::Value =
-                                serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Null);
-
-                            // Get sandbox runtime for this tool (if enabled and not bypassed)
-                            let sandbox = get_sandbox_for_tool(&tool_name, &sandbox_manager).await;
-
-                            // Special handling for task tool - run subagent
-                            let result = if tool_name == "task" {
-                                match serde_json::from_value::<task::TaskArgs>(input.clone()) {
-                                    Ok(args) => {
-                                        send_update(&update_tx, AppUpdate::Status(format!(
-                                            "Running {} subagent: {}",
-                                            args.subagent_type, args.description
-                                        )));
-
-                                        let subagent_result = run_subagent_standalone(
-                                            &args.subagent_type,
-                                            &args.prompt,
-                                            &cwd,
-                                            provider,
-                                            config,
-                                            tools.clone(),
-                                            cancel,
-                                            snapshot_store.clone(),
-                                            file_time.clone(),
-                                            sandbox.clone(),
-                                        )
-                                        .await;
-
-                                        // Sync todos after subagent completes (subagents may have called todowrite)
-                                        let phased = todo::get_phased_todos(todo_store.as_ref(), &cwd);
-                                        if !phased.is_empty() {
-                                            debug!(
-                                                phase_count = phased.phases.len(),
-                                                todo_count = phased.total_todos(),
-                                                "Syncing todos after subagent completion"
-                                            );
-                                            let (phases, todos) = convert_phased_todos_to_updates(&phased);
-                                            send_update(&update_tx, AppUpdate::TodosUpdated { phases, todos });
-                                        }
-
-                                        match subagent_result {
-                                            Ok(response) => Ok(wonopcode_tools::ToolOutput::new(
-                                                format!("Task completed: {}", args.description),
-                                                response,
-                                            )),
-                                            Err(e) => {
-                                                error!(
-                                                    tool = "task",
-                                                    subagent_type = %args.subagent_type,
-                                                    description = %args.description,
-                                                    error = %e,
-                                                    "Subagent execution failed"
-                                                );
-                                                Err(wonopcode_tools::ToolError::execution_failed(
-                                                    format!("Subagent failed: {e}"),
-                                                ))
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        // Truncate prompt for logging
-                                        let prompt_truncated = if args_str.len() > 500 {
-                                            format!("{}... [truncated]", &args_str[..500])
-                                        } else {
-                                            args_str.clone()
-                                        };
-                                        error!(
-                                            tool = "task",
-                                            error = %e,
-                                            arguments = %prompt_truncated,
-                                            "Invalid task arguments"
-                                        );
-                                        Err(wonopcode_tools::ToolError::validation(format!(
-                                            "Invalid task arguments: {e}"
-                                        )))
-                                    }
-                                }
-                            } else {
-                                // Execute regular tool
-                                execute_tool_standalone(
-                                    &tool_name,
-                                    input,
-                                    &cwd,
-                                    tools,
-                                    cancel,
-                                    snapshot_store,
-                                    file_time,
-                                    sandbox,
-                                    Some(tool_event_tx),
-                                )
-                                .await
-                            };
-
-                            let (output, success, metadata) = match result {
-                                Ok(out) => {
-                                    let output = if out.output.len() > 50000 {
-                                        format!(
-                                            "{}\n\n... [Output truncated: {} chars total, showing first 50000]",
-                                            &out.output[..50000],
-                                            out.output.len()
-                                        )
-                                    } else {
-                                        out.output
-                                    };
-                                    (output, true, out.metadata)
-                                }
-                                Err(e) => (format!("Error: {e}"), false, serde_json::Value::Null),
-                            };
-
-                            // Log tool completion with performance metrics
-                            let tool_duration = tool_start.elapsed();
-                            info!(
-                                tool = %tool_name,
-                                call_id = %call_id,
-                                success = success,
-                                output_len = output.len(),
-                                duration_ms = tool_duration.as_millis(),
-                                "Tool completed"
-                            );
-                            perf::log_tool(&tool_name, tool_duration, success);
-
-                            send_update(&update_tx, AppUpdate::ToolCompleted {
-                                id: call_id.clone(),
-                                success,
-                                output: output.clone(),
-                                metadata: Some(metadata.clone()),
-                            });
-
-                            // Check for agent change in metadata (from plan mode tools)
-                            if success {
-                                if let Some(agent) =
-                                    metadata.get("agent_change").and_then(|v| v.as_str())
-                                {
-                                    info!(agent = %agent, "Agent changed via tool");
-                                    send_update(&update_tx, AppUpdate::AgentChanged(agent.to_string()));
-                                }
-                            }
-
-                            // Send incremental modified file update for file-modifying tools
-                            if success
-                                && (tool_name == "write"
-                                    || tool_name == "edit"
-                                    || tool_name == "multiedit")
-                            {
-                                if let Some(obj) = metadata.as_object() {
-                                    let mut updates = Vec::new();
-
-                                    // For write tool: path and bytes
-                                    if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
-                                        let added = obj
-                                            .get("bytes")
-                                            .and_then(|v| v.as_u64())
-                                            .map(|b| (b / 40) as u32)
-                                            .unwrap_or(1);
-                                        updates.push(ModifiedFileUpdate {
-                                            path: path.to_string(),
-                                            added,
-                                            removed: 0,
-                                        });
-                                    }
-                                    // For edit tool: file, additions, deletions
-                                    if let Some(file) = obj.get("file").and_then(|v| v.as_str()) {
-                                        let added = obj
-                                            .get("additions")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0)
-                                            as u32;
-                                        let removed = obj
-                                            .get("deletions")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0)
-                                            as u32;
-                                        updates.push(ModifiedFileUpdate {
-                                            path: file.to_string(),
-                                            added,
-                                            removed,
-                                        });
-                                    }
-                                    // For multiedit tool: files and edits count
-                                    if let Some(files) = obj.get("files").and_then(|v| v.as_u64()) {
-                                        let edits = obj
-                                            .get("edits")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0)
-                                            as u32;
-                                        if files > 0 {
-                                            updates.push(ModifiedFileUpdate {
-                                                path: format!("{files} files"),
-                                                added: edits,
-                                                removed: 0,
-                                            });
-                                        }
-                                    }
-
-                                    if !updates.is_empty() {
-                                        send_update(&update_tx, AppUpdate::ModifiedFilesUpdated(updates));
-                                    }
-                                }
-                            }
-
-                            // Sync todos immediately if todowrite was executed
-                            // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__todowrite"
-                            let base_tool_name =
-                                tool_name.rsplit("__").next().unwrap_or(&tool_name);
-                            debug!(
-                                tool_name = %tool_name,
-                                base_tool_name = %base_tool_name,
-                                success = %success,
-                                "Checking if todo sync needed"
-                            );
-                            if base_tool_name == "todowrite" && success {
-                                // Read todos from the file-based store (shared with MCP server)
-                                let phased = todo::get_phased_todos(todo_store.as_ref(), &cwd);
-                                debug!(
-                                    phase_count = phased.phases.len(),
-                                    todo_count = phased.total_todos(),
-                                    cwd = %cwd.display(),
-                                    "Read todos from store for sync"
-                                );
-                                if !phased.is_empty() {
-                                    let (phases, todos) = convert_phased_todos_to_updates(&phased);
-                                    debug!(
-                                        phase_count = phases.len(),
-                                        update_count = todos.len(),
-                                        "Sending TodosUpdated from fallback sync"
-                                    );
-                                    send_update(&update_tx, AppUpdate::TodosUpdated { phases, todos });
-                                } else {
-                                    warn!("Todo updates empty after todowrite - file may not have been written");
-                                }
-                            }
-
-                            (call_id, tool_name, output, success, metadata)
-                        })
-                    })
-                    .collect();
-
-                // Wait for tools to complete, with cancellation support
-                // Use select_all in a loop so we can exit early on cancellation
-                // while preserving results from completed tools
-                let mut tool_results: Vec<(String, String, String, bool, serde_json::Value)> =
-                    Vec::new();
-                let mut remaining_futures = tool_futures;
-                let mut cancelled = false;
-
-                while !remaining_futures.is_empty() {
-                    let remaining_count = remaining_futures.len();
-                    tokio::select! {
-                        biased;
-
-                        // Check for cancellation
-                        _ = cancel.cancelled() => {
-                            info!(
-                                completed = tool_results.len(),
-                                remaining = remaining_count,
-                                "Tool execution cancelled, preserving completed results"
-                            );
-                            cancelled = true;
-                            break;
-                        }
-
-                        // Wait for the next tool to complete
-                        (result, _index, rest) = futures::future::select_all(remaining_futures) => {
-                            tool_results.push(result);
-                            remaining_futures = rest;
-                        }
-                    }
-                }
-
-                // Post-process results - add tool results to messages
-                // Note: Modified file and todo updates are now sent incrementally after each tool completes
-                let mut has_lsp_tool = false;
-                for (call_id, tool_name, output, _success, _metadata) in &tool_results {
-                    // Add tool result to messages
-                    messages.push(ProviderMessage::tool_result(call_id, output));
-                    // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__lsp"
-                    let base_tool_name = tool_name.rsplit("__").next().unwrap_or(tool_name);
-                    if base_tool_name == "lsp" {
-                        has_lsp_tool = true;
-                    }
-                }
-
-                // Send LSP status update if LSP tool was used
-                if has_lsp_tool {
-                    self.send_lsp_status(update_tx).await;
-                }
-
-                // If cancelled, save partial progress and return
-                if cancelled {
-                    // Save the assistant message with tool calls to history
-                    if !current_text.is_empty() {
-                        let assistant_msg = ProviderMessage::assistant(&current_text);
-                        {
-                            let mut history = self.history.write().await;
-                            history.push(assistant_msg.clone());
-                        }
-                        // Persist partial assistant message to session service
-                        if let Some(ref svc) = self.session_service {
-                            let parent_id = self.last_user_message_id.read().await.clone();
-                            if let Some(parent_id) = parent_id {
-                                if let Err(e) =
-                                    svc.save_assistant_message(&assistant_msg, &parent_id).await
-                                {
-                                    warn!(error = %e, "Failed to persist partial assistant message to session");
-                                }
-                            }
-                        }
-                    }
-                    info!(
-                        tool_results_completed = tool_results.len(),
-                        partial_text_len = current_text.len(),
-                        "Tool execution cancelled, partial results preserved"
-                    );
-                    // Return partial text as success so it gets displayed
-                    return Ok(current_text);
-                }
-
-                // Always continue after executing tool calls to get the model's response
-                // (Some models like o1 may not set finish_reason to ToolUse)
-                info!(
-                    tool_results_count = tool_results.len(),
-                    messages_count = messages.len(),
-                    "Tool calls executed, continuing loop to get model response"
-                );
-                continue;
-            }
-
-            debug!(
-                final_text_len = final_text.len(),
-                finish_reason = ?finish_reason,
-                "Prompt loop ending"
-            );
-
-            // Done - store final assistant message in history
-            if !final_text.is_empty() {
-                let assistant_msg = ProviderMessage::assistant(&final_text);
-                {
-                    let mut history = self.history.write().await;
-                    history.push(assistant_msg.clone());
-                }
-
-                // Persist assistant message to session service
-                if let Some(ref svc) = self.session_service {
-                    let parent_id = self.last_user_message_id.read().await.clone();
-                    if let Some(parent_id) = parent_id {
-                        if let Err(e) = svc.save_assistant_message(&assistant_msg, &parent_id).await
-                        {
-                            warn!(error = %e, "Failed to persist assistant message to session");
-                        } else {
-                            debug!("Persisted assistant message to session");
-                        }
-                    }
-                }
-            }
-            break;
-        }
-
-        Ok(final_text)
-    }
 
     /// Handle git status action.
     async fn handle_git_status(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
@@ -3581,360 +2506,6 @@ impl Runner {
     }
 }
 
-/// Run a subagent standalone (without self reference).
-/// This allows running multiple subagents in parallel from async closures.
-#[allow(clippy::too_many_arguments)]
-async fn run_subagent_standalone(
-    agent_type: &str,
-    prompt: &str,
-    cwd: &Path,
-    provider: Arc<RwLock<BoxedLanguageModel>>,
-    config: Arc<RwLock<RunnerConfig>>,
-    tools: Arc<ToolRegistry>,
-    cancel: CancellationToken,
-    snapshot_store: Option<Arc<SnapshotStore>>,
-    file_time: Arc<FileTimeState>,
-    sandbox: Option<Arc<dyn SandboxRuntime>>,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use futures::StreamExt;
-    use wonopcode_provider::message::ContentPart;
-
-    debug!(agent = agent_type, "Running subagent (standalone)");
-
-    // Get agent-specific system prompt
-    let system_prompt = task::get_subagent_prompt(agent_type);
-
-    // Get agent-specific tool configuration
-    let tool_config = task::get_subagent_tools(agent_type);
-
-    // Build tool definitions for allowed tools only
-    let tool_defs: Vec<ToolDefinition> = tools
-        .all()
-        .filter(|t| {
-            tool_config
-                .iter()
-                .find(|(name, _)| *name == t.id())
-                .map(|(_, enabled)| *enabled)
-                .unwrap_or(false)
-        })
-        .map(|t| ToolDefinition {
-            name: t.id().to_string(),
-            description: t.description().to_string(),
-            parameters: t.parameters_schema(),
-        })
-        .collect();
-
-    // Build messages - just the user prompt
-    let mut messages = vec![ProviderMessage::user(prompt)];
-
-    let mut final_text = String::new();
-    let mut steps = 0;
-    const MAX_STEPS: usize = 20; // Limit subagent steps
-
-    // Subagent loop
-    loop {
-        if cancel.is_cancelled() {
-            return Err("Cancelled".into());
-        }
-
-        if steps >= MAX_STEPS {
-            warn!(agent = agent_type, "Subagent max steps reached");
-            break;
-        }
-
-        steps += 1;
-        debug!(agent = agent_type, step = steps, "Subagent step");
-
-        // Build options with agent-specific system prompt
-        let options = {
-            let cfg = config.read().await;
-            GenerateOptions {
-                temperature: cfg.temperature,
-                max_tokens: cfg.max_tokens,
-                system: Some(system_prompt.to_string()),
-                tools: tool_defs.clone(),
-                abort: Some(cancel.clone()),
-                ..Default::default()
-            }
-        };
-
-        // Call provider
-        let stream = {
-            let provider = provider.read().await;
-            provider.generate(messages.clone(), options).await?
-        };
-        tokio::pin!(stream);
-
-        let mut current_text = String::new();
-        let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-        let mut finish_reason = FinishReason::EndTurn;
-
-        // Process stream
-        while let Some(chunk_result) = stream.next().await {
-            if cancel.is_cancelled() {
-                return Err("Cancelled".into());
-            }
-
-            let chunk = match chunk_result {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("Subagent stream error: {}", e);
-                    continue;
-                }
-            };
-
-            match chunk {
-                StreamChunk::TextDelta(delta) => {
-                    current_text.push_str(&delta);
-                }
-                StreamChunk::ToolCallStart { id, name } => {
-                    tool_calls.push((id, name, String::new()));
-                }
-                StreamChunk::ToolCallDelta { id: _, delta } => {
-                    if let Some((_, _, args)) = tool_calls.last_mut() {
-                        args.push_str(&delta);
-                    }
-                }
-                StreamChunk::FinishStep {
-                    finish_reason: reason,
-                    ..
-                } => {
-                    finish_reason = reason;
-                }
-                _ => {}
-            }
-        }
-
-        // Accumulate text output from all steps
-        if !current_text.is_empty() {
-            if !final_text.is_empty() {
-                final_text.push_str("\n\n");
-            }
-            final_text.push_str(&current_text);
-        }
-
-        // If no tool calls, we're done
-        if tool_calls.is_empty() {
-            break;
-        }
-
-        // Check if we should continue (tool calls)
-        if finish_reason != FinishReason::ToolUse {
-            break;
-        }
-
-        // Add assistant message with tool calls
-        let mut assistant_msg = if current_text.is_empty() {
-            ProviderMessage {
-                role: wonopcode_provider::message::Role::Assistant,
-                content: vec![],
-            }
-        } else {
-            ProviderMessage::assistant(&current_text)
-        };
-
-        // Add tool use parts
-        for (id, name, args_str) in &tool_calls {
-            let input: serde_json::Value = serde_json::from_str(args_str)
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-            assistant_msg
-                .content
-                .push(ContentPart::tool_use(id, name, input));
-        }
-        messages.push(assistant_msg);
-
-        // Execute tool calls (only allowed tools)
-        for (id, name, args_str) in &tool_calls {
-            // Check if tool is allowed for this agent
-            let is_allowed = tool_config
-                .iter()
-                .find(|(n, _)| *n == name.as_str())
-                .map(|(_, enabled)| *enabled)
-                .unwrap_or(false);
-
-            let output = if !is_allowed {
-                format!("Tool '{name}' is not available for {agent_type} agent")
-            } else {
-                let args: serde_json::Value = serde_json::from_str(args_str)
-                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-
-                // Execute tool
-                let tool = match tools.get(name) {
-                    Some(t) => t,
-                    None => {
-                        messages.push(ProviderMessage::tool_result(
-                            id,
-                            format!("Unknown tool: {name}"),
-                        ));
-                        continue;
-                    }
-                };
-
-                let ctx = wonopcode_tools::ToolContext {
-                    session_id: "subagent".to_string(),
-                    message_id: "subagent".to_string(),
-                    agent: agent_type.to_string(),
-                    abort: cancel.clone(),
-                    root_dir: cwd.to_path_buf(),
-                    cwd: cwd.to_path_buf(),
-                    snapshot: snapshot_store.clone(),
-                    file_time: Some(file_time.clone()),
-                    sandbox: sandbox.clone(),
-                    event_tx: None, // Subagents don't need event_tx for now
-                };
-
-                match tool.execute(args, &ctx).await {
-                    Ok(out) => out.output,
-                    Err(e) => format!("Error: {e}"),
-                }
-            };
-
-            // Add tool result
-            messages.push(ProviderMessage::tool_result(id, &output));
-        }
-    }
-
-    debug!(agent = agent_type, steps = steps, "Subagent completed");
-
-    // If no text output was generated, provide a fallback message
-    if final_text.is_empty() {
-        if steps == 0 {
-            Ok(
-                "Subagent did not produce any output. The model may have failed to respond."
-                    .to_string(),
-            )
-        } else {
-            Ok(format!(
-                "Subagent completed after {steps} steps but did not produce a text summary."
-            ))
-        }
-    } else {
-        Ok(final_text)
-    }
-}
-
-/// Execute a tool standalone (without self reference).
-/// This allows running multiple tools in parallel from async closures.
-#[allow(clippy::too_many_arguments)]
-async fn execute_tool_standalone(
-    tool_name: &str,
-    input: serde_json::Value,
-    cwd: &Path,
-    tools: Arc<ToolRegistry>,
-    cancel: CancellationToken,
-    snapshot_store: Option<Arc<SnapshotStore>>,
-    file_time: Arc<FileTimeState>,
-    sandbox: Option<Arc<dyn SandboxRuntime>>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<wonopcode_tools::ToolEvent>>,
-) -> Result<wonopcode_tools::ToolOutput, wonopcode_tools::ToolError> {
-    let tool = tools.get(tool_name).ok_or_else(|| {
-        wonopcode_tools::ToolError::validation(format!("Unknown tool: {tool_name}"))
-    })?;
-
-    let ctx = wonopcode_tools::ToolContext {
-        session_id: "default".to_string(),
-        message_id: "default".to_string(),
-        agent: "default".to_string(),
-        abort: cancel,
-        root_dir: cwd.to_path_buf(),
-        cwd: cwd.to_path_buf(),
-        snapshot: snapshot_store,
-        file_time: Some(file_time),
-        sandbox,
-        event_tx,
-    };
-
-    info!(tool = tool_name, "Executing tool");
-    let result = tool.execute(input.clone(), &ctx).await;
-
-    match &result {
-        Ok(_) => {
-            info!(tool = tool_name, "Tool execution completed successfully");
-        }
-        Err(e) => {
-            // Truncate arguments for logging to avoid huge log entries
-            let args_str =
-                serde_json::to_string(&input).unwrap_or_else(|_| "<invalid>".to_string());
-            let args_truncated = if args_str.len() > 2000 {
-                format!(
-                    "{}... [truncated, {} total chars]",
-                    &args_str[..2000],
-                    args_str.len()
-                )
-            } else {
-                args_str
-            };
-
-            error!(
-                tool = tool_name,
-                error = %e,
-                arguments = %args_truncated,
-                "Tool execution failed"
-            );
-        }
-    }
-
-    result
-}
-
-/// Get sandbox runtime for a tool from the sandbox manager.
-///
-/// Returns None if the sandbox manager is not configured, the tool bypasses sandbox,
-/// the sandbox was explicitly stopped, or the sandbox failed to start.
-async fn get_sandbox_for_tool(
-    tool_name: &str,
-    sandbox_manager: &Option<Arc<SandboxManager>>,
-) -> Option<Arc<dyn SandboxRuntime>> {
-    let manager = match sandbox_manager.as_ref() {
-        Some(m) => m,
-        None => {
-            info!(tool = tool_name, "No sandbox manager configured for tool");
-            return None;
-        }
-    };
-
-    // Check if tool should bypass sandbox
-    if manager.should_bypass_tool(tool_name) {
-        info!(tool = tool_name, "Tool bypasses sandbox");
-        return None;
-    }
-
-    // Check if sandbox was explicitly stopped by user
-    if manager.is_explicitly_stopped().await {
-        info!(
-            tool = tool_name,
-            "Sandbox explicitly stopped, not using sandbox"
-        );
-        return None;
-    }
-
-    // Get the runtime, starting it if needed
-    match manager.runtime().await {
-        Ok(runtime) => {
-            // Check if sandbox is ready
-            let is_ready = runtime.is_ready().await;
-            info!(
-                tool = tool_name,
-                is_ready = is_ready,
-                "Got sandbox runtime for tool"
-            );
-            if !is_ready {
-                // Auto-start sandbox for tool execution
-                info!(tool = tool_name, "Starting sandbox for tool");
-                if let Err(e) = runtime.start().await {
-                    warn!(tool = tool_name, error = %e, "Failed to start sandbox for tool");
-                    return None;
-                }
-                info!(tool = tool_name, "Sandbox started for tool");
-            }
-            Some(runtime as Arc<dyn SandboxRuntime>)
-        }
-        Err(e) => {
-            warn!(tool = tool_name, error = %e, "Failed to get sandbox runtime for tool");
-            None
-        }
-    }
-}
 
 /// Create a provider from configuration.
 ///
@@ -4457,397 +3028,6 @@ fn convert_mcp_remote_config(name: &str, config: &McpRemoteConfig) -> McpServerC
     server_config
 }
 
-/// Extract path from tool input for permission checking.
-fn extract_path_from_input(input: &serde_json::Value) -> Option<String> {
-    // Different tools use different field names for paths
-    let path_fields = ["filePath", "path", "file", "directory", "workdir"];
-
-    for field in &path_fields {
-        if let Some(path) = input.get(field).and_then(|v| v.as_str()) {
-            return Some(path.to_string());
-        }
-    }
-
-    // For bash tool, try to extract path from command
-    if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
-        // Extract first path-like argument from command
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        for part in parts.iter().skip(1) {
-            if part.starts_with('/') || part.starts_with("./") || part.starts_with("../") {
-                return Some(part.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-/// Extract modified file info from an observed tool (Claude CLI MCP tools).
-/// Returns a ModifiedFileUpdate if the tool modifies files.
-fn extract_modified_file_from_observed_tool(
-    tool_name: &str,
-    input_json: &str,
-    output: &str,
-) -> Option<ModifiedFileUpdate> {
-    // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__edit"
-    let base_name = tool_name.rsplit("__").next().unwrap_or(tool_name);
-
-    // Only process file-modifying tools
-    match base_name {
-        "edit" | "write" | "multiedit" | "patch" => {}
-        _ => return None,
-    }
-
-    // Try to extract metadata from output first (contains real line counts)
-    let metadata = extract_tool_metadata_from_output(output);
-
-    // Parse the input JSON
-    let input: serde_json::Value = serde_json::from_str(input_json).ok()?;
-
-    match base_name {
-        "edit" => {
-            // Single file tool - extract filePath from input, line counts from metadata
-            let path = metadata
-                .as_ref()
-                .and_then(|m| m.get("file").and_then(|v| v.as_str()))
-                .or_else(|| input.get("filePath").and_then(|v| v.as_str()))?;
-            let added = metadata
-                .as_ref()
-                .and_then(|m| m.get("additions").and_then(|v| v.as_u64()))
-                .unwrap_or(0) as u32;
-            let removed = metadata
-                .as_ref()
-                .and_then(|m| m.get("deletions").and_then(|v| v.as_u64()))
-                .unwrap_or(0) as u32;
-            Some(ModifiedFileUpdate {
-                path: path.to_string(),
-                added,
-                removed,
-            })
-        }
-        "write" => {
-            // Write tool - extract path from metadata or input
-            let path = metadata
-                .as_ref()
-                .and_then(|m| m.get("path").and_then(|v| v.as_str()))
-                .or_else(|| input.get("filePath").and_then(|v| v.as_str()))?;
-            // Write tool reports bytes, estimate lines (avg ~40 chars/line)
-            let added = metadata
-                .as_ref()
-                .and_then(|m| m.get("bytes").and_then(|v| v.as_u64()))
-                .map(|b| ((b / 40) as u32).max(1))
-                .unwrap_or(1);
-            Some(ModifiedFileUpdate {
-                path: path.to_string(),
-                added,
-                removed: 0,
-            })
-        }
-        "multiedit" => {
-            // Multi-edit tool - extract from metadata or input
-            let (paths, added, removed) = if let Some(ref meta) = metadata {
-                let paths: Vec<String> = meta
-                    .get("paths")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let added = meta.get("additions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let removed = meta.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                (paths, added, removed)
-            } else {
-                // Fallback to parsing input
-                let edits = input.get("edits").and_then(|v| v.as_array())?;
-                let mut paths_set: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
-                for edit in edits {
-                    if let Some(path) = edit.get("filePath").and_then(|v| v.as_str()) {
-                        paths_set.insert(path.to_string());
-                    }
-                }
-                (paths_set.into_iter().collect(), 0, 0)
-            };
-
-            if paths.is_empty() {
-                return None;
-            }
-
-            if paths.len() == 1 {
-                Some(ModifiedFileUpdate {
-                    path: paths.into_iter().next()?,
-                    added,
-                    removed,
-                })
-            } else {
-                Some(ModifiedFileUpdate {
-                    path: format!("{} files", paths.len()),
-                    added,
-                    removed,
-                })
-            }
-        }
-        "patch" => {
-            // Patch tool - extract from metadata
-            let (files_count, added, removed) = if let Some(ref meta) = metadata {
-                let files_modified = meta
-                    .get("files_modified")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let files_added = meta
-                    .get("files_added")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total_files = files_modified + files_added;
-                let added = meta.get("additions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let removed = meta.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                (total_files as usize, added, removed)
-            } else {
-                // Fallback: try to parse patch_text from input
-                let patch_text = input.get("patch_text").and_then(|v| v.as_str())?;
-                // Count files by looking for "*** " patterns
-                let count = patch_text
-                    .lines()
-                    .filter(|l| {
-                        l.starts_with("*** Add File:")
-                            || l.starts_with("*** Update File:")
-                            || l.starts_with("*** Delete File:")
-                    })
-                    .count();
-                (count.max(1), 0, 0)
-            };
-
-            if files_count == 0 {
-                return None;
-            }
-
-            if files_count == 1 {
-                // For single file, try to get the path
-                let path = input
-                    .get("patch_text")
-                    .and_then(|v| v.as_str())
-                    .and_then(|text| {
-                        text.lines().find_map(|l| {
-                            l.strip_prefix("*** Add File: ")
-                                .or_else(|| l.strip_prefix("*** Update File: "))
-                                .or_else(|| l.strip_prefix("*** Delete File: "))
-                        })
-                    })
-                    .unwrap_or("1 file");
-                Some(ModifiedFileUpdate {
-                    path: path.to_string(),
-                    added,
-                    removed,
-                })
-            } else {
-                Some(ModifiedFileUpdate {
-                    path: format!("{files_count} files"),
-                    added,
-                    removed,
-                })
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Extract tool metadata from output string.
-/// Looks for the <!-- TOOL_METADATA: {...} --> marker appended by MCP executor.
-fn extract_tool_metadata_from_output(output: &str) -> Option<serde_json::Value> {
-    const MARKER: &str = "<!-- TOOL_METADATA: ";
-    let start = output.rfind(MARKER)?;
-    let json_start = start + MARKER.len();
-    let end = output[json_start..].find(" -->")?;
-    let json_str = &output[json_start..json_start + end];
-    serde_json::from_str(json_str).ok()
-}
-
-/// Extract metadata from observed tool output.
-/// Some tools (like todowrite/todoread) include structured info in their output
-/// that we can parse to provide metadata for the TUI.
-fn extract_metadata_from_observed_tool(
-    tool_name: &str,
-    output: &str,
-) -> Option<serde_json::Map<String, serde_json::Value>> {
-    // Normalize tool name - MCP tools have prefix like "mcp__wonopcode-tools__todowrite"
-    let base_name = tool_name.rsplit("__").next().unwrap_or(tool_name);
-
-    match base_name {
-        "todowrite" | "todoread" => {
-            // Parse output like "Todo list updated: 2 pending, 1 in progress, 3 completed"
-            // or "5 todos: 2 pending, 1 in progress, 2 completed"
-            let mut metadata = serde_json::Map::new();
-
-            // Extract counts using simple pattern matching
-            if let Some(pending) = extract_count_before(output, " pending") {
-                metadata.insert("pending".to_string(), serde_json::json!(pending));
-            }
-            if let Some(in_progress) = extract_count_before(output, " in progress") {
-                metadata.insert("in_progress".to_string(), serde_json::json!(in_progress));
-            }
-            if let Some(completed) = extract_count_before(output, " completed") {
-                metadata.insert("completed".to_string(), serde_json::json!(completed));
-            }
-
-            // Calculate total
-            let total = metadata.values().filter_map(|v| v.as_u64()).sum::<u64>();
-            if total > 0 {
-                metadata.insert("total".to_string(), serde_json::json!(total));
-                Some(metadata)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Helper to extract a number that appears before a given suffix in text.
-/// E.g., extract_count_before("2 pending, 1 done", " pending") -> Some(2)
-fn extract_count_before(text: &str, suffix: &str) -> Option<u64> {
-    let idx = text.find(suffix)?;
-    let before = &text[..idx];
-    // Find the last number in the text before the suffix
-    let num_str: String = before
-        .chars()
-        .rev()
-        .take_while(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    num_str.parse().ok()
-}
-
-/// Determine the action type for a tool call.
-fn determine_tool_action(tool_name: &str, input: &serde_json::Value) -> String {
-    match tool_name {
-        "read" => "read".to_string(),
-        "write" => "write".to_string(),
-        "edit" | "multiedit" => "edit".to_string(),
-        "glob" | "grep" => "search".to_string(),
-        "bash" => {
-            // Determine if it's a read or write operation
-            if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
-                let read_commands = [
-                    "cat",
-                    "head",
-                    "tail",
-                    "less",
-                    "more",
-                    "ls",
-                    "pwd",
-                    "find",
-                    "grep",
-                    "rg",
-                    "tree",
-                    "git status",
-                    "git log",
-                    "git diff",
-                ];
-                let write_commands = [
-                    "rm",
-                    "mv",
-                    "cp",
-                    "mkdir",
-                    "rmdir",
-                    "touch",
-                    "chmod",
-                    "chown",
-                    "git add",
-                    "git commit",
-                    "git push",
-                ];
-
-                if read_commands.iter().any(|c| command.starts_with(c)) {
-                    "execute_read".to_string()
-                } else if write_commands.iter().any(|c| command.starts_with(c)) {
-                    "execute_write".to_string()
-                } else {
-                    "execute".to_string()
-                }
-            } else {
-                "execute".to_string()
-            }
-        }
-        "webfetch" => "fetch".to_string(),
-        "task" => "spawn_agent".to_string(),
-        "todowrite" | "todoread" => "manage_todos".to_string(),
-        "lsp" => "lsp_query".to_string(),
-        "skill" => "load_skill".to_string(),
-        _ => "execute".to_string(),
-    }
-}
-
-/// Format a human-readable description of the tool call for permission prompts.
-fn format_tool_description(tool_name: &str, input: &serde_json::Value) -> String {
-    match tool_name {
-        "read" => {
-            if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Read file: {path}")
-            } else {
-                "Read a file".to_string()
-            }
-        }
-        "write" => {
-            if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Write to file: {path}")
-            } else {
-                "Write to a file".to_string()
-            }
-        }
-        "edit" => {
-            if let Some(path) = input.get("filePath").and_then(|v| v.as_str()) {
-                format!("Edit file: {path}")
-            } else {
-                "Edit a file".to_string()
-            }
-        }
-        "bash" => {
-            if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
-                let truncated = if command.len() > 60 {
-                    format!("{}...", &command[..60])
-                } else {
-                    command.to_string()
-                };
-                format!("Execute: {truncated}")
-            } else {
-                "Execute a bash command".to_string()
-            }
-        }
-        "glob" => {
-            if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                format!("Search files: {pattern}")
-            } else {
-                "Search for files".to_string()
-            }
-        }
-        "grep" => {
-            if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                format!("Search content: {pattern}")
-            } else {
-                "Search file contents".to_string()
-            }
-        }
-        "webfetch" => {
-            if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                format!("Fetch URL: {url}")
-            } else {
-                "Fetch a web page".to_string()
-            }
-        }
-        "task" => {
-            if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                format!("Run task: {desc}")
-            } else {
-                "Run a sub-task".to_string()
-            }
-        }
-        _ => format!("Execute tool: {tool_name}"),
-    }
-}
 
 /// Convert core SandboxConfig to wonopcode-sandbox SandboxConfig.
 fn convert_sandbox_config(core_config: &CoreSandboxConfig) -> SandboxConfig {
@@ -4910,48 +3090,4 @@ fn convert_sandbox_config(core_config: &CoreSandboxConfig) -> SandboxConfig {
     }
 }
 
-#[cfg(test)]
-mod observed_tool_tests {
-    use super::*;
 
-    #[test]
-    fn test_extract_count_before() {
-        assert_eq!(
-            extract_count_before("2 pending, 1 done", " pending"),
-            Some(2)
-        );
-        assert_eq!(
-            extract_count_before("10 in progress", " in progress"),
-            Some(10)
-        );
-        assert_eq!(extract_count_before("no numbers here", " pending"), None);
-        assert_eq!(
-            extract_count_before("5 todos: 3 pending", " pending"),
-            Some(3)
-        );
-    }
-
-    #[test]
-    fn test_extract_metadata_from_todowrite() {
-        let output = "Todo list updated: 2 pending, 1 in progress, 3 completed";
-        let metadata =
-            extract_metadata_from_observed_tool("mcp__wonopcode-tools__todowrite", output);
-        assert!(metadata.is_some());
-        let m = metadata.unwrap();
-        assert_eq!(m.get("pending").and_then(|v| v.as_u64()), Some(2));
-        assert_eq!(m.get("in_progress").and_then(|v| v.as_u64()), Some(1));
-        assert_eq!(m.get("completed").and_then(|v| v.as_u64()), Some(3));
-        assert_eq!(m.get("total").and_then(|v| v.as_u64()), Some(6));
-    }
-
-    #[test]
-    fn test_extract_metadata_from_todoread() {
-        let output = "5 todos: 2 pending, 1 in progress, 2 completed";
-        let metadata = extract_metadata_from_observed_tool("todoread", output);
-        assert!(metadata.is_some());
-        let m = metadata.unwrap();
-        assert_eq!(m.get("pending").and_then(|v| v.as_u64()), Some(2));
-        assert_eq!(m.get("in_progress").and_then(|v| v.as_u64()), Some(1));
-        assert_eq!(m.get("completed").and_then(|v| v.as_u64()), Some(2));
-    }
-}

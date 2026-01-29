@@ -189,6 +189,7 @@ pub async fn run_command(
         Some(shared_bus),
         Some(shared_permission_manager),
         None, // No session service in run command
+        None, // Use default StandardLoop
     )
     .await
     {

@@ -19,6 +19,7 @@ members = [
     "crates/wonopcode-discover",
     "crates/wonopcode-test-utils",
     "crates/wonopcode-runner",
+    "crates/wonopcode-agent-loop",
     # Unified message types (IGGY migration)
     "crates/wonopcode-message",
     "crates/wonopcode-transport",
@@ -61,6 +62,7 @@ wonopcode-protocol = { path = "crates/wonopcode-protocol" }
 wonopcode-discover = { path = "crates/wonopcode-discover" }
 wonopcode-test-utils = { path = "crates/wonopcode-test-utils" }
 wonopcode-runner = { path = "crates/wonopcode-runner" }
+wonopcode-agent-loop = { path = "crates/wonopcode-agent-loop" }
 wonopcode-message = { path = "crates/wonopcode-message" }
 wonopcode-transport = { path = "crates/wonopcode-transport" }
 wonopcode-iggy-embedded = { path = "crates/wonopcode-iggy-embedded" }

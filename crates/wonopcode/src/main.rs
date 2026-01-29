@@ -671,6 +671,7 @@ async fn run_basic_mode(
         Some(shared_bus),
         Some(shared_permission_manager),
         Some(session_service),
+        None, // Use default StandardLoop
     )
     .await
     {
@@ -847,6 +848,7 @@ async fn run_tui_mode(
         Some(shared_bus),
         Some(shared_permission_manager),
         Some(session_service_web),
+        None, // Use default StandardLoop
     )
     .await
     {
@@ -1210,6 +1212,7 @@ async fn run_headless(
         Some(shared_bus),
         Some(shared_permission_manager.clone()),
         Some(session_service_headless),
+        None, // Use default StandardLoop
     )
     .await
     {

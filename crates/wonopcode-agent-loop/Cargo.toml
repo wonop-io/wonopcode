@@ -1,0 +1,35 @@
+[package]
+name = "wonopcode-agent-loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Agent loop trait and standard implementation for wonopcode"
+
+[dependencies]
+wonopcode-provider.workspace = true
+wonopcode-tools.workspace = true
+wonopcode-util.workspace = true
+wonopcode-snapshot.workspace = true
+wonopcode-sandbox.workspace = true
+
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
