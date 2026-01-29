@@ -450,8 +450,14 @@ impl SessionRepository {
             }
         }
 
-        // Sort by creation time (ascending - oldest first)
-        messages.sort_by_key(|m| m.message.created_at());
+        // Sort by creation time (ascending - oldest first), with message ID as tiebreaker
+        // This ensures stable ordering when messages have the same timestamp (e.g., in fast tests)
+        messages.sort_by(|a, b| {
+            a.message
+                .created_at()
+                .cmp(&b.message.created_at())
+                .then_with(|| a.message.id().cmp(b.message.id()))
+        });
 
         Ok(messages)
     }
