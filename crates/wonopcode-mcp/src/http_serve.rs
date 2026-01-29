@@ -119,7 +119,11 @@ impl McpHttpState {
     ///
     /// This is called when switching workstreams to ensure tools execute
     /// in the correct directory.
-    pub async fn update_working_directory(&self, cwd: std::path::PathBuf, root_dir: std::path::PathBuf) {
+    pub async fn update_working_directory(
+        &self,
+        cwd: std::path::PathBuf,
+        root_dir: std::path::PathBuf,
+    ) {
         let mut ctx = self.context.write().await;
         ctx.cwd = cwd;
         ctx.root_dir = root_dir;
