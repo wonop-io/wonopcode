@@ -242,6 +242,23 @@ pub enum ServerPayload {
         tokens_in: u64,
         tokens_out: u64,
     },
+    
+    /// Available models list.
+    AvailableModels {
+        models: Vec<ModelInfoSummary>,
+    },
+}
+
+/// Simplified model info for transmission
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelInfoSummary {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub description: Option<String>,
+    pub context_window: u32,
+    pub input_cost: Option<f64>,
+    pub output_cost: Option<f64>,
 }
 
 impl ServerPayload {
@@ -319,6 +336,7 @@ impl ServerPayload {
             ServerPayload::SandboxRestarted { .. } => "sandbox_restarted",
             ServerPayload::AgentStopped => "agent_stopped",
             ServerPayload::SessionStats { .. } => "session_stats",
+            ServerPayload::AvailableModels { .. } => "available_models",
         }
     }
 }

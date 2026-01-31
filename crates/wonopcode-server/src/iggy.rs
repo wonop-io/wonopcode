@@ -425,7 +425,7 @@ pub fn client_payload_to_app_action(payload: &ClientPayload) -> Option<wonopcode
         }),
         ClientPayload::Quit => Some(wonopcode_tui::AppAction::Quit),
         // Control actions handled separately
-        ClientPayload::Ping | ClientPayload::RequestState => None,
+        ClientPayload::Ping | ClientPayload::RequestState | ClientPayload::GetAvailableModels => None,
         // Workstream actions are Pro-only (not supported in Community Edition AppAction)
         ClientPayload::ListWorkstreams
         | ClientPayload::CreateWorktree { .. }
@@ -681,7 +681,7 @@ pub fn client_payload_to_legacy_action(
             remember: *remember,
         }),
         // Control actions are handled separately
-        ClientPayload::Ping | ClientPayload::RequestState | ClientPayload::Quit => None,
+        ClientPayload::Ping | ClientPayload::RequestState | ClientPayload::Quit | ClientPayload::GetAvailableModels => None,
         // Workstream actions are Pro-only
         ClientPayload::ListWorkstreams
         | ClientPayload::CreateWorktree { .. }

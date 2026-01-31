@@ -39,7 +39,7 @@ mod workstream;
 
 pub use client::{ClientMessage, ClientPayload, SaveScope};
 pub use info::*;
-pub use server::{ServerMessage, ServerPayload};
+pub use server::{ModelInfoSummary, ServerMessage, ServerPayload};
 pub use state::*;
 pub use workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo, WorkstreamStatus};
 
@@ -47,7 +47,7 @@ pub use workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo, WorkstreamSt
 pub mod prelude {
     pub use crate::client::{ClientMessage, ClientPayload, SaveScope};
     pub use crate::info::*;
-    pub use crate::server::{ServerMessage, ServerPayload};
+    pub use crate::server::{ModelInfoSummary, ServerMessage, ServerPayload};
     pub use crate::state::*;
     pub use crate::workstream::{WorkstreamEvent, WorkstreamId, WorkstreamInfo, WorkstreamStatus};
 }

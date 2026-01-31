@@ -177,6 +177,9 @@ pub enum ClientPayload {
 
     /// Request to quit (for graceful shutdown).
     Quit,
+    
+    /// Request list of available models.
+    GetAvailableModels,
 }
 
 /// Scope for saving settings.

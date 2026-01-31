@@ -1176,6 +1176,7 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::SandboxStopped
         | ServerPayload::SandboxRestarted { .. }
         | ServerPayload::AgentStopped
-        | ServerPayload::SessionStats { .. } => return None,
+        | ServerPayload::SessionStats { .. }
+        | ServerPayload::AvailableModels { .. } => return None,
     })
 }
