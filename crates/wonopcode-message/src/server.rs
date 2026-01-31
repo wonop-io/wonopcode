@@ -213,6 +213,35 @@ pub enum ServerPayload {
         workstream_count: usize,
         uptime_secs: u64,
     },
+    
+    // === Agent Control Updates ===
+    /// Model changed successfully.
+    ModelChanged {
+        model: String,
+    },
+    
+    /// Sandbox started successfully.
+    SandboxStarted {
+        container_id: String,
+    },
+    
+    /// Sandbox stopped successfully.
+    SandboxStopped,
+    
+    /// Sandbox restarted successfully.
+    SandboxRestarted {
+        container_id: String,
+    },
+    
+    /// Agent stopped successfully.
+    AgentStopped,
+    
+    /// Session statistics update.
+    SessionStats {
+        total_cost: f64,
+        tokens_in: u64,
+        tokens_out: u64,
+    },
 }
 
 impl ServerPayload {
@@ -284,6 +313,12 @@ impl ServerPayload {
             ServerPayload::ConversationHistory { .. } => "conversation_history",
             ServerPayload::Pong => "pong",
             ServerPayload::ServerStatus { .. } => "server_status",
+            ServerPayload::ModelChanged { .. } => "model_changed",
+            ServerPayload::SandboxStarted { .. } => "sandbox_started",
+            ServerPayload::SandboxStopped => "sandbox_stopped",
+            ServerPayload::SandboxRestarted { .. } => "sandbox_restarted",
+            ServerPayload::AgentStopped => "agent_stopped",
+            ServerPayload::SessionStats { .. } => "session_stats",
         }
     }
 }

@@ -39,6 +39,35 @@ pub trait Backend: Send + Sync {
 
     /// Get the backend type name (for display).
     fn backend_type(&self) -> &'static str;
+    
+    /// Convenience method: Change the AI model
+    async fn change_model(&self, model_id: String) -> BackendResult<()> {
+        self.send_action(AppAction::ChangeModel(model_id)).await
+    }
+    
+    /// Convenience method: Start the sandbox (Docker)
+    async fn start_sandbox(&self) -> BackendResult<String> {
+        self.send_action(AppAction::SandboxStart).await?;
+        // TODO: Return actual container ID from backend response
+        Ok("sandbox-container".to_string())
+    }
+    
+    /// Convenience method: Stop the sandbox (Docker)
+    async fn stop_sandbox(&self) -> BackendResult<()> {
+        self.send_action(AppAction::SandboxStop).await
+    }
+    
+    /// Convenience method: Restart the sandbox (Docker)
+    async fn restart_sandbox(&self) -> BackendResult<String> {
+        self.send_action(AppAction::SandboxRestart).await?;
+        // TODO: Return actual container ID from backend response
+        Ok("sandbox-container".to_string())
+    }
+    
+    /// Convenience method: Stop the agent
+    async fn stop_agent(&self) -> BackendResult<()> {
+        self.send_action(AppAction::Quit).await
+    }
 }
 
 /// Local backend using direct tokio channels.
@@ -1141,5 +1170,12 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         // Control payloads
         ServerPayload::Pong => return None, // Internal ping/pong, don't expose to UI
         ServerPayload::ServerStatus { .. } => return None, // Internal status
+        // Agent control payloads - handled by Pro edition UI, not TUI
+        ServerPayload::ModelChanged { .. }
+        | ServerPayload::SandboxStarted { .. }
+        | ServerPayload::SandboxStopped
+        | ServerPayload::SandboxRestarted { .. }
+        | ServerPayload::AgentStopped
+        | ServerPayload::SessionStats { .. } => return None,
     })
 }
