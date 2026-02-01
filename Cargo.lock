@@ -6121,6 +6121,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wonopcode-git"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
 name = "wonopcode-iggy-embedded"
 version = "0.1.2"
 dependencies = [

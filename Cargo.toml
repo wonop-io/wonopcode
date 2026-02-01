@@ -24,6 +24,7 @@ members = [
     "crates/wonopcode-message",
     "crates/wonopcode-transport",
     "crates/wonopcode-iggy-embedded",
+    "crates/wonopcode-git",
     # TUI sub-crates
     "crates/wonopcode-tui-core",
     "crates/wonopcode-tui-render",
@@ -66,6 +67,7 @@ wonopcode-agent-loop = { path = "crates/wonopcode-agent-loop" }
 wonopcode-message = { path = "crates/wonopcode-message" }
 wonopcode-transport = { path = "crates/wonopcode-transport" }
 wonopcode-iggy-embedded = { path = "crates/wonopcode-iggy-embedded" }
+wonopcode-git = { path = "crates/wonopcode-git" }
 
 # TUI sub-crates
 wonopcode-tui-core = { path = "crates/wonopcode-tui-core" }
