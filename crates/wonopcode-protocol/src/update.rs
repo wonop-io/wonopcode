@@ -78,6 +78,8 @@ pub enum Update {
         runtime_type: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        container_id: Option<String>,
     },
 
     /// System message to display.
@@ -303,11 +305,13 @@ mod tests {
             state: "running".to_string(),
             runtime_type: Some("docker".to_string()),
             error: None,
+            container_id: Some("abc123".to_string()),
         };
         let json = serde_json::to_string(&update).unwrap();
         assert!(json.contains("sandbox_updated"));
         assert!(json.contains("running"));
         assert!(json.contains("docker"));
+        assert!(json.contains("abc123"));
     }
 
     #[test]
@@ -380,6 +384,7 @@ mod tests {
                 state: "".to_string(),
                 runtime_type: None,
                 error: None,
+                container_id: None,
             },
             Update::SystemMessage {
                 message: "".to_string(),

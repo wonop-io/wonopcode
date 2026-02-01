@@ -567,6 +567,7 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             state: status.state.clone(),
             runtime_type: status.runtime_type.clone(),
             error: status.error.clone(),
+            container_id: status.container_id.clone(),
         },
         wonopcode_tui::AppUpdate::SystemMessage(message) => ServerPayload::SystemMessage {
             message: message.clone(),
@@ -824,10 +825,12 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             state,
             runtime_type,
             error,
+            container_id,
         } => ServerPayload::SandboxUpdated {
             state: state.clone(),
             runtime_type: runtime_type.clone(),
             error: error.clone(),
+            container_id: container_id.clone(),
         },
         wonopcode_protocol::Update::SystemMessage { message } => ServerPayload::SystemMessage {
             message: message.clone(),

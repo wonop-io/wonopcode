@@ -415,6 +415,7 @@ impl SandboxRuntime for DockerRuntime {
             image: self.config.image().to_string(),
             host_root: self.path_mapper.host_root().to_path_buf(),
             workspace_path: self.path_mapper.sandbox_root().to_path_buf(),
+            container_id: self.container_id.read().await.clone(),
         }
     }
 

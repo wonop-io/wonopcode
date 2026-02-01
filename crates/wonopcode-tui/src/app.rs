@@ -422,6 +422,8 @@ pub struct SandboxStatusUpdate {
     pub runtime_type: Option<String>,
     /// Error message if state is "error"
     pub error: Option<String>,
+    /// Container ID from Docker runtime (when running)
+    pub container_id: Option<String>,
 }
 
 /// Permission request update from the runner.

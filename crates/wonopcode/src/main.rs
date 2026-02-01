@@ -1664,6 +1664,7 @@ async fn run_headless(
                     state: status.state,
                     runtime_type: status.runtime_type,
                     error: status.error,
+                    container_id: status.container_id,
                 },
                 wonopcode_tui::AppUpdate::SystemMessage(message) => {
                     Update::SystemMessage { message }
@@ -1905,6 +1906,7 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
         state: state.sandbox.state,
         runtime_type: state.sandbox.runtime_type,
         error: state.sandbox.error,
+        container_id: None, // Not available during state restoration
     };
     // Send as update so it's processed correctly
     let update_tx = app.update_sender();

@@ -1202,19 +1202,25 @@ impl Runner {
                 if manager.is_ready().await {
                     // Sandbox is already running, update permission manager state
                     self.permission_manager.set_sandbox_running(true);
-                    // Share sandbox runtime with permission manager for MCP tools
-                    if let Ok(runtime) = manager.runtime().await {
+                    
+                    // Get container ID from runtime info
+                    let container_id = if let Ok(runtime) = manager.runtime().await {
                         let wrapper: Arc<dyn std::any::Any + Send + Sync> =
-                            Arc::new(SandboxRuntimeWrapper(runtime));
+                            Arc::new(SandboxRuntimeWrapper(runtime.clone()));
                         self.permission_manager
                             .set_sandbox_runtime_any(Some(wrapper))
                             .await;
-                    }
+                        runtime.info().await.container_id
+                    } else {
+                        None
+                    };
+                    
                     (
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "running".to_string(),
                             runtime_type: Some(runtime_type),
                             error: None,
+                            container_id,
                         },
                         Some(format!(
                             "⬡ Sandbox active ({runtime_lower}) - commands execute in isolated container"
@@ -1226,6 +1232,7 @@ impl Runner {
                             state: "stopped".to_string(),
                             runtime_type: Some(runtime_type),
                             error: None,
+                            container_id: None,
                         },
                         Some(format!(
                             "⬡ Sandbox available ({runtime_lower}) - use /sandbox start to enable isolation"
@@ -1238,6 +1245,7 @@ impl Runner {
                         state: "disabled".to_string(),
                         runtime_type: None,
                         error: None,
+                        container_id: None,
                     },
                     None, // Don't show message when sandbox is completely disabled
                 )
@@ -1895,6 +1903,7 @@ impl Runner {
                     state: "starting".to_string(),
                     runtime_type: Some(manager.runtime_type_display()),
                     error: None,
+                    container_id: None,
                 }),
             );
 
@@ -1915,6 +1924,13 @@ impl Runner {
                             .await;
                     }
 
+                    // Get container ID from runtime info
+                    let container_id = if let Ok(runtime) = manager.runtime().await {
+                        runtime.info().await.container_id
+                    } else {
+                        None
+                    };
+
                     self.bus
                         .publish(SandboxStatusChanged {
                             state: SandboxState::Running,
@@ -1928,6 +1944,7 @@ impl Runner {
                             state: "running".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: None,
+                            container_id,
                         }),
                     );
 
@@ -1955,6 +1972,7 @@ impl Runner {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: Some(e.to_string()),
+                            container_id: None,
                         }),
                     );
                 }
@@ -1966,6 +1984,7 @@ impl Runner {
                     state: "disabled".to_string(),
                     runtime_type: None,
                     error: Some("Sandbox not configured".to_string()),
+                    container_id: None,
                 }),
             );
         }
@@ -2056,6 +2075,7 @@ impl Runner {
                             state: "stopped".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: None,
+                            container_id: None,
                         }),
                     );
 
@@ -2079,6 +2099,7 @@ impl Runner {
                             state: "error".to_string(),
                             runtime_type: Some(manager.runtime_type_display()),
                             error: Some(e.to_string()),
+                            container_id: None,
                         }),
                     );
                 }
@@ -2090,6 +2111,7 @@ impl Runner {
                     state: "disabled".to_string(),
                     runtime_type: None,
                     error: Some("Sandbox not configured".to_string()),
+                    container_id: None,
                 }),
             );
         }

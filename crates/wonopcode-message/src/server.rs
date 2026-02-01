@@ -146,6 +146,8 @@ pub enum ServerPayload {
         runtime_type: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        container_id: Option<String>,
     },
 
     /// System message to display.
@@ -231,6 +233,11 @@ pub enum ServerPayload {
     /// Sandbox restarted successfully.
     SandboxRestarted {
         container_id: String,
+    },
+    
+    /// Sandbox error occurred.
+    SandboxError {
+        message: String,
     },
     
     /// Agent stopped successfully.
@@ -334,6 +341,7 @@ impl ServerPayload {
             ServerPayload::SandboxStarted { .. } => "sandbox_started",
             ServerPayload::SandboxStopped => "sandbox_stopped",
             ServerPayload::SandboxRestarted { .. } => "sandbox_restarted",
+            ServerPayload::SandboxError { .. } => "sandbox_error",
             ServerPayload::AgentStopped => "agent_stopped",
             ServerPayload::SessionStats { .. } => "session_stats",
             ServerPayload::AvailableModels { .. } => "available_models",
@@ -487,6 +495,7 @@ mod tests {
                 state: "".into(),
                 runtime_type: None,
                 error: None,
+                container_id: None,
             },
             ServerPayload::SystemMessage { message: "".into() },
             ServerPayload::AgentChanged { agent: "".into() },

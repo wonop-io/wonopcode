@@ -232,6 +232,8 @@ pub struct SandboxInfo {
     pub host_root: PathBuf,
     /// Sandbox workspace path
     pub workspace_path: PathBuf,
+    /// Container ID (for Docker runtime when running)
+    pub container_id: Option<String>,
 }
 
 /// Information about a sandbox snapshot.
