@@ -325,6 +325,106 @@ pub fn get_diff_files(worktree_path: &Path, base_branch: &str) -> Result<Vec<Dif
     Ok(files)
 }
 
+/// Get list of files changed with custom compare target
+///
+/// Supports different diff modes:
+/// - base=Some("main"), compare=None: main..working_tree (all changes)
+/// - base=Some("main"), compare=Some("HEAD"): main..HEAD (branch changes)
+/// - base=Some("HEAD"), compare=None: HEAD..working_tree (uncommitted)
+pub fn get_diff_files_with_compare(
+    worktree_path: &Path,
+    base: Option<&str>,
+    compare: Option<&str>,
+) -> Result<Vec<DiffFileSummary>> {
+    // Build diff spec
+    let diff_spec = match (base, compare) {
+        (Some(b), Some(c)) => format!("{}..{}", b, c),
+        (Some(b), None) => b.to_string(), // Compare against working tree
+        (None, None) => "HEAD".to_string(), // HEAD vs working tree
+        _ => return Ok(Vec::new()),
+    };
+    
+    // Get name-status
+    let status_output = Command::new("git")
+        .args(["diff", "--name-status", &diff_spec])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git diff --name-status")?;
+
+    if !status_output.status.success() {
+        return Err(anyhow::anyhow!(
+            "git diff --name-status failed: {}",
+            String::from_utf8_lossy(&status_output.stderr)
+        ));
+    }
+
+    // Get numstat
+    let numstat_output = Command::new("git")
+        .args(["diff", "--numstat", &diff_spec])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git diff --numstat")?;
+
+    if !numstat_output.status.success() {
+        return Err(anyhow::anyhow!(
+            "git diff --numstat failed: {}",
+            String::from_utf8_lossy(&numstat_output.stderr)
+        ));
+    }
+
+    // Parse results
+    let status_text = String::from_utf8_lossy(&status_output.stdout).to_string();
+    let status_lines: Vec<_> = status_text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    let numstat_text = String::from_utf8_lossy(&numstat_output.stdout).to_string();
+    let numstat_lines: Vec<_> = numstat_text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    let mut files = Vec::new();
+
+    for (status_line, numstat_line) in status_lines.iter().zip(numstat_lines.iter()) {
+        let status_parts: Vec<_> = status_line.splitn(2, '\t').collect();
+        if status_parts.len() < 2 {
+            continue;
+        }
+
+        let status_code = status_parts[0];
+        let path = status_parts[1].to_string();
+
+        let status = match status_code.chars().next() {
+            Some('A') => "added",
+            Some('M') => "modified",
+            Some('D') => "deleted",
+            Some('R') => "renamed",
+            _ => "unknown",
+        };
+
+        let numstat_parts: Vec<_> = numstat_line.split_whitespace().collect();
+        let additions = numstat_parts
+            .first()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let deletions = numstat_parts
+            .get(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        files.push(DiffFileSummary {
+            path,
+            status: status.to_string(),
+            additions,
+            deletions,
+        });
+    }
+
+    Ok(files)
+}
+
 /// Get full diff for a specific file
 ///
 /// Returns the complete diff with line-by-line information.
@@ -383,6 +483,100 @@ pub fn get_file_diff(worktree_path: &Path, file_path: &str, base_branch: &str) -
     } else {
         "modified".to_string()
     };
+
+    Ok(FileDiff {
+        path: file_path.to_string(),
+        status,
+        additions,
+        deletions,
+        lines,
+    })
+}
+
+/// Get full diff for a specific file with custom compare target
+///
+/// Supports different diff modes (same as get_diff_files_with_compare)
+pub fn get_file_diff_with_compare(
+    worktree_path: &Path,
+    file_path: &str,
+    base: Option<&str>,
+    compare: Option<&str>,
+) -> Result<FileDiff> {
+    // Build diff spec
+    let diff_spec = match (base, compare) {
+        (Some(b), Some(c)) => format!("{}..{}", b, c),
+        (Some(b), None) => b.to_string(), // Compare against working tree
+        (None, None) => "HEAD".to_string(), // HEAD vs working tree
+        _ => {
+            return Ok(FileDiff {
+                path: file_path.to_string(),
+                status: "unchanged".to_string(),
+                additions: 0,
+                deletions: 0,
+                lines: Vec::new(),
+            });
+        }
+    };
+
+    // Get the unified diff for this file
+    let diff_output = Command::new("git")
+        .args(["diff", "-U3", &diff_spec, "--", file_path])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git diff")?;
+
+    if !diff_output.status.success() {
+        return Err(anyhow::anyhow!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&diff_output.stderr)
+        ));
+    }
+
+    let diff_text = String::from_utf8_lossy(&diff_output.stdout);
+    let lines = parse_unified_diff(&diff_text)?;
+
+    // Get stats
+    let numstat_output = Command::new("git")
+        .args(["diff", "--numstat", &diff_spec, "--", file_path])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git diff --numstat")?;
+
+    let mut additions = 0;
+    let mut deletions = 0;
+    let mut status = "modified".to_string();
+
+    if numstat_output.status.success() {
+        let numstat_text = String::from_utf8_lossy(&numstat_output.stdout);
+        if let Some(line) = numstat_text.lines().next() {
+            let parts: Vec<_> = line.split_whitespace().collect();
+            additions = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+            deletions = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        }
+    }
+
+    // Try to detect file status
+    let status_output = Command::new("git")
+        .args(["diff", "--name-status", &diff_spec, "--", file_path])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git diff --name-status")?;
+
+    if status_output.status.success() {
+        let status_text = String::from_utf8_lossy(&status_output.stdout);
+        if let Some(line) = status_text.lines().next() {
+            let parts: Vec<_> = line.splitn(2, '\t').collect();
+            if let Some(status_code) = parts.first() {
+                status = match status_code.chars().next() {
+                    Some('A') => "added".to_string(),
+                    Some('M') => "modified".to_string(),
+                    Some('D') => "deleted".to_string(),
+                    Some('R') => "renamed".to_string(),
+                    _ => "unknown".to_string(),
+                };
+            }
+        }
+    }
 
     Ok(FileDiff {
         path: file_path.to_string(),
