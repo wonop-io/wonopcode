@@ -93,6 +93,8 @@ pub enum LoopUpdate {
     ToolCompleted {
         /// Tool call ID.
         id: String,
+        /// Tool name.
+        name: String,
         /// Whether execution succeeded.
         success: bool,
         /// Tool output.

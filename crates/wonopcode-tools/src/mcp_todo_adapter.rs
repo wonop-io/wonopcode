@@ -95,6 +95,22 @@ impl McpTodoAdapter {
         self.tool_mappings.contains_key(tool_id)
     }
 
+    /// Get a clone of the tool mappings for use in async contexts.
+    /// This is useful when the adapter itself can't be moved due to Arc<dyn Tool> fields.
+    pub fn tool_mappings(&self) -> HashMap<String, McpTodoToolType> {
+        self.tool_mappings.clone()
+    }
+
+    /// Parse MCP TODO tool output and convert to PhasedTodos (public for external use).
+    /// Returns the tool type and parsed todos if the tool is a recognized MCP TODO tool.
+    pub fn parse_todo_output(&self, tool_id: &str, output: &str) -> Option<PhasedTodos> {
+        if let Some(tool_type) = self.tool_mappings.get(tool_id) {
+            self.parse_mcp_todo_output(output, *tool_type).ok()
+        } else {
+            None
+        }
+    }
+
     /// Intercept MCP TODO tool output and emit appropriate events.
     ///
     /// This method should be called by the runner when an MCP TODO tool completes execution.
@@ -352,6 +368,15 @@ impl McpTodoAdapter {
 
     /// Check if a tool ID represents an MCP TODO write tool.
     fn is_mcp_todo_write_tool(tool_id: &str) -> bool {
+        Self::is_mcp_todo_write_tool_static(tool_id)
+    }
+
+    /// Check if a tool ID represents an MCP TODO write tool (public static version).
+    ///
+    /// This can be called without an McpTodoAdapter instance, which is useful
+    /// when intercepting tool completions from external execution (e.g., Claude CLI)
+    /// where no local MCP setup exists.
+    pub fn is_mcp_todo_write_tool_static(tool_id: &str) -> bool {
         // Standard MCP naming patterns
         (tool_id.starts_with("mcp__") && (
             tool_id.ends_with("__todo_write") ||

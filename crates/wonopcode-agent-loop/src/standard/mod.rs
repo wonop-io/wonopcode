@@ -215,6 +215,8 @@ impl AgentLoop for StandardLoop {
             let mut step_usage = Usage::default();
             // Track pending tool calls during streaming
             let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
+            // Track observed tool names by ID (for external tool execution like CLI providers)
+            let mut observed_tool_names: HashMap<String, String> = HashMap::new();
 
             // Process stream
             while let Some(chunk_result) = stream.next().await {
@@ -270,6 +272,8 @@ impl AgentLoop for StandardLoop {
                     StreamChunk::ToolObserved { id, name, input } => {
                         // Tool was observed being executed externally
                         debug!(id = %id, name = %name, "Tool observed (external execution)");
+                        // Track the tool name by ID so we can include it in ToolCompleted
+                        observed_tool_names.insert(id.clone(), name.clone());
                         ctx.send_update(LoopUpdate::ToolStarted { id, name, input });
                     }
                     StreamChunk::ToolResultObserved {
@@ -278,9 +282,14 @@ impl AgentLoop for StandardLoop {
                         output,
                     } => {
                         // Tool result was observed (external execution completed)
-                        debug!(id = %id, success = %success, "Tool result observed");
+                        // Look up the tool name from when we observed it starting
+                        let name = observed_tool_names
+                            .remove(&id)
+                            .unwrap_or_else(|| "unknown".to_string());
+                        debug!(id = %id, name = %name, success = %success, "Tool result observed");
                         ctx.send_update(LoopUpdate::ToolCompleted {
                             id,
+                            name,
                             success,
                             output,
                             metadata: None,
@@ -402,6 +411,7 @@ impl AgentLoop for StandardLoop {
                     });
                     ctx.send_update(LoopUpdate::ToolCompleted {
                         id: call_id.clone(),
+                        name: tool_name.clone(),
                         success: false,
                         output: error_msg.clone(),
                         metadata: None,
@@ -449,6 +459,7 @@ impl AgentLoop for StandardLoop {
 
                 ctx.send_update(LoopUpdate::ToolCompleted {
                     id: call_id.clone(),
+                    name: tool_name.clone(),
                     success,
                     output: output.clone(),
                     metadata,

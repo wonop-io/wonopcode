@@ -89,6 +89,155 @@ fn convert_phased_todos_to_updates(
     (phases, todos)
 }
 
+/// Parse MCP TODO tool output and convert it to PhasedTodos.
+/// This is a simplified parser that handles the common markdown output format from the todowrite tool.
+fn parse_mcp_todo_output_simple(output: &str) -> Result<todo::PhasedTodos, serde_json::Error> {
+    // Try to parse as JSON first (may be embedded in markdown response)
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+        // Try direct PhasedTodos format
+        if let Ok(phased_todos) = serde_json::from_value::<todo::PhasedTodos>(value.clone()) {
+            return Ok(phased_todos);
+        }
+        // Try parsing phases array from JSON
+        if let Some(phases_value) = value.get("phases") {
+            if let Ok(phases) = serde_json::from_value::<Vec<todo::Phase>>(phases_value.clone()) {
+                let mut phased_todos = todo::PhasedTodos::new();
+                for phase in phases {
+                    phased_todos.add_phase(phase);
+                }
+                return Ok(phased_todos);
+            }
+        }
+    }
+
+    // Parse markdown format (the most common output from todowrite)
+    // Format:
+    // ## ○ Phase Name (0/3 done)
+    //   [ ] [high] Task description (task_id)
+    //   [>] [medium] In progress task (task_id_2)
+    //   [x] [low] Completed task (task_id_3)
+    let mut phased_todos = todo::PhasedTodos::new();
+    let mut current_phase: Option<todo::Phase> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+
+        // Phase header: ## ○ Phase Name (0/3 done)
+        if trimmed.starts_with("##") {
+            // Save previous phase if exists
+            if let Some(phase) = current_phase.take() {
+                phased_todos.add_phase(phase);
+            }
+
+            // Extract phase name
+            let phase_line = trimmed.trim_start_matches("##").trim();
+            let phase_name = if let Some(pos) = phase_line.find('(') {
+                phase_line[..pos].trim()
+            } else {
+                phase_line
+            };
+
+            // Remove status icon if present (○, ◐, ●)
+            let phase_name = phase_name.trim_start_matches(['○', '◐', '●']).trim();
+
+            current_phase = Some(todo::Phase::new(
+                format!("phase_{}", phased_todos.phases.len() + 1),
+                phase_name,
+            ));
+        }
+        // Todo item: [ ] [priority] description (id)
+        else if trimmed.starts_with('[') {
+            if let Some(ref mut phase) = current_phase {
+                if let Some(todo_item) = parse_markdown_todo_line(trimmed) {
+                    phase.add_todo(todo_item);
+                }
+            }
+        }
+    }
+
+    // Save final phase
+    if let Some(phase) = current_phase {
+        phased_todos.add_phase(phase);
+    }
+
+    // If no phases were parsed, return error
+    if phased_todos.phases.is_empty() {
+        return Err(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "No valid TODO phases found in output",
+        )));
+    }
+
+    Ok(phased_todos)
+}
+
+/// Parse a single markdown TODO line into a TodoItem.
+fn parse_markdown_todo_line(line: &str) -> Option<todo::TodoItem> {
+    let line = line.trim();
+
+    // Extract status icon: [ ], [>], [x], [-]
+    let status = if line.starts_with("[ ]") {
+        todo::TodoStatus::Pending
+    } else if line.starts_with("[>]") {
+        todo::TodoStatus::InProgress
+    } else if line.starts_with("[x]") {
+        todo::TodoStatus::Completed
+    } else if line.starts_with("[-]") {
+        todo::TodoStatus::Cancelled
+    } else {
+        return None;
+    };
+
+    // Remove status part
+    let rest = line[3..].trim();
+
+    // Extract priority if present: [high], [medium], [low]
+    let (priority, rest) = if rest.starts_with('[') {
+        if let Some(end) = rest.find(']') {
+            let priority_str = &rest[1..end];
+            let priority = match priority_str {
+                "high" => todo::TodoPriority::High,
+                "medium" => todo::TodoPriority::Medium,
+                "low" => todo::TodoPriority::Low,
+                _ => todo::TodoPriority::Medium,
+            };
+            (priority, rest[end + 1..].trim())
+        } else {
+            (todo::TodoPriority::Medium, rest)
+        }
+    } else {
+        (todo::TodoPriority::Medium, rest)
+    };
+
+    // Extract ID from parentheses at the end
+    let (content, id) = if let Some(start) = rest.rfind('(') {
+        if let Some(end) = rest.rfind(')') {
+            if end > start {
+                let id = rest[start + 1..end].trim().to_string();
+                let content = rest[..start].trim().to_string();
+                (content, id)
+            } else {
+                // Generate a simple ID based on content hash if no ID found
+                let hash = rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
+                (rest.to_string(), format!("todo_{:x}", hash))
+            }
+        } else {
+            let hash = rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
+            (rest.to_string(), format!("todo_{:x}", hash))
+        }
+    } else {
+        let hash = rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
+        (rest.to_string(), format!("todo_{:x}", hash))
+    };
+
+    Some(todo::TodoItem {
+        id,
+        content,
+        status,
+        priority,
+    })
+}
+
 /// Wrapper to store `Arc<dyn SandboxRuntime>` as `Arc<dyn Any + Send + Sync>`.
 /// This allows sharing sandbox runtime through permission manager without circular deps.
 pub struct SandboxRuntimeWrapper(pub Arc<dyn SandboxRuntime>);
@@ -890,6 +1039,9 @@ impl Runner {
         // Create a channel for LoopUpdate events
         let (loop_update_tx, mut loop_update_rx) = mpsc::unbounded_channel::<LoopUpdate>();
 
+        // Get MCP TODO tool mappings for intercepting TODO tool completions
+        let mcp_todo_mappings = self.mcp_todo_adapter.as_ref().map(|a| a.tool_mappings());
+
         // Spawn a task to forward LoopUpdate events to AppUpdate
         let update_tx_clone = update_tx.clone();
         let forward_task = tokio::spawn(async move {
@@ -902,14 +1054,39 @@ impl Runner {
                     }
                     LoopUpdate::ToolCompleted {
                         id,
+                        name,
                         success,
                         output,
                         metadata,
-                    } => AppUpdate::ToolCompleted {
-                        id,
-                        success,
-                        output,
-                        metadata,
+                    } => {
+                        // Check if this is a TODO tool and emit TodosUpdated if so.
+                        // This handles both cases:
+                        // 1. When MCP adapter is available (mcp_todo_mappings is Some)
+                        // 2. When MCP tools are observed from external execution (e.g., Claude CLI)
+                        //    even without local MCP setup (mcp_todo_mappings is None)
+                        let is_todo_tool = if let Some(ref mappings) = mcp_todo_mappings {
+                            // Check registered MCP TODO tools
+                            mappings.contains_key(&name)
+                        } else {
+                            // Fallback: check by tool name pattern for external MCP tools
+                            // This is essential for Claude CLI mode where tools are executed externally
+                            mcp_todo_adapter::McpTodoAdapter::is_mcp_todo_write_tool_static(&name)
+                        };
+
+                        if is_todo_tool {
+                            debug!(tool = %name, "Intercepting TODO tool completion");
+                            // Parse the output as TODO data
+                            if let Ok(phased_todos) = parse_mcp_todo_output_simple(&output) {
+                                let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
+                                let _ = update_tx_clone.send(AppUpdate::TodosUpdated { phases, todos });
+                            }
+                        }
+                        AppUpdate::ToolCompleted {
+                            id,
+                            success,
+                            output,
+                            metadata,
+                        }
                     },
                     LoopUpdate::ResponseComplete { text } => AppUpdate::Completed { text },
                     LoopUpdate::TokenUsage {
