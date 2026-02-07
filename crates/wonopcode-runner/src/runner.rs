@@ -1101,18 +1101,26 @@ impl Runner {
             false
         };
 
-        // Get the current CLI session ID before recreating the provider
-        // This preserves Claude CLI session persistence when changing models within same provider
-        let old_provider_id = {
+        // Get the current CLI session ID and model info before recreating the provider
+        // We only preserve the session if staying with the SAME model on the same provider,
+        // because Claude CLI sessions are tied to specific models
+        let (old_provider_id, old_model_id) = {
             let provider = self.provider.read().await;
-            provider.provider_id().to_string()
+            (provider.provider_id().to_string(), provider.model_info().id.clone())
         };
-        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic" {
-            // Staying with Claude CLI provider - preserve session
+        let cli_session_id = if old_provider_id == "anthropic-cli" 
+            && provider_name == "anthropic"
+            && old_model_id == model_id 
+        {
+            // Staying with same Claude CLI provider AND same model - preserve session
             let provider = self.provider.read().await;
             provider.get_cli_session_id().await
         } else {
-            // Changing providers - start fresh session
+            // Changing providers or models - start fresh session
+            // Claude CLI sessions are model-specific, so we can't reuse them across models
+            if old_model_id != model_id {
+                info!(old_model = %old_model_id, new_model = %model_id, "Model changed, starting fresh session");
+            }
             None
         };
 
