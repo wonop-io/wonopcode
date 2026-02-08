@@ -17,7 +17,10 @@ pub mod compaction;
 mod runner;
 
 pub use compaction::{CompactionConfig, CompactionResult};
-pub use runner::{load_api_key, Runner, RunnerConfig, SandboxRuntimeWrapper};
+pub use runner::{
+    get_auth_method, get_provider_status, get_server_config, has_credentials, load_api_key, Runner,
+    RunnerConfig, SandboxRuntimeWrapper,
+};
 
 // Re-export agent loop types for convenience
 pub use wonopcode_agent_loop::{

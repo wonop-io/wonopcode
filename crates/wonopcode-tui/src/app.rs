@@ -1251,15 +1251,28 @@ impl<S: SidebarTrait> App<S> {
         match result {
             SettingsResult::Save(scope) => {
                 // Extract values from dialog before making mutable borrows
-                let (config, theme_name, new_render_settings) =
+                let (config, theme_name, new_render_settings, auth_changes) =
                     if let Some(ref dialog) = self.settings_dialog {
                         let config = dialog.to_config();
                         let theme_name = config.theme.clone();
                         let render_settings = dialog.get_render_settings();
-                        (Some(config), theme_name, Some(render_settings))
+                        let auth_changes = dialog.get_auth_changes();
+                        (Some(config), theme_name, Some(render_settings), auth_changes)
                     } else {
-                        (None, None, None)
+                        (None, None, None, None)
                     };
+
+                // Save auth settings changes to CredentialsManager
+                if let Some(auth_changes) = auth_changes {
+                    if let Some(mut creds_manager) = wonopcode_core::CredentialsManager::new() {
+                        if let Err(e) = auth_changes.apply(&mut creds_manager) {
+                            self.toasts
+                                .push(Toast::error(format!("Failed to save credentials: {e}")));
+                        } else {
+                            self.toasts.push(Toast::success("Credentials updated"));
+                        }
+                    }
+                }
 
                 if let Some(config) = config {
                     // Apply theme change immediately if present

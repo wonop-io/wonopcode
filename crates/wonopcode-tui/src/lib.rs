@@ -47,10 +47,10 @@ pub use app::{
 pub use backend::{Backend, BackendError, BackendResult, IggyBackend, LocalBackend, RemoteBackend};
 pub use widgets::{
     highlight_code, highlight_diff, is_diff, render_markdown, render_markdown_with_width,
-    CommandPalette, ContextInfo, DialogItem, DiffHunk, DiffLine, DiffWidget, DisplayMessage,
-    DisplayToolCall, DotsSpinner, FileDiff, FooterStatus, FooterWidget, HelpDialog, InputAction,
-    InputWidget, LogoWidget, LspServerStatus, LspStatus, McpServerStatus, McpStatus, MessageRole,
-    MessagesWidget, ModelDialog, ModifiedFile, PhaseItem, PromptHistory, SelectDialog,
+    AuthMethodDisplay, CommandPalette, ContextInfo, DialogItem, DiffHunk, DiffLine, DiffWidget,
+    DisplayMessage, DisplayToolCall, DotsSpinner, FileDiff, FooterStatus, FooterWidget, HelpDialog,
+    InputAction, InputWidget, LogoWidget, LspServerStatus, LspStatus, McpServerStatus, McpStatus,
+    MessageRole, MessagesWidget, ModelDialog, ModifiedFile, PhaseItem, PromptHistory, SelectDialog,
     SessionDialog, SidebarSection, SidebarTrait, SidebarWidget, ThemeDialog, Toast, ToastManager,
     ToastType, TodoItem, ToolStatus,
 };

@@ -27,7 +27,7 @@ pub mod which_key;
 
 // Re-export commonly used types
 pub use autocomplete::{AutocompleteAction, FileAutocomplete};
-pub use footer::{FooterMode, FooterStatus, FooterWidget, SandboxDisplayState};
+pub use footer::{AuthMethodDisplay, FooterMode, FooterStatus, FooterWidget, SandboxDisplayState};
 pub use help_overlay::{HelpContext, HelpEntry, HelpOverlay};
 pub use input::{InputAction, InputWidget, PromptHistory};
 pub use logo::LogoWidget;

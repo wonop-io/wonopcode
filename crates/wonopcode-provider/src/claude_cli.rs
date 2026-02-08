@@ -53,11 +53,230 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tracing::{debug, info, warn};
+
+/// Cache for the Claude CLI binary path.
+/// This is cached because finding the binary can be slow if it's not in PATH.
+static CLAUDE_CLI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Clear the Claude CLI path cache.
+/// Call this after changing the custom Claude CLI path in settings.
+pub fn clear_claude_cli_cache() {
+    // Note: OnceLock doesn't have a clear method, so we can't actually clear it.
+    // The cache will persist until the process restarts.
+    warn!("Claude CLI path cache cannot be cleared at runtime - restart the process for new settings");
+}
+
+/// Build an enhanced PATH that includes common Node.js installation locations.
+/// This is necessary for packaged apps that don't inherit the user's full PATH.
+/// The Claude CLI uses #!/usr/bin/env node, so node must be in PATH.
+pub fn build_enhanced_path() -> String {
+    let mut paths: Vec<String> = Vec::new();
+    
+    // Add common Node.js/npm locations
+    paths.push("/opt/homebrew/bin".to_string()); // Homebrew on Apple Silicon
+    paths.push("/usr/local/bin".to_string());    // Homebrew on Intel / system
+    
+    // Add user's local bin
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/bin").to_string_lossy().to_string());
+        paths.push(home.join(".npm-global/bin").to_string_lossy().to_string());
+        
+        // nvm - check for current version symlink first
+        let nvm_current = home.join(".nvm/current/bin");
+        if nvm_current.exists() {
+            paths.push(nvm_current.to_string_lossy().to_string());
+        }
+    }
+    
+    // Add existing PATH
+    if let Ok(existing_path) = std::env::var("PATH") {
+        paths.push(existing_path);
+    }
+    
+    #[cfg(unix)]
+    let separator = ":";
+    #[cfg(windows)]
+    let separator = ";";
+    
+    paths.join(separator)
+}
+
+/// Find the Claude CLI binary, searching common installation locations.
+///
+/// This is important for packaged applications (like Tauri desktop apps) that may
+/// not inherit the user's full PATH environment variable.
+///
+/// Search order:
+/// 0. Custom path from WONOPCODE_CLAUDE_CLI_PATH environment variable
+/// 1. Standard PATH lookup
+/// 2. Homebrew on macOS: /opt/homebrew/bin/claude, /usr/local/bin/claude
+/// 3. npm global: ~/.npm-global/bin/claude
+/// 4. User local: ~/.local/bin/claude
+fn find_claude_cli() -> Option<PathBuf> {
+    CLAUDE_CLI_PATH
+        .get_or_init(|| {
+            info!("Searching for Claude CLI...");
+            
+            // Build enhanced PATH to ensure Node.js is available
+            // Claude CLI uses #!/usr/bin/env node, so node must be in PATH
+            let enhanced_path = build_enhanced_path();
+            
+            // 0. Check custom path from environment variable first
+            // This is set by the desktop app from user settings at startup
+            if let Ok(custom_path) = std::env::var("WONOPCODE_CLAUDE_CLI_PATH") {
+                if !custom_path.is_empty() {
+                    let path = PathBuf::from(&custom_path);
+                    info!(path = %path.display(), "Checking custom Claude CLI path from WONOPCODE_CLAUDE_CLI_PATH");
+                    
+                    if path.exists() {
+                        let mut cmd = Command::new(&path);
+                        cmd.arg("--version");
+                        cmd.env("PATH", &enhanced_path);
+                        
+                        match cmd.output() {
+                            Ok(output) if output.status.success() => {
+                                info!(path = %path.display(), "Using custom Claude CLI path");
+                                return Some(path);
+                            }
+                            Ok(output) => {
+                                warn!(
+                                    path = %path.display(),
+                                    status = ?output.status,
+                                    stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                                    "Custom Claude CLI path exists but failed to run"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(path = %path.display(), error = %e, "Failed to execute custom Claude CLI path");
+                            }
+                        }
+                    } else {
+                        warn!(path = %path.display(), "Custom Claude CLI path does not exist");
+                    }
+                }
+            }
+            
+            // 1. Try standard PATH lookup first (with enhanced PATH)
+            let mut cmd = Command::new("claude");
+            cmd.arg("--version");
+            cmd.env("PATH", &enhanced_path);
+            
+            match cmd.output() {
+                Ok(output) if output.status.success() => {
+                    info!("Found claude in PATH");
+                    return Some(PathBuf::from("claude"));
+                }
+                Ok(output) => {
+                    debug!(
+                        status = ?output.status,
+                        stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                        "claude in PATH failed"
+                    );
+                }
+                Err(e) => {
+                    debug!(error = %e, "claude not found in PATH");
+                }
+            }
+
+            // 2. Check common installation locations
+            let common_paths = [
+                // Homebrew on Apple Silicon
+                "/opt/homebrew/bin/claude",
+                // Homebrew on Intel Mac / Linux
+                "/usr/local/bin/claude",
+                // User local bin
+                "~/.local/bin/claude",
+                // npm global (common location)
+                "~/.npm-global/bin/claude",
+            ];
+
+            let home = dirs::home_dir();
+            debug!(home_dir = ?home, "Checking common installation locations");
+            
+            for path_str in common_paths {
+                let path = if path_str.starts_with("~/") {
+                    if let Some(ref h) = home {
+                        h.join(&path_str[2..])
+                    } else {
+                        continue;
+                    }
+                } else {
+                    PathBuf::from(path_str)
+                };
+
+                debug!(path = %path.display(), exists = path.exists(), "Checking location");
+                
+                if path.exists() {
+                    // Verify it actually works (with enhanced PATH for Node.js)
+                    let mut cmd = Command::new(&path);
+                    cmd.arg("--version");
+                    cmd.env("PATH", &enhanced_path);
+                    
+                    match cmd.output() {
+                        Ok(output) if output.status.success() => {
+                            info!(path = %path.display(), "Found Claude CLI at non-PATH location");
+                            return Some(path);
+                        }
+                        Ok(output) => {
+                            debug!(
+                                path = %path.display(),
+                                status = ?output.status,
+                                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                                "Claude CLI exists but failed to run"
+                            );
+                        }
+                        Err(e) => {
+                            debug!(path = %path.display(), error = %e, "Failed to execute Claude CLI");
+                        }
+                    }
+                }
+            }
+
+            // 3. Try to find via npm root
+            #[cfg(unix)]
+            {
+                debug!("Trying npm root lookup...");
+                if let Ok(output) = Command::new("npm").args(["root", "-g"]).output() {
+                    if output.status.success() {
+                        let npm_root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        debug!(npm_root = %npm_root, "Found npm global root");
+                        let npm_claude = Path::new(&npm_root)
+                            .parent() // Go up from node_modules
+                            .map(|p| p.join("bin").join("claude"));
+                        if let Some(p) = npm_claude {
+                            debug!(path = %p.display(), exists = p.exists(), "Checking npm global bin");
+                            if p.exists() {
+                                if let Ok(output) = Command::new(&p).arg("--version").output() {
+                                    if output.status.success() {
+                                        info!(path = %p.display(), "Found Claude CLI via npm root");
+                                        return Some(p);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    debug!("npm command not available");
+                }
+            }
+
+            warn!("Claude CLI not found in PATH or common locations");
+            None
+        })
+        .clone()
+}
+
+/// Get an async Command for running the Claude CLI.
+/// Uses the cached path if claude is not in PATH.
+fn claude_async_command() -> Option<TokioCommand> {
+    find_claude_cli().map(TokioCommand::new)
+}
 
 /// MCP transport configuration.
 ///
@@ -240,25 +459,20 @@ impl ClaudeCliProvider {
     }
 
     /// Check if Claude CLI is installed and accessible.
+    ///
+    /// This searches in common installation locations beyond just PATH,
+    /// which is important for packaged desktop apps that don't inherit
+    /// the user's full environment.
     pub fn check_cli_available() -> ProviderResult<()> {
-        let output = Command::new("claude").arg("--version").output();
-
-        match output {
-            Ok(o) if o.status.success() => {
-                let version = String::from_utf8_lossy(&o.stdout);
-                debug!(version = %version.trim(), "Claude CLI found");
-                Ok(())
-            }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                Err(ProviderError::internal(format!(
-                    "Claude CLI returned error: {stderr}"
-                )))
-            }
-            Err(_) => Err(ProviderError::internal(
+        // Use the cached find_claude_cli which searches common locations
+        if find_claude_cli().is_some() {
+            debug!("Claude CLI found");
+            Ok(())
+        } else {
+            Err(ProviderError::internal(
                 "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
                     .to_string(),
-            )),
+            ))
         }
     }
 
@@ -306,7 +520,12 @@ impl ClaudeCliProvider {
     /// Perform the actual authentication check (uncached, async).
     #[allow(clippy::cognitive_complexity)]
     async fn check_auth_uncached_async() -> bool {
-        let output = TokioCommand::new("claude")
+        let Some(mut cmd) = claude_async_command() else {
+            debug!("Claude CLI not found for auth check");
+            return false;
+        };
+        
+        let output = cmd
             .args(["-p", "hi", "--output-format", "json"])
             .output()
             .await;
@@ -767,10 +986,21 @@ impl LanguageModel for ClaudeCliProvider {
         );
 
         // Spawn the Claude CLI process with streaming JSON output
-        let mut cmd = TokioCommand::new("claude");
+        // Use find_claude_cli to handle packaged apps that don't have claude in PATH
+        let cli_path = find_claude_cli().ok_or_else(|| {
+            ProviderError::internal(
+                "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+                    .to_string(),
+            )
+        })?;
+        let mut cmd = TokioCommand::new(cli_path);
         cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // Set enhanced PATH to ensure Node.js is available
+        // Claude CLI uses #!/usr/bin/env node, so node must be in PATH
+        cmd.env("PATH", build_enhanced_path());
 
         // Set working directory if configured
         if let Some(ref workdir) = self.working_directory {

@@ -263,6 +263,69 @@ pub enum SettingsResult {
     None,
 }
 
+/// Authentication settings changes to be saved to CredentialsManager.
+#[derive(Debug, Clone, Default)]
+pub struct AuthSettingsChanges {
+    /// Anthropic authentication method (API key or Claude CLI).
+    pub anthropic_method: Option<wonopcode_core::AuthMethod>,
+    /// Anthropic API key (only if changed).
+    pub anthropic_key: Option<String>,
+    /// OpenAI API key (only if changed).
+    pub openai_key: Option<String>,
+    /// OpenRouter API key (only if changed).
+    pub openrouter_key: Option<String>,
+    /// Google API key (only if changed).
+    pub google_key: Option<String>,
+}
+
+impl AuthSettingsChanges {
+    /// Apply these changes to a CredentialsManager.
+    pub fn apply(&self, manager: &mut wonopcode_core::CredentialsManager) -> Result<(), String> {
+        // Set auth method for Anthropic
+        if let Some(method) = &self.anthropic_method {
+            match method {
+                wonopcode_core::AuthMethod::ClaudeCli => {
+                    manager
+                        .set_claude_cli("anthropic")
+                        .map_err(|e| e.to_string())?;
+                }
+                wonopcode_core::AuthMethod::ApiKey => {
+                    // If switching to API key mode, only update if we have a new key
+                    if let Some(key) = &self.anthropic_key {
+                        manager
+                            .set_api_key("anthropic", key)
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+            }
+        } else if let Some(key) = &self.anthropic_key {
+            // Just updating the key without changing method
+            manager
+                .set_api_key("anthropic", key)
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Set other API keys
+        if let Some(key) = &self.openai_key {
+            manager
+                .set_api_key("openai", key)
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(key) = &self.openrouter_key {
+            manager
+                .set_api_key("openrouter", key)
+                .map_err(|e| e.to_string())?;
+        }
+        if let Some(key) = &self.google_key {
+            manager
+                .set_api_key("google", key)
+                .map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Internal action for starting an edit (to avoid borrow checker issues).
 enum EditAction {
     Toggle,
@@ -426,6 +489,40 @@ impl SettingsDialog {
                             "explore".to_string(),
                         ],
                     },
+                ),
+                // Authentication settings
+                SettingItem::new(
+                    "auth.anthropic_method",
+                    "Anthropic Auth",
+                    "Authentication method for Anthropic (Claude CLI uses your subscription)",
+                    SettingValue::Select {
+                        value: "api_key".to_string(),
+                        options: vec!["api_key".to_string(), "claude_cli".to_string()],
+                    },
+                ),
+                SettingItem::new(
+                    "auth.anthropic_key",
+                    "Anthropic API Key",
+                    "API key for Anthropic (sk-ant-...)",
+                    SettingValue::String(String::new()),
+                ),
+                SettingItem::new(
+                    "auth.openai_key",
+                    "OpenAI API Key",
+                    "API key for OpenAI (sk-...)",
+                    SettingValue::String(String::new()),
+                ),
+                SettingItem::new(
+                    "auth.openrouter_key",
+                    "OpenRouter API Key",
+                    "API key for OpenRouter (sk-or-...)",
+                    SettingValue::String(String::new()),
+                ),
+                SettingItem::new(
+                    "auth.google_key",
+                    "Google API Key",
+                    "API key for Google Gemini",
+                    SettingValue::String(String::new()),
                 ),
             ],
         );
@@ -1089,6 +1186,75 @@ impl SettingsDialog {
             }
         }
 
+        // Update Model tab auth settings from CredentialsManager
+        if let Some(creds_manager) = wonopcode_core::CredentialsManager::new() {
+            if let Some(items) = dialog.items.get_mut(&SettingsTab::Model) {
+                for item in items.iter_mut() {
+                    match item.key.as_str() {
+                        "auth.anthropic_method" => {
+                            if let Some(method) = creds_manager.get_auth_method("anthropic") {
+                                if let SettingValue::Select { options, .. } = &item.value {
+                                    let value = match method {
+                                        wonopcode_core::AuthMethod::ApiKey => "api_key",
+                                        wonopcode_core::AuthMethod::ClaudeCli => "claude_cli",
+                                    };
+                                    update_item(
+                                        item,
+                                        SettingValue::Select {
+                                            value: value.to_string(),
+                                            options: options.clone(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        "auth.anthropic_key" => {
+                            if let Some(key) = creds_manager.get_api_key("anthropic") {
+                                // Mask the key for display (show first 7 chars + dots)
+                                let masked = if key.len() > 10 {
+                                    format!("{}•••••••••", &key[..7])
+                                } else {
+                                    "•••••••••".to_string()
+                                };
+                                update_item(item, SettingValue::String(masked));
+                            }
+                        }
+                        "auth.openai_key" => {
+                            if let Some(key) = creds_manager.get_api_key("openai") {
+                                let masked = if key.len() > 10 {
+                                    format!("{}•••••••••", &key[..7])
+                                } else {
+                                    "•••••••••".to_string()
+                                };
+                                update_item(item, SettingValue::String(masked));
+                            }
+                        }
+                        "auth.openrouter_key" => {
+                            if let Some(key) = creds_manager.get_api_key("openrouter") {
+                                let masked = if key.len() > 10 {
+                                    format!("{}•••••••••", &key[..7])
+                                } else {
+                                    "•••••••••".to_string()
+                                };
+                                update_item(item, SettingValue::String(masked));
+                            }
+                        }
+                        "auth.google_key" => {
+                            if let Some(key) = creds_manager.get_api_key("google") {
+                                let masked = if key.len() > 10 {
+                                    format!("{}•••••••••", &key[..7])
+                                } else {
+                                    "•••••••••".to_string()
+                                };
+                                update_item(item, SettingValue::String(masked));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         // Update Permissions tab from config
         if let Some(perm_config) = &config.permission {
             if let Some(items) = dialog.items.get_mut(&SettingsTab::Permissions) {
@@ -1679,6 +1845,73 @@ impl SettingsDialog {
         }
 
         config
+    }
+
+    /// Get authentication settings changes that need to be saved to CredentialsManager.
+    /// Returns None if no auth settings were changed.
+    pub fn get_auth_changes(&self) -> Option<AuthSettingsChanges> {
+        let mut changes = AuthSettingsChanges::default();
+        let mut has_any_changes = false;
+
+        if let Some(items) = self.items.get(&SettingsTab::Model) {
+            for item in items {
+                if !item.dirty {
+                    continue;
+                }
+
+                match item.key.as_str() {
+                    "auth.anthropic_method" => {
+                        if let SettingValue::Select { value, .. } = &item.value {
+                            changes.anthropic_method = Some(match value.as_str() {
+                                "claude_cli" => wonopcode_core::AuthMethod::ClaudeCli,
+                                _ => wonopcode_core::AuthMethod::ApiKey,
+                            });
+                            has_any_changes = true;
+                        }
+                    }
+                    "auth.anthropic_key" => {
+                        if let SettingValue::String(s) = &item.value {
+                            // Only save if it's not a masked key (doesn't contain dots)
+                            if !s.is_empty() && !s.contains('•') {
+                                changes.anthropic_key = Some(s.clone());
+                                has_any_changes = true;
+                            }
+                        }
+                    }
+                    "auth.openai_key" => {
+                        if let SettingValue::String(s) = &item.value {
+                            if !s.is_empty() && !s.contains('•') {
+                                changes.openai_key = Some(s.clone());
+                                has_any_changes = true;
+                            }
+                        }
+                    }
+                    "auth.openrouter_key" => {
+                        if let SettingValue::String(s) = &item.value {
+                            if !s.is_empty() && !s.contains('•') {
+                                changes.openrouter_key = Some(s.clone());
+                                has_any_changes = true;
+                            }
+                        }
+                    }
+                    "auth.google_key" => {
+                        if let SettingValue::String(s) = &item.value {
+                            if !s.is_empty() && !s.contains('•') {
+                                changes.google_key = Some(s.clone());
+                                has_any_changes = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if has_any_changes {
+            Some(changes)
+        } else {
+            None
+        }
     }
 
     /// Check if there are unsaved changes.

@@ -3173,8 +3173,17 @@ fn load_custom_instructions(cwd: &Path) -> Option<String> {
 }
 
 /// Load API key from environment or credentials file.
+///
+/// Checks in order:
+/// 1. Environment variables (highest priority for CI/Docker)
+/// 2. CredentialsManager (unified config with legacy support)
 pub fn load_api_key(provider: &str) -> Option<String> {
-    // Validate provider first
+    // Use CredentialsManager which handles both env vars and file-based credentials
+    if let Some(creds_manager) = wonopcode_core::CredentialsManager::new() {
+        return creds_manager.get_api_key(provider);
+    }
+    
+    // Fallback to direct env var check if CredentialsManager fails
     let env_var = match provider {
         "anthropic" => "ANTHROPIC_API_KEY",
         "openai" => "OPENAI_API_KEY",
@@ -3188,60 +3197,87 @@ pub fn load_api_key(provider: &str) -> Option<String> {
         _ => return None,
     };
 
-    // Try environment variables first
-    if let Ok(key) = std::env::var(env_var) {
-        if !key.is_empty() {
-            debug!(provider = %provider, source = "env", key_len = key.len(), "Found API key");
-            return Some(key);
-        }
-    }
-
-    // Try credentials file
-    if let Some(key) = load_api_key_from_file(provider) {
-        debug!(provider = %provider, source = "file", key_len = key.len(), "Found API key");
-        return Some(key);
-    }
-
-    debug!(provider = %provider, "No API key found");
-    None
+    std::env::var(env_var).ok().filter(|k| !k.is_empty())
 }
 
-/// Load API key from the credentials file.
-fn load_api_key_from_file(provider: &str) -> Option<String> {
-    let credentials_path =
-        wonopcode_core::config::Config::global_config_dir()?.join("credentials.json");
+/// Get the authentication method configured for a provider.
+///
+/// Returns the configured auth method if credentials are set,
+/// otherwise None.
+pub fn get_auth_method(provider: &str) -> Option<wonopcode_core::AuthMethod> {
+    wonopcode_core::CredentialsManager::new()?.get_auth_method(provider)
+}
 
-    if !credentials_path.exists() {
-        debug!(path = %credentials_path.display(), "Credentials file not found");
-        return None;
+/// Check if a provider has valid credentials configured.
+pub fn has_credentials(provider: &str) -> bool {
+    wonopcode_core::CredentialsManager::new()
+        .map(|cm| cm.has_credentials(provider))
+        .unwrap_or(false)
+}
+
+/// Get the server configuration for a repository path.
+///
+/// This returns the per-server configuration including provider, model,
+/// and auth method preferences.
+pub fn get_server_config(repo_path: &std::path::Path) -> wonopcode_core::ServerInstanceConfig {
+    wonopcode_core::ServerConfigManager::new()
+        .map(|sm| sm.get_config(repo_path))
+        .unwrap_or_default()
+}
+
+/// Get provider status information.
+///
+/// Returns status for a provider including availability and configured auth method.
+pub fn get_provider_status(provider: &str) -> wonopcode_core::ProviderStatus {
+    use wonopcode_provider::claude_cli::ClaudeCliProvider;
+
+    let creds_manager = wonopcode_core::CredentialsManager::new();
+    let has_api_key = creds_manager
+        .as_ref()
+        .map(|cm| cm.get_api_key(provider).is_some())
+        .unwrap_or(false);
+    let auth_method = creds_manager.as_ref().and_then(|cm| cm.get_auth_method(provider));
+
+    // Check CLI availability for anthropic
+    let (cli_available, cli_authenticated) = if provider == "anthropic" {
+        (
+            ClaudeCliProvider::is_available(),
+            ClaudeCliProvider::is_authenticated(),
+        )
+    } else {
+        (false, false)
+    };
+
+    // Provider is available if it has an API key OR (for anthropic) has CLI auth
+    let available = has_api_key
+        || (provider == "anthropic" && cli_authenticated)
+        || auth_method == Some(wonopcode_core::AuthMethod::ClaudeCli);
+
+    wonopcode_core::ProviderStatus {
+        id: provider.to_string(),
+        name: provider_display_name(provider),
+        available,
+        auth_method,
+        cli_available,
+        cli_authenticated,
+        model_count: 0, // TODO: Add model counting
     }
+}
 
-    let content = std::fs::read_to_string(&credentials_path).ok()?;
-
-    // Try parsing as simple HashMap<String, String> first (legacy format)
-    if let Ok(credentials) = serde_json::from_str::<HashMap<String, String>>(&content) {
-        debug!(provider = %provider, format = "legacy", "Parsed credentials file");
-        return credentials.get(provider).cloned();
+/// Get display name for a provider.
+fn provider_display_name(provider: &str) -> String {
+    match provider {
+        "anthropic" => "Anthropic".to_string(),
+        "openai" => "OpenAI".to_string(),
+        "openrouter" => "OpenRouter".to_string(),
+        "google" => "Google".to_string(),
+        "xai" => "xAI".to_string(),
+        "mistral" => "Mistral".to_string(),
+        "groq" => "Groq".to_string(),
+        "deepinfra" => "DeepInfra".to_string(),
+        "together" => "Together".to_string(),
+        _ => provider.to_string(),
     }
-
-    // Try parsing as HashMap<String, Value> for new nested format
-    if let Ok(credentials) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&content) {
-        debug!(provider = %provider, format = "nested", "Parsed credentials file");
-        if let Some(provider_config) = credentials.get(provider) {
-            // For API key auth, look for "key" field
-            if let Some(key) = provider_config.get("key").and_then(|v| v.as_str()) {
-                return Some(key.to_string());
-            }
-            // For OAuth auth (anthropic subscription), return None - we use CLI instead
-            if provider_config.get("type").and_then(|v| v.as_str()) == Some("oauth") {
-                debug!(provider = %provider, "Found OAuth credentials, will use CLI");
-                return None;
-            }
-        }
-    }
-
-    debug!(provider = %provider, "Could not parse credentials file");
-    None
 }
 
 /// Convert wonopcode McpRemoteConfig to wonopcode_mcp ServerConfig.

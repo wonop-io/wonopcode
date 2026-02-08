@@ -51,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use tracing::{debug, info, warn};
 
 /// Static regex for variable substitution, compiled once.
 static VAR_REGEX: OnceLock<regex::Regex> = OnceLock::new();
@@ -1526,6 +1527,652 @@ fn merge_hashmap<K: std::hash::Hash + Eq, V>(
         }
         (b, None) => b,
         (None, o) => o,
+    }
+}
+
+// ============================================================================
+// Credentials Management
+// ============================================================================
+
+/// Authentication method for a provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Use Claude CLI for subscription-based access (no API key needed).
+    ClaudeCli,
+    /// Use API key for pay-per-use access.
+    #[default]
+    ApiKey,
+}
+
+impl std::fmt::Display for AuthMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthMethod::ClaudeCli => write!(f, "Claude CLI (subscription)"),
+            AuthMethod::ApiKey => write!(f, "API Key"),
+        }
+    }
+}
+
+/// Provider credential configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProviderCredential {
+    /// API key credential.
+    ApiKey {
+        /// The API key value.
+        key: String,
+    },
+    /// Claude CLI subscription (no key needed).
+    ClaudeCli,
+}
+
+impl ProviderCredential {
+    /// Get the API key if this is an ApiKey credential.
+    pub fn api_key(&self) -> Option<&str> {
+        match self {
+            ProviderCredential::ApiKey { key } => Some(key),
+            ProviderCredential::ClaudeCli => None,
+        }
+    }
+
+    /// Get the authentication method.
+    pub fn auth_method(&self) -> AuthMethod {
+        match self {
+            ProviderCredential::ApiKey { .. } => AuthMethod::ApiKey,
+            ProviderCredential::ClaudeCli => AuthMethod::ClaudeCli,
+        }
+    }
+}
+
+/// Status information for a provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderStatus {
+    /// Provider ID (e.g., "anthropic", "openai").
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Whether the provider is available (has valid credentials).
+    pub available: bool,
+    /// Current authentication method.
+    pub auth_method: Option<AuthMethod>,
+    /// Whether Claude CLI is available (for anthropic only).
+    pub cli_available: bool,
+    /// Whether Claude CLI is authenticated (for anthropic only).
+    pub cli_authenticated: bool,
+    /// Number of available models.
+    pub model_count: usize,
+}
+
+/// Server-specific configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInstanceConfig {
+    /// Display name for this server.
+    pub name: String,
+    /// Provider to use.
+    pub provider: String,
+    /// Model ID to use.
+    pub model: String,
+    /// Authentication method.
+    pub auth_method: AuthMethod,
+}
+
+impl Default for ServerInstanceConfig {
+    fn default() -> Self {
+        Self {
+            name: "default".to_string(),
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet-4-5-20250929".to_string(),
+            auth_method: AuthMethod::ApiKey,
+        }
+    }
+}
+
+/// Credentials file structure.
+///
+/// Supports both legacy format (flat HashMap<String, String>) and
+/// new format with structured credentials.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CredentialsFile {
+    /// Provider credentials.
+    #[serde(flatten)]
+    pub credentials: HashMap<String, ProviderCredential>,
+}
+
+/// Manages credentials and server configurations.
+///
+/// This provides a unified interface for loading/saving credentials
+/// that works across all platforms (CLI, TUI, Desktop).
+pub struct CredentialsManager {
+    /// Path to the credentials file.
+    credentials_path: PathBuf,
+    /// Cached credentials.
+    credentials: HashMap<String, ProviderCredential>,
+}
+
+impl CredentialsManager {
+    /// Create a new credentials manager.
+    ///
+    /// Loads credentials from the standard location:
+    /// `~/.config/wonopcode/credentials.json`
+    pub fn new() -> Option<Self> {
+        let credentials_path = Config::global_config_dir()?.join("credentials.json");
+        let mut manager = Self {
+            credentials_path,
+            credentials: HashMap::new(),
+        };
+        
+        // Load existing credentials
+        if let Err(e) = manager.load() {
+            warn!(error = %e, "Failed to load credentials");
+        }
+        
+        Some(manager)
+    }
+
+    /// Create a credentials manager with a custom path.
+    pub fn with_path(credentials_path: PathBuf) -> Self {
+        let mut manager = Self {
+            credentials_path,
+            credentials: HashMap::new(),
+        };
+        
+        if let Err(e) = manager.load() {
+            warn!(error = %e, "Failed to load credentials");
+        }
+        
+        manager
+    }
+
+    /// Load credentials from file.
+    fn load(&mut self) -> CoreResult<()> {
+        if !self.credentials_path.exists() {
+            debug!(path = %self.credentials_path.display(), "Credentials file not found");
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(&self.credentials_path)?;
+        
+        // Try parsing as new format first
+        if let Ok(creds_file) = serde_json::from_str::<CredentialsFile>(&content) {
+            self.credentials = creds_file.credentials;
+            debug!(
+                path = %self.credentials_path.display(),
+                providers = self.credentials.len(),
+                format = "structured",
+                "Loaded credentials"
+            );
+            return Ok(());
+        }
+        
+        // Try legacy format: HashMap<String, String> or HashMap<String, Value>
+        if let Ok(legacy) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&content) {
+            for (provider, value) in legacy {
+                match value {
+                    serde_json::Value::String(key) => {
+                        // Simple key string
+                        self.credentials.insert(
+                            provider,
+                            ProviderCredential::ApiKey { key },
+                        );
+                    }
+                    serde_json::Value::Object(obj) => {
+                        // Nested object - check for "key" or "type"
+                        if let Some(key) = obj.get("key").and_then(|v| v.as_str()) {
+                            self.credentials.insert(
+                                provider,
+                                ProviderCredential::ApiKey { key: key.to_string() },
+                            );
+                        } else if obj.get("type").and_then(|v| v.as_str()) == Some("oauth") {
+                            // OAuth = Claude CLI
+                            self.credentials.insert(
+                                provider,
+                                ProviderCredential::ClaudeCli,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            debug!(
+                path = %self.credentials_path.display(),
+                providers = self.credentials.len(),
+                format = "legacy",
+                "Loaded credentials from legacy format"
+            );
+        }
+        
+        Ok(())
+    }
+
+    /// Save credentials to file.
+    pub fn save(&self) -> CoreResult<()> {
+        // Ensure directory exists
+        if let Some(parent) = self.credentials_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        let content = serde_json::to_string_pretty(&self.credentials)
+            .map_err(|e| ConfigError::InvalidJson {
+                path: self.credentials_path.display().to_string(),
+                message: e.to_string(),
+            })?;
+        
+        std::fs::write(&self.credentials_path, &content)?;
+        
+        // Set restrictive permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&self.credentials_path, perms)?;
+        }
+        
+        info!(path = %self.credentials_path.display(), "Saved credentials");
+        Ok(())
+    }
+
+    /// Get API key for a provider.
+    ///
+    /// Checks in order:
+    /// 1. Environment variables
+    /// 2. Stored credentials
+    pub fn get_api_key(&self, provider: &str) -> Option<String> {
+        // 1. Check environment variables first
+        if let Some(key) = self.get_api_key_from_env(provider) {
+            debug!(provider = %provider, source = "env", "Found API key");
+            return Some(key);
+        }
+        
+        // 2. Check stored credentials
+        if let Some(cred) = self.credentials.get(provider) {
+            if let Some(key) = cred.api_key() {
+                debug!(provider = %provider, source = "file", "Found API key");
+                return Some(key.to_string());
+            }
+        }
+        
+        debug!(provider = %provider, "No API key found");
+        None
+    }
+
+    /// Get API key from environment variable.
+    fn get_api_key_from_env(&self, provider: &str) -> Option<String> {
+        let env_var = match provider {
+            "anthropic" => "ANTHROPIC_API_KEY",
+            "openai" => "OPENAI_API_KEY",
+            "openrouter" => "OPENROUTER_API_KEY",
+            "google" => "GOOGLE_API_KEY",
+            "xai" => "XAI_API_KEY",
+            "mistral" => "MISTRAL_API_KEY",
+            "groq" => "GROQ_API_KEY",
+            "deepinfra" => "DEEPINFRA_API_KEY",
+            "together" => "TOGETHER_API_KEY",
+            _ => return None,
+        };
+        
+        std::env::var(env_var).ok().filter(|k| !k.is_empty())
+    }
+
+    /// Set API key for a provider.
+    pub fn set_api_key(&mut self, provider: &str, key: &str) -> CoreResult<()> {
+        self.credentials.insert(
+            provider.to_string(),
+            ProviderCredential::ApiKey { key: key.to_string() },
+        );
+        self.save()
+    }
+
+    /// Set a provider to use Claude CLI authentication.
+    pub fn set_claude_cli(&mut self, provider: &str) -> CoreResult<()> {
+        self.credentials.insert(
+            provider.to_string(),
+            ProviderCredential::ClaudeCli,
+        );
+        self.save()
+    }
+
+    /// Remove credentials for a provider.
+    pub fn remove(&mut self, provider: &str) -> CoreResult<()> {
+        self.credentials.remove(provider);
+        self.save()
+    }
+
+    /// Get the credential for a provider.
+    pub fn get_credential(&self, provider: &str) -> Option<&ProviderCredential> {
+        self.credentials.get(provider)
+    }
+
+    /// Get the authentication method for a provider.
+    pub fn get_auth_method(&self, provider: &str) -> Option<AuthMethod> {
+        self.credentials.get(provider).map(|c| c.auth_method())
+    }
+
+    /// Check if a provider has valid credentials.
+    pub fn has_credentials(&self, provider: &str) -> bool {
+        // Check env first
+        if self.get_api_key_from_env(provider).is_some() {
+            return true;
+        }
+        
+        // Check stored credentials
+        if let Some(cred) = self.credentials.get(provider) {
+            match cred {
+                ProviderCredential::ApiKey { key } => !key.is_empty(),
+                ProviderCredential::ClaudeCli => true,
+            }
+        } else {
+            false
+        }
+    }
+
+    /// List all configured providers.
+    pub fn list_providers(&self) -> Vec<String> {
+        self.credentials.keys().cloned().collect()
+    }
+
+    /// Get credentials path.
+    pub fn credentials_path(&self) -> &Path {
+        &self.credentials_path
+    }
+}
+
+impl Default for CredentialsManager {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|| Self {
+            credentials_path: PathBuf::from("credentials.json"),
+            credentials: HashMap::new(),
+        })
+    }
+}
+
+// ============================================================================
+// App Settings
+// ============================================================================
+
+/// Application-wide settings stored in `~/.config/wonopcode/settings.json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    /// Custom path to the Claude CLI binary.
+    /// If set, this path will be used instead of searching PATH.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_cli_path: Option<String>,
+    
+    /// Default provider to use (e.g., "anthropic", "openai").
+    /// If not set, uses the first available provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<String>,
+    
+    /// Default model ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+}
+
+/// Manages application-wide settings.
+pub struct AppSettingsManager {
+    /// Path to the settings file.
+    settings_path: PathBuf,
+    /// Current settings.
+    pub settings: AppSettings,
+}
+
+impl AppSettingsManager {
+    /// Create a new settings manager.
+    pub fn new() -> Option<Self> {
+        let settings_path = Config::global_config_dir()?.join("settings.json");
+        let mut manager = Self {
+            settings_path,
+            settings: AppSettings::default(),
+        };
+        
+        if let Err(e) = manager.load() {
+            debug!(error = %e, "Failed to load app settings");
+        }
+        
+        Some(manager)
+    }
+    
+    /// Load settings from file.
+    fn load(&mut self) -> CoreResult<()> {
+        if !self.settings_path.exists() {
+            debug!(path = %self.settings_path.display(), "Settings file not found");
+            return Ok(());
+        }
+        
+        let content = std::fs::read_to_string(&self.settings_path)?;
+        self.settings = serde_json::from_str(&content)
+            .map_err(|e| ConfigError::InvalidJson {
+                path: self.settings_path.display().to_string(),
+                message: e.to_string(),
+            })?;
+        
+        debug!(path = %self.settings_path.display(), "Loaded app settings");
+        Ok(())
+    }
+    
+    /// Save settings to file.
+    pub fn save(&self) -> CoreResult<()> {
+        if let Some(parent) = self.settings_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        let content = serde_json::to_string_pretty(&self.settings)
+            .map_err(|e| ConfigError::InvalidJson {
+                path: self.settings_path.display().to_string(),
+                message: e.to_string(),
+            })?;
+        
+        std::fs::write(&self.settings_path, &content)?;
+        info!(path = %self.settings_path.display(), "Saved app settings");
+        Ok(())
+    }
+    
+    /// Get the Claude CLI path.
+    pub fn get_claude_cli_path(&self) -> Option<&str> {
+        self.settings.claude_cli_path.as_deref()
+    }
+    
+    /// Set the Claude CLI path.
+    pub fn set_claude_cli_path(&mut self, path: Option<String>) -> CoreResult<()> {
+        self.settings.claude_cli_path = path;
+        self.save()
+    }
+    
+    /// Get the default provider.
+    pub fn get_default_provider(&self) -> Option<&str> {
+        self.settings.default_provider.as_deref()
+    }
+    
+    /// Set the default provider.
+    pub fn set_default_provider(&mut self, provider: Option<String>) -> CoreResult<()> {
+        self.settings.default_provider = provider;
+        self.save()
+    }
+    
+    /// Get the default model.
+    pub fn get_default_model(&self) -> Option<&str> {
+        self.settings.default_model.as_deref()
+    }
+    
+    /// Set the default model.
+    pub fn set_default_model(&mut self, model: Option<String>) -> CoreResult<()> {
+        self.settings.default_model = model;
+        self.save()
+    }
+}
+
+impl Default for AppSettingsManager {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|| Self {
+            settings_path: PathBuf::from("settings.json"),
+            settings: AppSettings::default(),
+        })
+    }
+}
+
+// ============================================================================
+// Server Instance Configuration
+// ============================================================================
+
+/// Manages per-server (per-repository) configurations.
+pub struct ServerConfigManager {
+    /// Path to the server config file.
+    config_path: PathBuf,
+    /// Server configurations keyed by repo path hash.
+    servers: HashMap<String, ServerInstanceConfig>,
+    /// Default configuration.
+    defaults: ServerInstanceConfig,
+}
+
+impl ServerConfigManager {
+    /// Create a new server config manager.
+    pub fn new() -> Option<Self> {
+        let config_path = Config::global_config_dir()?.join("servers.json");
+        let mut manager = Self {
+            config_path,
+            servers: HashMap::new(),
+            defaults: ServerInstanceConfig::default(),
+        };
+        
+        if let Err(e) = manager.load() {
+            warn!(error = %e, "Failed to load server configs");
+        }
+        
+        Some(manager)
+    }
+
+    /// Load server configurations from file.
+    fn load(&mut self) -> CoreResult<()> {
+        if !self.config_path.exists() {
+            return Ok(());
+        }
+        
+        let content = std::fs::read_to_string(&self.config_path)?;
+        
+        #[derive(Deserialize)]
+        struct ServerConfigFile {
+            #[serde(default)]
+            defaults: Option<ServerInstanceConfig>,
+            #[serde(default)]
+            servers: HashMap<String, ServerInstanceConfig>,
+        }
+        
+        let file: ServerConfigFile = serde_json::from_str(&content)
+            .map_err(|e| ConfigError::InvalidJson {
+                path: self.config_path.display().to_string(),
+                message: e.to_string(),
+            })?;
+        
+        if let Some(defaults) = file.defaults {
+            self.defaults = defaults;
+        }
+        self.servers = file.servers;
+        
+        debug!(
+            path = %self.config_path.display(),
+            servers = self.servers.len(),
+            "Loaded server configurations"
+        );
+        
+        Ok(())
+    }
+
+    /// Save server configurations to file.
+    pub fn save(&self) -> CoreResult<()> {
+        if let Some(parent) = self.config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        #[derive(Serialize)]
+        struct ServerConfigFile<'a> {
+            defaults: &'a ServerInstanceConfig,
+            servers: &'a HashMap<String, ServerInstanceConfig>,
+        }
+        
+        let content = serde_json::to_string_pretty(&ServerConfigFile {
+            defaults: &self.defaults,
+            servers: &self.servers,
+        }).map_err(|e| ConfigError::InvalidJson {
+            path: self.config_path.display().to_string(),
+            message: e.to_string(),
+        })?;
+        
+        std::fs::write(&self.config_path, content)?;
+        
+        info!(path = %self.config_path.display(), "Saved server configurations");
+        Ok(())
+    }
+
+    /// Get configuration for a server (repo path).
+    ///
+    /// Returns server-specific config if set, otherwise defaults.
+    pub fn get_config(&self, repo_path: &Path) -> ServerInstanceConfig {
+        let key = Self::hash_path(repo_path);
+        self.servers.get(&key).cloned().unwrap_or_else(|| self.defaults.clone())
+    }
+
+    /// Set configuration for a server.
+    pub fn set_config(&mut self, repo_path: &Path, config: ServerInstanceConfig) -> CoreResult<()> {
+        let key = Self::hash_path(repo_path);
+        self.servers.insert(key, config);
+        self.save()
+    }
+
+    /// Update specific fields of server configuration.
+    pub fn update_config(
+        &mut self,
+        repo_path: &Path,
+        provider: Option<String>,
+        model: Option<String>,
+        auth_method: Option<AuthMethod>,
+    ) -> CoreResult<()> {
+        let key = Self::hash_path(repo_path);
+        let mut config = self.servers.get(&key).cloned().unwrap_or_else(|| self.defaults.clone());
+        
+        if let Some(p) = provider {
+            config.provider = p;
+        }
+        if let Some(m) = model {
+            config.model = m;
+        }
+        if let Some(a) = auth_method {
+            config.auth_method = a;
+        }
+        
+        self.servers.insert(key, config);
+        self.save()
+    }
+
+    /// Get default configuration.
+    pub fn get_defaults(&self) -> &ServerInstanceConfig {
+        &self.defaults
+    }
+
+    /// Set default configuration.
+    pub fn set_defaults(&mut self, defaults: ServerInstanceConfig) -> CoreResult<()> {
+        self.defaults = defaults;
+        self.save()
+    }
+
+    /// Hash a repo path to create a consistent key.
+    fn hash_path(path: &Path) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+}
+
+impl Default for ServerConfigManager {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|| Self {
+            config_path: PathBuf::from("servers.json"),
+            servers: HashMap::new(),
+            defaults: ServerInstanceConfig::default(),
+        })
     }
 }
 

@@ -88,6 +88,26 @@ impl FooterMode {
     }
 }
 
+/// Authentication method indicator for the footer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthMethodDisplay {
+    /// Using API key (pay-per-use).
+    #[default]
+    ApiKey,
+    /// Using Claude CLI subscription.
+    ClaudeCli,
+}
+
+impl AuthMethodDisplay {
+    /// Get a short display string for the auth method.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            AuthMethodDisplay::ApiKey => "API",
+            AuthMethodDisplay::ClaudeCli => "CLI",
+        }
+    }
+}
+
 /// Footer widget showing directory and status.
 #[derive(Debug, Clone)]
 pub struct FooterWidget {
@@ -99,6 +119,8 @@ pub struct FooterWidget {
     model: String,
     /// Provider name.
     provider: String,
+    /// Authentication method.
+    auth_method: AuthMethodDisplay,
     /// Whether connected.
     connected: bool,
     /// Status (Ready/Thinking/Running).
@@ -132,6 +154,7 @@ impl Default for FooterWidget {
             directory: String::new(),
             model: String::new(),
             provider: String::new(),
+            auth_method: AuthMethodDisplay::default(),
             connected: true,
             status: FooterStatus::default(),
             tokens: None,
@@ -167,6 +190,16 @@ impl FooterWidget {
     /// Set the provider.
     pub fn set_provider(&mut self, provider: impl Into<String>) {
         self.provider = provider.into();
+    }
+
+    /// Set the authentication method.
+    pub fn set_auth_method(&mut self, method: AuthMethodDisplay) {
+        self.auth_method = method;
+    }
+
+    /// Get the current authentication method.
+    pub fn get_auth_method(&self) -> AuthMethodDisplay {
+        self.auth_method
     }
 
     /// Set connection status.
@@ -377,9 +410,19 @@ impl FooterWidget {
             right_parts.push(Span::styled("  ", theme.text_style()));
         }
 
-        // Model name
+        // Model name with auth method indicator
         if !self.model.is_empty() {
             right_parts.push(Span::styled(&self.model, theme.dim_style()));
+            // Show auth method indicator: (API) or (CLI)
+            let auth_label = match self.auth_method {
+                AuthMethodDisplay::ApiKey => " (API)",
+                AuthMethodDisplay::ClaudeCli => " (CLI)",
+            };
+            let auth_style = match self.auth_method {
+                AuthMethodDisplay::ApiKey => theme.dim_style(),
+                AuthMethodDisplay::ClaudeCli => theme.info_style(),
+            };
+            right_parts.push(Span::styled(auth_label, auth_style));
             right_parts.push(Span::styled("  ", theme.text_style()));
         }
 

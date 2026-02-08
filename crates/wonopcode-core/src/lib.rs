@@ -36,7 +36,11 @@ pub use agent::{Agent, AgentMode, AgentPermission, AgentRegistry};
 // Re-export bash permission types from util to maintain backwards compatibility
 pub use bus::{Bus, SandboxState, SandboxStatusChanged, SandboxToolExecution};
 pub use command::{Command, CommandRegistry};
-pub use config::{Config, McpConfig, McpJsonFile, McpJsonServer, McpLocalConfig, McpRemoteConfig};
+pub use config::{
+    AppSettings, AppSettingsManager, AuthMethod, Config, CredentialsManager, McpConfig,
+    McpJsonFile, McpJsonServer, McpLocalConfig, McpRemoteConfig, ProviderCredential,
+    ProviderStatus, ServerConfigManager, ServerInstanceConfig,
+};
 pub use error::{CoreError, CoreResult, WorkstreamError};
 pub use format::{Formatter, FormatterRegistry};
 pub use hook::{Hook, HookContext, HookEvent, HookRegistry};

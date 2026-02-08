@@ -36,7 +36,8 @@ pub use mcp::{McpDialog, McpServerInfo, McpStatus};
 pub use permission::{PermissionDialog, PermissionResult};
 pub use sandbox::{SandboxAction, SandboxDialog, SandboxState};
 pub use settings::{
-    SaveScope, SettingItem, SettingValue, SettingsDialog, SettingsResult, SettingsTab,
+    AuthSettingsChanges, SaveScope, SettingItem, SettingValue, SettingsDialog, SettingsResult,
+    SettingsTab,
 };
 pub use status::{HelpDialog, PerfDialog, StatusDialog};
 pub use timeline::{TimelineDialog, TimelineItem};

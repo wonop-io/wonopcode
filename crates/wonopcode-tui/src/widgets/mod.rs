@@ -33,7 +33,7 @@ pub use dialog::{
     TimelineDialog, TimelineItem,
 };
 pub use diff::{simple_diff, DiffHunk, DiffLine, DiffNavAction, DiffWidget, FileDiff};
-pub use footer::{FooterStatus, FooterWidget};
+pub use footer::{AuthMethodDisplay, FooterStatus, FooterWidget};
 pub use help_overlay::{HelpContext, HelpEntry, HelpOverlay};
 pub use input::{InputAction, InputWidget, PromptHistory};
 pub use logo::LogoWidget;
