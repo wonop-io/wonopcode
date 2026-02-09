@@ -421,7 +421,10 @@ pub fn create_mcp_router(state: McpHttpState) -> Router {
 }
 
 /// SSE connection handler.
-async fn mcp_sse(
+///
+/// This handler establishes an SSE connection for MCP communication.
+/// It can be used directly with axum's State extractor.
+pub async fn mcp_sse(
     State(state): State<McpHttpState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // Generate unique session ID
@@ -474,13 +477,17 @@ async fn mcp_sse(
 
 /// Query parameters for message endpoint.
 #[derive(Deserialize)]
-struct MessageQuery {
+pub struct MessageQuery {
+    /// The session ID for the MCP connection.
     #[serde(rename = "sessionId")]
-    session_id: String,
+    pub session_id: String,
 }
 
 /// Message endpoint handler.
-async fn mcp_message(
+///
+/// This handler processes JSON-RPC messages for MCP communication.
+/// It can be used directly with axum's State extractor.
+pub async fn mcp_message(
     State(state): State<McpHttpState>,
     Query(query): Query<MessageQuery>,
     Json(request): Json<JsonRpcRequest>,

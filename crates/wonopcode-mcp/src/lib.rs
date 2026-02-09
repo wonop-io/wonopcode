@@ -58,7 +58,7 @@ mod transport;
 pub use callback::OAuthCallbackServer;
 pub use client::McpClient;
 pub use error::{McpError, McpResult};
-pub use http_serve::{create_mcp_router, McpHttpState};
+pub use http_serve::{create_mcp_router, mcp_message, mcp_sse, McpHttpState, MessageQuery};
 pub use oauth::{
     OAuthConfig, OAuthProvider, OAuthTokens, OAUTH_CALLBACK_PATH, OAUTH_CALLBACK_PORT,
 };
