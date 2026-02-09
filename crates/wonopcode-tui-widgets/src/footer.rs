@@ -286,6 +286,48 @@ impl FooterWidget {
         self.mode = mode;
     }
 
+    // ========================================================================
+    // Reset methods for workstream state isolation
+    // ========================================================================
+
+    /// Reset sandbox state to default (disabled).
+    pub fn reset_sandbox_state(&mut self) {
+        self.sandbox_state = SandboxDisplayState::default();
+        self.sandbox_runtime = None;
+    }
+
+    /// Reset token counts to zero.
+    pub fn reset_tokens(&mut self) {
+        self.tokens = None;
+    }
+
+    /// Reset pending permissions count.
+    pub fn reset_pending_permissions(&mut self) {
+        self.pending_permissions = 0;
+    }
+
+    /// Reset LSP server count.
+    pub fn reset_lsp_count(&mut self) {
+        self.lsp_count = 0;
+    }
+
+    /// Reset MCP server status.
+    pub fn reset_mcp_status(&mut self) {
+        self.mcp_count = 0;
+        self.mcp_has_error = false;
+    }
+
+    /// Reset all workstream-specific state.
+    /// This is called when switching workstreams to ensure clean state.
+    pub fn reset_workstream_state(&mut self) {
+        self.reset_sandbox_state();
+        self.reset_tokens();
+        self.reset_pending_permissions();
+        self.reset_lsp_count();
+        self.reset_mcp_status();
+        self.status = FooterStatus::default();
+    }
+
     /// Render the footer.
     /// Layout: Status/Spinner | MODE hints | Model | Tokens | Sandbox | Permissions | LSP | MCP
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {

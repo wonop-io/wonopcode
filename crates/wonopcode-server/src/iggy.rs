@@ -604,6 +604,15 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
         wonopcode_tui::AppUpdate::SessionLoaded { id, .. } => ServerPayload::Status {
             message: format!("Session {} loaded", id),
         },
+        // Busy state change - convert to Status for now
+        // The actual busy state is already reflected through Started/Completed
+        wonopcode_tui::AppUpdate::BusyStateChanged(busy) => ServerPayload::Status {
+            message: if *busy {
+                "Agent is busy".to_string()
+            } else {
+                "Agent is idle".to_string()
+            },
+        },
     }
 }
 

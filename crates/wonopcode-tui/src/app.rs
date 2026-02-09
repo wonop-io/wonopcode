@@ -374,6 +374,9 @@ pub enum AppUpdate {
     GitHistoryUpdated(Vec<GitCommitUpdate>),
     /// Git operation result (success/error).
     GitOperationResult { success: bool, message: String },
+    /// Agent busy state changed (processing started/finished).
+    /// Used for workstream state synchronization.
+    BusyStateChanged(bool),
 }
 
 /// Git status update from the runner.
@@ -778,6 +781,53 @@ impl<S: SidebarTrait> App<S> {
         self.topbar.set_directory(&project);
         self.autocomplete
             .set_cwd(std::path::PathBuf::from(&project));
+    }
+
+    // ========================================================================
+    // Workstream State Management
+    // ========================================================================
+
+    /// Reset all workstream-specific state.
+    /// Called when switching between workstreams to ensure clean state isolation.
+    pub fn reset_workstream_state(&mut self) {
+        // Reset sidebar state (todos, tokens, cost, MCP, LSP, modified files)
+        self.sidebar.reset_workstream_state();
+
+        // Reset footer state (sandbox, tokens, permissions, LSP, MCP counts)
+        self.footer.reset_workstream_state();
+
+        // Clear messages (conversation is workstream-specific)
+        self.messages.set_messages(Vec::new());
+
+        // Reset UI state
+        self.set_state(AppState::Input);
+        self.route = Route::Home;
+
+        // Clear any pending permission requests
+        self.permission_queue.clear();
+        if self.permission_dialog.is_some() {
+            self.permission_dialog = None;
+            self.dialog = ActiveDialog::None;
+        }
+
+        // Reset session title
+        self.session_title.clear();
+        self.sidebar.set_session_title("");
+    }
+
+    /// Set the busy state (whether agent is processing).
+    /// This is typically set from workstream state updates.
+    pub fn set_busy(&mut self, busy: bool) {
+        if busy {
+            self.footer.set_status(FooterStatus::Thinking);
+            self.set_state(AppState::Waiting);
+        } else {
+            self.footer.set_status(FooterStatus::Idle);
+            // Only go back to Input if we were Waiting
+            if self.state == AppState::Waiting {
+                self.set_state(AppState::Input);
+            }
+        }
     }
 
     /// Set the theme by name.
@@ -3420,6 +3470,10 @@ async function fetchUserData(userId) {
                 if let Some(dialog) = &mut self.git_dialog {
                     dialog.set_message(&message);
                 }
+            }
+            AppUpdate::BusyStateChanged(busy) => {
+                // Sync the busy state from workstream
+                self.set_busy(busy);
             }
         }
     }

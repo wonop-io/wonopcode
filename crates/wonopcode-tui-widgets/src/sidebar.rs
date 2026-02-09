@@ -109,6 +109,39 @@ pub trait SidebarTrait: Default + Send {
 
     /// Render the sidebar.
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme);
+
+    // ========================================================================
+    // Reset methods for workstream state isolation
+    // ========================================================================
+
+    /// Clear all todos and phases.
+    fn clear_todos(&mut self);
+
+    /// Reset token counts to zero.
+    fn reset_tokens(&mut self);
+
+    /// Reset cost to zero.
+    fn reset_cost(&mut self);
+
+    /// Clear all MCP server status.
+    fn clear_mcp_servers(&mut self);
+
+    /// Clear all LSP server status.
+    fn clear_lsp_servers(&mut self);
+
+    /// Clear all modified files.
+    fn clear_modified_files(&mut self);
+
+    /// Reset all workstream-specific state.
+    /// This is called when switching workstreams to ensure clean state.
+    fn reset_workstream_state(&mut self) {
+        self.clear_todos();
+        self.reset_tokens();
+        self.reset_cost();
+        self.clear_mcp_servers();
+        self.clear_lsp_servers();
+        self.clear_modified_files();
+    }
 }
 
 /// Format a number with comma separators (e.g., 67360 -> "67,360").
@@ -475,6 +508,33 @@ impl SidebarWidget {
     /// Clear all modified files.
     pub fn clear_modified_files(&mut self) {
         self.modified_files.clear();
+    }
+
+    /// Clear all todos and phases.
+    pub fn clear_todos(&mut self) {
+        self.phases.clear();
+        self.todos.clear();
+    }
+
+    /// Reset token counts to zero.
+    pub fn reset_tokens(&mut self) {
+        self.context.input_tokens = 0;
+        self.context.output_tokens = 0;
+    }
+
+    /// Reset cost to zero.
+    pub fn reset_cost(&mut self) {
+        self.context.cost = 0.0;
+    }
+
+    /// Clear all MCP servers.
+    pub fn clear_mcp_servers(&mut self) {
+        self.mcp_servers.clear();
+    }
+
+    /// Clear all LSP servers.
+    pub fn clear_lsp_servers(&mut self) {
+        self.lsp_servers.clear();
     }
 
     /// Handle a mouse click at the given position.
@@ -1255,5 +1315,29 @@ impl SidebarTrait for SidebarWidget {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         self.render(frame, area, theme)
+    }
+
+    fn clear_todos(&mut self) {
+        self.clear_todos()
+    }
+
+    fn reset_tokens(&mut self) {
+        self.reset_tokens()
+    }
+
+    fn reset_cost(&mut self) {
+        self.reset_cost()
+    }
+
+    fn clear_mcp_servers(&mut self) {
+        self.clear_mcp_servers()
+    }
+
+    fn clear_lsp_servers(&mut self) {
+        self.clear_lsp_servers()
+    }
+
+    fn clear_modified_files(&mut self) {
+        self.clear_modified_files()
     }
 }
