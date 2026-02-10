@@ -1036,6 +1036,10 @@ impl Runner {
             None
         };
 
+        // Track how many messages existed before the loop runs
+        // This helps us identify which assistant messages are new (for session persistence)
+        let messages_count_before_loop = messages.len();
+
         // Create a channel for LoopUpdate events
         let (loop_update_tx, mut loop_update_rx) = mpsc::unbounded_channel::<LoopUpdate>();
 
@@ -1180,24 +1184,118 @@ impl Runner {
         drop(loop_update_tx);
         let _ = forward_task.await;
 
+        // === SESSION PERSISTENCE: Save assistant messages (with tool calls) ===
+        // IMPORTANT: We save the actual messages from the agent loop, not synthetic text-only messages.
+        // This ensures tool calls (ContentPart::ToolUse) are persisted and can be reconstructed
+        // when the conversation is reloaded (e.g., switching workstreams).
+        if result.is_ok() {
+            if let Some(ref svc) = self.session_service {
+                if let Some(ref parent_id) = user_msg_id {
+                    // Only process messages that were added during this turn
+                    // (skip the ones that existed before the loop ran)
+                    let new_messages: Vec<_> = messages.iter().skip(messages_count_before_loop).collect();
+                    
+                    info!(
+                        messages_before = messages_count_before_loop,
+                        messages_after = messages.len(),
+                        new_message_count = new_messages.len(),
+                        "SESSION PERSISTENCE: Processing new messages for storage"
+                    );
+                    
+                    let mut last_saved_id = parent_id.clone();
+                    let mut assistant_count = 0;
+                    let mut tool_count = 0;
+                    
+                    // Track the last saved assistant message ID for updating tool results
+                    let mut current_assistant_msg_id: Option<String> = None;
+                    let mut tool_results_updated = 0;
+                    
+                    for msg in new_messages {
+                        match msg.role {
+                            wonopcode_provider::Role::Assistant => {
+                                assistant_count += 1;
+                                // Count tool use parts in this message
+                                let tools_in_msg = msg.content.iter().filter(|c| {
+                                    matches!(c, wonopcode_provider::ContentPart::ToolUse { .. })
+                                }).count();
+                                tool_count += tools_in_msg;
+                                
+                                info!(
+                                    content_parts = msg.content.len(),
+                                    tool_use_parts = tools_in_msg,
+                                    "SESSION PERSISTENCE: Saving assistant message"
+                                );
+                                
+                                // This message may contain ContentPart::ToolUse parts
+                                // which will be converted to MessagePart::Tool by save_assistant_message
+                                match svc.save_assistant_message(msg, &last_saved_id).await {
+                                    Ok(msg_id) => {
+                                        info!(
+                                            message_id = %msg_id,
+                                            parts = msg.content.len(),
+                                            "SESSION PERSISTENCE: Persisted assistant message with {} content parts",
+                                            msg.content.len()
+                                        );
+                                        current_assistant_msg_id = Some(msg_id.clone());
+                                        last_saved_id = msg_id;
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to persist assistant message to session");
+                                    }
+                                }
+                            }
+                            wonopcode_provider::Role::Tool => {
+                                // Tool result messages update the state of existing tool parts
+                                // These come from both internal tool execution and observed (CLI) tools
+                                if let Some(ref assistant_msg_id) = current_assistant_msg_id {
+                                    for content in &msg.content {
+                                        if let wonopcode_provider::ContentPart::ToolResult { tool_use_id, content: result_content, is_error } = content {
+                                            let output = result_content.clone();
+                                            let success = !is_error.unwrap_or(false);
+                                            
+                                            debug!(
+                                                assistant_msg_id = %assistant_msg_id,
+                                                tool_use_id = %tool_use_id,
+                                                success = %success,
+                                                output_len = output.len(),
+                                                "SESSION PERSISTENCE: Updating tool result"
+                                            );
+                                            
+                                            if let Err(e) = svc.update_tool_result(
+                                                assistant_msg_id,
+                                                tool_use_id,
+                                                output,
+                                                success,
+                                                None,
+                                            ).await {
+                                                warn!(error = %e, tool_use_id = %tool_use_id, "Failed to update tool result");
+                                            } else {
+                                                tool_results_updated += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                // User and System messages are handled separately
+                            }
+                        }
+                    }
+                    
+                    info!(
+                        assistant_messages_saved = assistant_count,
+                        total_tool_parts = tool_count,
+                        tool_results_updated = tool_results_updated,
+                        "SESSION PERSISTENCE: Completed saving messages"
+                    );
+                }
+            }
+        }
+
         // Update history with the new messages
         {
             let mut history = self.history.write().await;
             *history = messages;
-        }
-
-        // === SESSION PERSISTENCE: Save assistant message ===
-        if let Ok(ref response_text) = result {
-            if let Some(ref svc) = self.session_service {
-                if let Some(ref parent_id) = user_msg_id {
-                    let assistant_msg = ProviderMessage::assistant(response_text);
-                    if let Err(e) = svc.save_assistant_message(&assistant_msg, parent_id).await {
-                        warn!(error = %e, "Failed to persist assistant message to session");
-                    } else {
-                        debug!("Persisted assistant message to session");
-                    }
-                }
-            }
         }
 
         // Convert LoopError to Box<dyn Error>

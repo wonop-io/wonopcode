@@ -95,6 +95,14 @@ impl SessionService {
     ///
     /// This is the preferred way to create a SessionService when you have
     /// an Instance available (e.g., in workstream creation).
+    ///
+    /// This method will automatically load the most recent session for this workstream's
+    /// directory if one exists, ensuring that conversation history is available when
+    /// switching between workstreams.
+    ///
+    /// IMPORTANT: Sessions are filtered by directory (workstream path), not just project_id.
+    /// Different worktrees of the same git repository share the same project_id but have
+    /// different directories. Each workstream should only see its own sessions.
     pub async fn from_instance(
         instance: &crate::Instance,
         model_id: impl Into<String>,
@@ -105,15 +113,61 @@ impl SessionService {
         let worktree = instance.worktree().await;
         let root = worktree.display().to_string();
 
-        Self::new(
+        let service = Self::new(
             instance.storage().clone(),
             instance.bus().clone(),
-            project_id,
+            project_id.clone(),
             model_id,
             provider_id,
-            cwd,
+            cwd.clone(),
             root,
-        )
+        );
+
+        // Try to load the most recent session for THIS WORKSTREAM (filtered by directory)
+        // This ensures:
+        // 1. Conversation history is available when switching workstreams
+        // 2. Sessions from other worktrees (same project_id, different directory) are NOT loaded
+        match service.repo.list(&project_id).await {
+            Ok(sessions) => {
+                // Filter sessions to only those matching this workstream's directory
+                // Sessions are already sorted by ID descending (newest first)
+                let matching_session = sessions
+                    .into_iter()
+                    .find(|s| s.directory == cwd);
+                
+                if let Some(session) = matching_session {
+                    {
+                        let mut current = service.current_session.write().await;
+                        *current = Some(session.id.clone());
+                    }
+                    {
+                        let mut ctx = service.conversion_ctx.write().await;
+                        ctx.session_id = session.id.clone();
+                    }
+                    info!(
+                        session_id = %session.id,
+                        directory = %cwd,
+                        "Loaded most recent session for workstream"
+                    );
+                } else {
+                    debug!(
+                        project_id = %project_id,
+                        directory = %cwd,
+                        "No existing sessions found for this workstream directory"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    project_id = %project_id,
+                    directory = %cwd,
+                    error = %e,
+                    "Failed to list sessions, starting without history"
+                );
+            }
+        }
+
+        service
     }
 
     /// Get the underlying SessionRepository.

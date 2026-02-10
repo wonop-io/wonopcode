@@ -517,8 +517,20 @@ impl SessionRepository {
             }
         }
 
-        // Sort by ID (ascending - parts are created in order)
-        parts.sort_by(|a, b| a.id().cmp(b.id()));
+        // Sort by order field if present, otherwise fall back to ID
+        // The order field preserves the correct text/tool interleaving
+        parts.sort_by(|a, b| {
+            match (a.order(), b.order()) {
+                // Both have order - sort by order
+                (Some(ord_a), Some(ord_b)) => ord_a.cmp(&ord_b),
+                // Only a has order - a comes first
+                (Some(_), None) => std::cmp::Ordering::Less,
+                // Only b has order - b comes first
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                // Neither has order - fall back to ID
+                (None, None) => a.id().cmp(b.id()),
+            }
+        });
 
         Ok(parts)
     }

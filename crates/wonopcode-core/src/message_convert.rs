@@ -136,33 +136,43 @@ pub fn convert_assistant_message(
 
     let message_id = assistant_msg.id.clone();
     let mut parts = Vec::new();
+    let mut order: u32 = 0;
 
     for content in &provider_msg.content {
         match content {
             ContentPart::Text { text } => {
-                parts.push(MessagePart::Text(TextPart::new(
+                let mut part = MessagePart::Text(TextPart::new(
                     &ctx.session_id,
                     &message_id,
                     text,
-                )));
+                ));
+                part.set_order(order);
+                order += 1;
+                parts.push(part);
             }
             ContentPart::Thinking { text } => {
-                parts.push(MessagePart::Reasoning(ReasoningPart::new(
+                let mut part = MessagePart::Reasoning(ReasoningPart::new(
                     &ctx.session_id,
                     &message_id,
                     text,
-                )));
+                ));
+                part.set_order(order);
+                order += 1;
+                parts.push(part);
             }
             ContentPart::ToolUse { id, name, input } => {
                 let raw = serde_json::to_string(input).unwrap_or_default();
-                parts.push(MessagePart::Tool(ToolPart::new(
+                let mut part = MessagePart::Tool(ToolPart::new(
                     &ctx.session_id,
                     &message_id,
                     id,
                     name,
                     input.clone(),
                     &raw,
-                )));
+                ));
+                part.set_order(order);
+                order += 1;
+                parts.push(part);
             }
             ContentPart::ToolResult { .. } => {
                 // Tool results are typically in separate Tool role messages

@@ -362,6 +362,29 @@ impl MessagePart {
             MessagePart::Compaction(p) => &p.session_id,
         }
     }
+
+    /// Get the order of this part within the message (if set).
+    /// Returns None for parts that don't have an order set.
+    pub fn order(&self) -> Option<u32> {
+        match self {
+            MessagePart::Text(p) => p.order,
+            MessagePart::Reasoning(p) => p.order,
+            MessagePart::Tool(p) => p.order,
+            // Other part types don't support order yet
+            _ => None,
+        }
+    }
+
+    /// Set the order of this part.
+    pub fn set_order(&mut self, order: u32) {
+        match self {
+            MessagePart::Text(p) => p.order = Some(order),
+            MessagePart::Reasoning(p) => p.order = Some(order),
+            MessagePart::Tool(p) => p.order = Some(order),
+            // Other part types don't support order yet
+            _ => {}
+        }
+    }
 }
 
 /// Common fields for all parts.
@@ -401,6 +424,11 @@ pub struct TextPart {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+
+    /// Order of this part within the message (0-indexed).
+    /// Used to preserve correct text/tool interleaving when reloading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
 }
 
 impl TextPart {
@@ -418,7 +446,14 @@ impl TextPart {
             ignored: None,
             time: Some(PartTime::started()),
             metadata: None,
+            order: None,
         }
+    }
+
+    /// Create with explicit order.
+    pub fn with_order(mut self, order: u32) -> Self {
+        self.order = Some(order);
+        self
     }
 }
 
@@ -432,6 +467,10 @@ pub struct ReasoningPart {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<PartTime>,
+
+    /// Order of this part within the message (0-indexed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
 }
 
 impl ReasoningPart {
@@ -446,7 +485,14 @@ impl ReasoningPart {
             message_id: message_id.into(),
             text: text.into(),
             time: Some(PartTime::started()),
+            order: None,
         }
+    }
+
+    /// Create with explicit order.
+    pub fn with_order(mut self, order: u32) -> Self {
+        self.order = Some(order);
+        self
     }
 }
 
@@ -483,6 +529,10 @@ pub struct ToolPart {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+
+    /// Order of this part within the message (0-indexed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
 }
 
 impl ToolPart {
@@ -505,7 +555,14 @@ impl ToolPart {
                 raw: raw.into(),
             },
             metadata: None,
+            order: None,
         }
+    }
+
+    /// Create with explicit order.
+    pub fn with_order(mut self, order: u32) -> Self {
+        self.order = Some(order);
+        self
     }
 }
 

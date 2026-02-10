@@ -8,6 +8,7 @@ mod tools;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -215,8 +216,17 @@ impl AgentLoop for StandardLoop {
             let mut step_usage = Usage::default();
             // Track pending tool calls during streaming
             let mut pending_tool_calls: HashMap<String, (String, String)> = HashMap::new();
-            // Track observed tool names by ID (for external tool execution like CLI providers)
-            let mut observed_tool_names: HashMap<String, String> = HashMap::new();
+            // Track observed tools in order (for external tool execution like CLI providers)
+            // Using IndexMap to preserve insertion order
+            let mut observed_tools: IndexMap<String, (String, String)> = IndexMap::new(); // id -> (name, input)
+            // Track observed tool results (success, output) - separate from observed_tools
+            // because results arrive later via ToolResultObserved events
+            let mut observed_tool_results: HashMap<String, (bool, String)> = HashMap::new();
+            // Track content parts in order for correct interleaving
+            // This is needed because text and tools can be interleaved:
+            // text1 -> tool1 -> text2 -> tool2
+            // We need to preserve this order in the persisted message
+            let mut ordered_content: Vec<ContentPart> = Vec::new();
 
             // Process stream
             while let Some(chunk_result) = stream.next().await {
@@ -270,10 +280,23 @@ impl AgentLoop for StandardLoop {
                     }
                     StreamChunk::ReasoningEnd => {}
                     StreamChunk::ToolObserved { id, name, input } => {
-                        // Tool was observed being executed externally
+                        // Tool was observed being executed externally (e.g., by Claude CLI)
                         debug!(id = %id, name = %name, "Tool observed (external execution)");
-                        // Track the tool name by ID so we can include it in ToolCompleted
-                        observed_tool_names.insert(id.clone(), name.clone());
+                        
+                        // Flush any accumulated text BEFORE the tool to preserve order
+                        // This ensures text1 -> tool1 -> text2 ordering is maintained
+                        if !current_text.is_empty() {
+                            ordered_content.push(ContentPart::text(&current_text));
+                            current_text.clear();
+                        }
+                        
+                        // Add the tool to ordered content
+                        let input_val: serde_json::Value =
+                            serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
+                        ordered_content.push(ContentPart::tool_use(&id, &name, input_val));
+                        
+                        // Track the tool for result matching
+                        observed_tools.insert(id.clone(), (name.clone(), input.clone()));
                         ctx.send_update(LoopUpdate::ToolStarted { id, name, input });
                     }
                     StreamChunk::ToolResultObserved {
@@ -283,10 +306,16 @@ impl AgentLoop for StandardLoop {
                     } => {
                         // Tool result was observed (external execution completed)
                         // Look up the tool name from when we observed it starting
-                        let name = observed_tool_names
-                            .remove(&id)
+                        let name = observed_tools
+                            .get(&id)
+                            .map(|(n, _)| n.clone())
                             .unwrap_or_else(|| "unknown".to_string());
                         debug!(id = %id, name = %name, success = %success, "Tool result observed");
+                        
+                        // Store the result for later persistence
+                        // This allows us to update the tool state from Pending to Completed
+                        observed_tool_results.insert(id.clone(), (success, output.clone()));
+                        
                         ctx.send_update(LoopUpdate::ToolCompleted {
                             id,
                             name,
@@ -346,24 +375,61 @@ impl AgentLoop for StandardLoop {
             final_text = current_text.clone();
 
             // Add assistant message to history
-            if !current_text.is_empty() || !tool_calls.is_empty() {
-                let mut content = vec![];
-                if !current_text.is_empty() {
-                    content.push(ContentPart::text(&current_text));
-                }
-                for (id, name, args) in &tool_calls {
-                    let input: serde_json::Value =
-                        serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
-                    content.push(ContentPart::tool_use(id, name, input));
-                }
+            // Include both regular tool_calls AND observed_tools (from external execution like Claude CLI)
+            let has_observed_tools = !observed_tools.is_empty();
+            if !current_text.is_empty() || !tool_calls.is_empty() || has_observed_tools {
+                let content = if has_observed_tools {
+                    // For observed tools (external execution like Claude CLI),
+                    // use ordered_content which preserves text/tool interleaving.
+                    // First, flush any remaining text that came after the last tool.
+                    if !current_text.is_empty() {
+                        ordered_content.push(ContentPart::text(&current_text));
+                    }
+                    ordered_content.clone()
+                } else {
+                    // For internal tool execution, build content the traditional way
+                    let mut content = vec![];
+                    if !current_text.is_empty() {
+                        content.push(ContentPart::text(&current_text));
+                    }
+                    // Add regular tool calls (from internal execution)
+                    for (id, name, args) in &tool_calls {
+                        let input: serde_json::Value =
+                            serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+                        content.push(ContentPart::tool_use(id, name, input));
+                    }
+                    content
+                };
+
+                debug!(
+                    text_len = current_text.len(),
+                    tool_calls = tool_calls.len(),
+                    observed_tools = observed_tools.len(),
+                    ordered_content_len = if has_observed_tools { ordered_content.len() } else { 0 },
+                    "Adding assistant message to history"
+                );
 
                 ctx.messages.push(ProviderMessage {
                     role: wonopcode_provider::Role::Assistant,
                     content,
                 });
+                
+                // Add tool result messages for observed tools (like internal execution does)
+                // This ensures the tool results are available for persistence
+                for (id, (success, output)) in &observed_tool_results {
+                    debug!(
+                        tool_id = %id,
+                        success = %success,
+                        output_len = output.len(),
+                        "Adding observed tool result to history"
+                    );
+                    ctx.messages.push(ProviderMessage::tool_result(id, output));
+                }
             }
 
-            // If no tool calls, we're done
+            // If no tool calls to execute internally, we're done
+            // Note: observed_tools are already executed by the external process (e.g., Claude CLI)
+            // so we don't iterate based on them - they're only recorded for history
             if tool_calls.is_empty() {
                 break;
             }
