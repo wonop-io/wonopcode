@@ -1907,6 +1907,11 @@ pub struct AppSettings {
     /// Default model ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    
+    /// Default base branch for new workstreams (e.g., "main", "master", "develop").
+    /// If not set, defaults to "main".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_base_branch: Option<String>,
 }
 
 /// Manages application-wide settings.
@@ -1998,6 +2003,17 @@ impl AppSettingsManager {
     /// Set the default model.
     pub fn set_default_model(&mut self, model: Option<String>) -> CoreResult<()> {
         self.settings.default_model = model;
+        self.save()
+    }
+    
+    /// Get the default base branch for new workstreams.
+    pub fn get_default_base_branch(&self) -> Option<&str> {
+        self.settings.default_base_branch.as_deref()
+    }
+    
+    /// Set the default base branch for new workstreams.
+    pub fn set_default_base_branch(&mut self, branch: Option<String>) -> CoreResult<()> {
+        self.settings.default_base_branch = branch;
         self.save()
     }
 }
