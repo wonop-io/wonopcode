@@ -183,6 +183,19 @@ fn parse_worktree_list(output: &str, repo_root: &Path) -> Vec<PassiveWorkstream>
     worktrees
 }
 
+/// Check if a git branch exists in the repository.
+fn branch_exists(repo_root: &Path, branch_name: &str) -> bool {
+    let output = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch_name)])
+        .current_dir(repo_root)
+        .output();
+    
+    match output {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
 /// Create a new git worktree.
 pub async fn create_worktree(
     repo_root: &Path,
@@ -214,26 +227,44 @@ pub async fn create_worktree(
         std::fs::create_dir_all(parent)?;
     }
 
-    // Create the worktree with a new branch
-    let output = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            "-b",
-            branch_name,
-            worktree_path.to_string_lossy().as_ref(),
-            base_branch,
-        ])
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| WorkstreamError::Git(format!("Failed to run git worktree add: {}", e)))?;
+    // Check if branch already exists (e.g., from a previously closed worktree)
+    let branch_already_exists = branch_exists(repo_root, branch_name);
+    
+    let output = if branch_already_exists {
+        // Branch exists - reuse it by creating worktree without -b flag
+        info!(branch = %branch_name, "Branch already exists, reusing for worktree");
+        Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                worktree_path.to_string_lossy().as_ref(),
+                branch_name,
+            ])
+            .current_dir(repo_root)
+            .output()
+            .map_err(|e| WorkstreamError::Git(format!("Failed to run git worktree add: {}", e)))?
+    } else {
+        // Branch doesn't exist - create it from base branch
+        Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                worktree_path.to_string_lossy().as_ref(),
+                base_branch,
+            ])
+            .current_dir(repo_root)
+            .output()
+            .map_err(|e| WorkstreamError::Git(format!("Failed to run git worktree add: {}", e)))?
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(WorkstreamError::Git(format!("git worktree add failed: {}", stderr)).into());
     }
 
-    info!(path = %worktree_path.display(), "Worktree created");
+    info!(path = %worktree_path.display(), branch_reused = branch_already_exists, "Worktree created");
 
     Ok(PassiveWorkstream {
         branch: branch_name.to_string(),
