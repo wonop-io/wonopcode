@@ -805,6 +805,7 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
                             status: t.status,
                             priority: t.priority,
                             phase_id: t.phase_id,
+                            parents: t.parents,
                         })
                         .collect(),
                 })
@@ -817,6 +818,7 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
                     status: t.status,
                     priority: t.priority,
                     phase_id: t.phase_id,
+                    parents: t.parents,
                 })
                 .collect(),
         },
@@ -1189,6 +1191,7 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                             status: t.status,
                             priority: t.priority,
                             phase_id: t.phase_id,
+                            parents: t.parents,
                         })
                         .collect(),
                 })
@@ -1201,6 +1204,7 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                     status: t.status,
                     priority: t.priority,
                     phase_id: t.phase_id,
+                    parents: t.parents,
                 })
                 .collect(),
         },

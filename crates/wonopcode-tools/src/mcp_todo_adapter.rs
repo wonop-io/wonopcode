@@ -205,6 +205,7 @@ impl McpTodoAdapter {
             content: output.trim().to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::Medium,
+            parents: vec![],
         };
         phase.add_todo(todo);
         phased_todos.add_phase(phase);
@@ -347,6 +348,7 @@ impl McpTodoAdapter {
             content,
             status,
             priority,
+            parents: vec![],
         })
     }
 

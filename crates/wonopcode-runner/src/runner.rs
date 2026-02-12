@@ -66,6 +66,7 @@ fn convert_phased_todos_to_updates(
                     status: t.status.as_str().to_string(),
                     priority: t.priority.as_str().to_string(),
                     phase_id: Some(p.id.clone()),
+                    parents: t.parents.clone(),
                 })
                 .collect(),
         })
@@ -82,6 +83,7 @@ fn convert_phased_todos_to_updates(
                 status: t.status.as_str().to_string(),
                 priority: t.priority.as_str().to_string(),
                 phase_id: Some(p.id.clone()),
+                parents: t.parents.clone(),
             })
         })
         .collect();
@@ -235,6 +237,7 @@ fn parse_markdown_todo_line(line: &str) -> Option<todo::TodoItem> {
         content,
         status,
         priority,
+        parents: vec![],
     })
 }
 

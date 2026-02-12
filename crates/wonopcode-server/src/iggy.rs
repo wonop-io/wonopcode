@@ -512,6 +512,7 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                             status: t.status.clone(),
                             priority: t.priority.clone(),
                             phase_id: t.phase_id.clone(),
+                            parents: t.parents.clone(),
                         })
                         .collect(),
                 })
@@ -524,6 +525,7 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                     status: t.status.clone(),
                     priority: t.priority.clone(),
                     phase_id: t.phase_id.clone(),
+                    parents: t.parents.clone(),
                 })
                 .collect(),
         },
@@ -779,6 +781,7 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
                             status: t.status.clone(),
                             priority: t.priority.clone(),
                             phase_id: None,
+                            parents: t.parents.clone(),
                         })
                         .collect(),
                 })
@@ -791,6 +794,7 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
                     status: t.status.clone(),
                     priority: t.priority.clone(),
                     phase_id: None,
+                    parents: t.parents.clone(),
                 })
                 .collect(),
         },

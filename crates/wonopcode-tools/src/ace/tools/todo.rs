@@ -56,6 +56,7 @@ fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
                     content: task.title.clone(),
                     status: todo_status,
                     priority: todo_priority,
+                    parents: task.metadata.parents.clone(),
                 });
             }
             phased_todos.add_phase(phase);
