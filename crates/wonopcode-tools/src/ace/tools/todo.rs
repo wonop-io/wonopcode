@@ -71,12 +71,21 @@ fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
 /// so the Plan View in the desktop UI updates immediately.
 fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore) {
     if let Some(ref event_tx) = ctx.event_tx {
+        tracing::info!("emit_todos_updated: event_tx is available, reading tasks...");
         if let Ok(tasks) = store.list_artifacts(ArtifactType::Task) {
+            tracing::info!("emit_todos_updated: found {} tasks, building phased todos", tasks.len());
             let phased_todos = build_phased_todos_from_tasks(&tasks);
+            tracing::info!("emit_todos_updated: built {} phases", phased_todos.phases.len());
             if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(phased_todos)) {
-                tracing::debug!("Failed to send TodosUpdated event: {}", e);
+                tracing::warn!("emit_todos_updated: Failed to send TodosUpdated event: {}", e);
+            } else {
+                tracing::info!("emit_todos_updated: Successfully sent TodosUpdated event");
             }
+        } else {
+            tracing::warn!("emit_todos_updated: Failed to list tasks from store");
         }
+    } else {
+        tracing::warn!("emit_todos_updated: event_tx is None, cannot emit event!");
     }
 }
 

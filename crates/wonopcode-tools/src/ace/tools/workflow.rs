@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::ace::config::WonopCodeConfig;
-use crate::ace::{ArtifactStore, ArtifactType, Progress, WorkflowPhase, WorkstreamState};
+use crate::ace::{Artifact, ArtifactStore, ArtifactType, Priority, Progress, WorkflowPhase, WorkstreamState};
 use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult};
 
 /// ace_what_now tool - provides guidance on what to do next.
@@ -298,7 +298,7 @@ fn recommend_design_phase(
         output.push_str(")\n```\n\n");
     } else if config.ace.workflow.checkpoints.design.required {
         output.push_str("**Step 3: Request User Review** (REQUIRED)\n\n");
-        output.push_str("⛔ **STOP AND WAIT FOR APPROVAL** before implementing.\n\n");
+        output.push_str("⛔ **STOP AND WAIT FOR APPROVAL** before creating implementation plan.\n\n");
         output.push_str(&format!(
             "✅ All {} requirement(s) have:\n- {} design document(s)\n- {} test case(s)\n\n",
             requirements.len(),
@@ -310,9 +310,13 @@ fn recommend_design_phase(
         output.push_str("  checkpoint=\"design\",\n");
         output.push_str("  action=\"request_review\"\n");
         output.push_str(")\n```\n\n");
-        output.push_str("Wait for user to say \"approved\" before implementing.\n");
+        output.push_str("Wait for user to say \"approved\".\n\n");
+        output.push_str("**After design approval, you will:**\n");
+        output.push_str("1. Create tasks that break down the implementation work\n");
+        output.push_str("2. Submit the implementation plan for approval\n");
+        output.push_str("3. Only then begin coding\n");
     } else {
-        output.push_str("Design phase complete. Workflow can advance to Implementation.\n");
+        output.push_str("Design phase complete. Workflow can advance to Implementation Planning.\n");
     }
 
     Ok(())
@@ -328,6 +332,9 @@ fn recommend_implementation_phase(
         .unwrap_or_default();
     let designs = store
         .list_artifacts(ArtifactType::Design)
+        .unwrap_or_default();
+    let test_cases = store
+        .list_artifacts(ArtifactType::TestCase)
         .unwrap_or_default();
     let requirements = store
         .list_artifacts(ArtifactType::Requirement)
@@ -345,9 +352,30 @@ fn recommend_implementation_phase(
 
     output.push_str("### Implementation Phase\n\n");
 
+    // Gate implementation: require test cases before proceeding
+    if !requirements.is_empty() && test_cases.is_empty() {
+        output.push_str("⛔ **STOP: Test cases required before implementation!**\n\n");
+        output.push_str("You have {} requirement(s) but no test cases.\n\n");
+        output.push_str("**You MUST create test cases first.** DO NOT implement code without test coverage.\n\n");
+        output.push_str("Go back and create test cases:\n");
+        output.push_str("```\nace_create_artifact(\n");
+        output.push_str("  type=\"test-case\",\n");
+        output.push_str(&format!("  parents=[\"{}\"],\n", requirements[0].metadata.id));
+        output.push_str("  title=\"Test: verify [behavior]\",\n");
+        output.push_str("  content=\"## Steps\\n1. ...\\n## Expected\\n- ...\"\n");
+        output.push_str(")\n```\n\n");
+        return Ok(());
+    }
+
+    // Check if implementation plan has been approved (tasks exist and we have an active task or all done)
+    let plan_approved = !tasks.is_empty() && (state.active_task.is_some() || done_tasks > 0 || 
+        tasks.iter().any(|t| t.metadata.progress == Progress::InProgress));
+
+    // Tasks must be created BEFORE implementation begins
     if tasks.is_empty() {
-        output.push_str("**Create Tasks**\n\n");
-        output.push_str("Break down work into tasks:\n\n");
+        output.push_str("**Step 1: Create Implementation Plan** (REQUIRED before coding)\n\n");
+        output.push_str("⚠️ **You MUST create tasks BEFORE writing any code!**\n");
+        output.push_str("Tasks break down the implementation work and provide trackability.\n\n");
 
         // Show available parents
         if !designs.is_empty() {
@@ -373,7 +401,18 @@ fn recommend_implementation_phase(
                 parent.metadata.id
             ));
         }
-        output.push_str("])\n```\n");
+        output.push_str("])\n```\n\n");
+        output.push_str("**DO NOT write implementation code until the plan is approved!**\n");
+    } else if !plan_approved && state.active_task.is_none() {
+        // Tasks exist but plan not yet approved
+        output.push_str("**Step 2: Submit Implementation Plan for Approval** (REQUIRED)\n\n");
+        output.push_str("⛔ **STOP AND WAIT FOR APPROVAL** before writing any code.\n\n");
+        output.push_str(&format!("You have created {} task(s). Submit them for review:\n\n", tasks.len()));
+        output.push_str("```\nace_submit_checkpoint(\n");
+        output.push_str("  checkpoint=\"implementation_plan\",\n");
+        output.push_str("  action=\"request_review\"\n");
+        output.push_str(")\n```\n\n");
+        output.push_str("Wait for user to say \"approved\" before starting implementation.\n");
     } else if let Some(ref active) = state.active_task {
         output.push_str(&format!("**Complete Active Task:** `{}`\n\n", active));
         output.push_str("When done:\n");
@@ -466,7 +505,8 @@ impl Tool for AceSubmitCheckpointTool {
 
 Checkpoints:
 - requirements: Review use cases and requirements before design
-- design: Review technical designs before implementation
+- design: Review technical designs and test cases before planning implementation
+- implementation_plan: Review the task breakdown before coding begins
 - verification: Verify tests pass before deployment
 
 Actions:
@@ -476,7 +516,10 @@ Actions:
 Example flow:
 1. Call with action="request_review" to present the review
 2. Wait for user to say "approved"
-3. Call with action="approve" to advance the workflow"#
+3. Call with action="approve" to advance the workflow
+
+IMPORTANT: After design approval, you must create tasks and get the implementation
+plan approved BEFORE writing any code."#
     }
 
     fn parameters_schema(&self) -> Value {
@@ -486,7 +529,7 @@ Example flow:
             "properties": {
                 "checkpoint": {
                     "type": "string",
-                    "enum": ["requirements", "design", "verification"],
+                    "enum": ["requirements", "design", "implementation_plan", "verification"],
                     "description": "The checkpoint to submit"
                 },
                 "action": {
@@ -639,6 +682,127 @@ Example flow:
                         }
                         summary.push('\n');
                     }
+                    "implementation_plan" => {
+                        let tasks = store
+                            .list_artifacts(ArtifactType::Task)
+                            .unwrap_or_default();
+                        let designs = store
+                            .list_artifacts(ArtifactType::Design)
+                            .unwrap_or_default();
+                        let requirements = store
+                            .list_artifacts(ArtifactType::Requirement)
+                            .unwrap_or_default();
+                        let use_cases = store
+                            .list_artifacts(ArtifactType::UseCase)
+                            .unwrap_or_default();
+                        let test_cases = store
+                            .list_artifacts(ArtifactType::TestCase)
+                            .unwrap_or_default();
+
+                        // Validate: require at least one task
+                        if tasks.is_empty() {
+                            return Err(ToolError::validation(
+                                "Cannot submit implementation plan checkpoint: No tasks defined.\n\n\
+                                 You must create tasks that break down the implementation work.\n\
+                                 Use `ace_todo_write(tasks=[...])` to create tasks first.\n\n\
+                                 Call `ace_what_now()` for guidance on creating tasks."
+                            ));
+                        }
+
+                        // Build set of valid parent IDs (designs, requirements, use cases, test cases)
+                        let valid_parents: std::collections::HashSet<String> = designs.iter()
+                            .map(|a| a.metadata.id.clone())
+                            .chain(requirements.iter().map(|a| a.metadata.id.clone()))
+                            .chain(use_cases.iter().map(|a| a.metadata.id.clone()))
+                            .chain(test_cases.iter().map(|a| a.metadata.id.clone()))
+                            .collect();
+
+                        // Validate: each task must have at least one valid parent
+                        let orphan_tasks: Vec<_> = tasks.iter()
+                            .filter(|t| {
+                                t.metadata.parents.is_empty() || 
+                                !t.metadata.parents.iter().any(|p| valid_parents.contains(p))
+                            })
+                            .collect();
+
+                        if !orphan_tasks.is_empty() {
+                            let orphan_list: String = orphan_tasks
+                                .iter()
+                                .take(5)
+                                .map(|t| format!("  - `{}`: {} (parents: {})", 
+                                    t.metadata.id, 
+                                    t.title,
+                                    if t.metadata.parents.is_empty() { 
+                                        "none".to_string() 
+                                    } else { 
+                                        t.metadata.parents.join(", ") 
+                                    }
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let more_msg = if orphan_tasks.len() > 5 {
+                                format!("\n  ... and {} more", orphan_tasks.len() - 5)
+                            } else {
+                                String::new()
+                            };
+                            
+                            let available_parents: String = designs.iter()
+                                .take(3)
+                                .map(|d| format!("  - `{}` (design)", d.metadata.id))
+                                .chain(requirements.iter().take(3).map(|r| format!("  - `{}` (requirement)", r.metadata.id)))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+
+                            return Err(ToolError::validation(format!(
+                                "Cannot submit implementation plan: {} task(s) have no valid parent artifact.\n\n\
+                                 Each task must reference at least one design, requirement, use case, or test case.\n\n\
+                                 Tasks without valid parents:\n{}{}\n\n\
+                                 Available parent artifacts:\n{}\n\n\
+                                 Update tasks with: `ace_todo_write(tasks=[{{content: \"...\", parent: \"DES-xxx\"}}])`",
+                                orphan_tasks.len(), orphan_list, more_msg, available_parents
+                            )));
+                        }
+
+                        summary.push_str("### Implementation Plan\n\n");
+                        summary.push_str("The following tasks break down the implementation work:\n\n");
+
+                        // Group tasks by parent design/requirement
+                        let mut by_parent: std::collections::HashMap<String, Vec<&Artifact>> = std::collections::HashMap::new();
+                        for task in &tasks {
+                            let parent = task.metadata.parents.first()
+                                .cloned()
+                                .unwrap_or_else(|| "unassigned".to_string());
+                            by_parent.entry(parent).or_default().push(task);
+                        }
+
+                        for (parent_id, parent_tasks) in &by_parent {
+                            // Find parent title
+                            let parent_title = designs.iter()
+                                .find(|d| &d.metadata.id == parent_id)
+                                .map(|d| d.title.as_str())
+                                .unwrap_or("Unknown");
+                            
+                            summary.push_str(&format!("**{}** ({})\n", parent_id, parent_title));
+                            for task in parent_tasks {
+                                let priority_icon = match task.metadata.priority {
+                                    Priority::High => "🔴",
+                                    Priority::Medium => "🟡",
+                                    Priority::Low => "🟢",
+                                };
+                                summary.push_str(&format!(
+                                    "  - {} `{}`: {}\n",
+                                    priority_icon,
+                                    task.metadata.id,
+                                    task.title
+                                ));
+                            }
+                            summary.push('\n');
+                        }
+
+                        summary.push_str(&format!("**Total:** {} task(s)\n\n", tasks.len()));
+                        summary.push_str("⚠️ **After approval, implementation will begin.**\n");
+                        summary.push_str("The agent will work through these tasks one at a time.\n");
+                    }
                     "verification" => {
                         let test_cases = store
                             .list_artifacts(ArtifactType::TestCase)
@@ -682,7 +846,8 @@ Example flow:
                 let types_to_promote = match args.checkpoint.as_str() {
                     "requirements" => vec![ArtifactType::UseCase, ArtifactType::Requirement],
                     "design" => vec![ArtifactType::Design, ArtifactType::TestCase],
-                    "verification" => vec![ArtifactType::Task],
+                    "implementation_plan" => vec![ArtifactType::Task],
+                    "verification" => vec![],  // Tasks already promoted at implementation_plan
                     _ => vec![],
                 };
 
@@ -884,5 +1049,172 @@ mod tests {
         // Verify state was updated
         let state = WorkstreamState::load(dir.path()).unwrap().unwrap();
         assert_eq!(state.workflow.current_phase, WorkflowPhase::Analysis);
+    }
+
+    #[tokio::test]
+    async fn test_implementation_plan_requires_tasks() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let tool = AceSubmitCheckpointTool;
+        let result = tool
+            .execute(
+                json!({
+                    "checkpoint": "implementation_plan",
+                    "action": "request_review"
+                }),
+                &ctx,
+            )
+            .await;
+
+        // Should fail because no tasks exist
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("No tasks defined"));
+    }
+
+    #[tokio::test]
+    async fn test_implementation_plan_requires_valid_parents() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let store = ArtifactStore::new(dir.path()).unwrap();
+        store.ensure_directories().unwrap();
+
+        // Try to create a task WITHOUT a valid parent (empty parents)
+        // The store should reject this at creation time
+        let result = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Task,
+                "Orphan task",
+                "",
+                vec![], // No parent!
+                Priority::Medium,
+                false,
+            );
+
+        // The store validates parent types at creation time
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("requires at least one parent"));
+    }
+
+    #[tokio::test]
+    async fn test_implementation_plan_with_valid_parents() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let store = ArtifactStore::new(dir.path()).unwrap();
+        store.ensure_directories().unwrap();
+
+        // Create proper artifact hierarchy: UC -> REQ -> DES -> TASK
+        let uc = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::UseCase,
+                "Test Use Case",
+                "Content",
+                vec![],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let req = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Requirement,
+                "Test Requirement",
+                "Content",
+                vec![uc.metadata.id.clone()],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let des = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Design,
+                "Test Design",
+                "Content",
+                vec![req.metadata.id.clone()],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        // Create task with valid parent (the design)
+        store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Task,
+                "Implement feature",
+                "",
+                vec![des.metadata.id.clone()],
+                Priority::High,
+                false,
+            )
+            .unwrap();
+
+        state.save(dir.path()).unwrap();
+
+        let tool = AceSubmitCheckpointTool;
+        let result = tool
+            .execute(
+                json!({
+                    "checkpoint": "implementation_plan",
+                    "action": "request_review"
+                }),
+                &ctx,
+            )
+            .await;
+
+        // Should succeed because task has valid parent
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.output.contains("Implementation Plan"));
+        assert!(output.output.contains("Implement feature"));
+        assert!(output.output.contains(&des.metadata.id));
+    }
+
+    #[tokio::test]
+    async fn test_implementation_plan_rejects_invalid_parent_id() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let store = ArtifactStore::new(dir.path()).unwrap();
+        store.ensure_directories().unwrap();
+
+        // Try to create a task with a parent ID that doesn't exist
+        // The store should reject this at creation time
+        let result = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Task,
+                "Task with fake parent",
+                "",
+                vec!["DES-FAKE-001".to_string()], // Non-existent parent
+                Priority::Medium,
+                false,
+            );
+
+        // The store validates that parent artifacts exist
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Parent artifact not found") || err.contains("DES-FAKE-001"));
     }
 }
