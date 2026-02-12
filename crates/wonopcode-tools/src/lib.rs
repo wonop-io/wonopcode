@@ -7,6 +7,7 @@ pub mod error;
 pub mod registry;
 
 // Tool implementations
+pub mod ace;
 pub mod bash;
 pub mod batch;
 pub mod edit;
@@ -30,6 +31,12 @@ pub mod write;
 pub use error::{ToolError, ToolResult};
 pub use registry::ToolRegistry;
 
+// Re-export ACE tools for convenience
+pub use ace::{
+    AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
+    AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+};
+
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -43,8 +50,33 @@ use wonopcode_util::FileTimeState;
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
-    /// Todo list was updated with new phased structure.
+    /// Todo list was updated with new phased structure (legacy, for backward compatibility).
     TodosUpdated(todo::PhasedTodos),
+    /// An artifact was created.
+    ArtifactCreated {
+        id: String,
+        artifact_type: String,
+    },
+    /// An artifact was updated.
+    ArtifactUpdated {
+        id: String,
+    },
+    /// A task's status changed.
+    TaskStatusChanged {
+        id: String,
+        old_status: String,
+        new_status: String,
+    },
+    /// A workflow phase was completed.
+    PhaseCompleted {
+        phase: String,
+    },
+    /// A checkpoint review was requested.
+    CheckpointRequested {
+        checkpoint: String,
+    },
+    /// The workflow is complete.
+    WorkflowComplete,
 }
 
 /// Context provided to tools during execution.
@@ -260,9 +292,38 @@ mod tests {
 
         // Test that we can clone the event
         let cloned = event;
-        let ToolEvent::TodosUpdated(phased_todos) = cloned;
-        assert_eq!(phased_todos.phases.len(), 1);
-        assert_eq!(phased_todos.phases[0].todos.len(), 1);
-        assert_eq!(phased_todos.phases[0].todos[0].id, "1");
+        if let ToolEvent::TodosUpdated(phased_todos) = cloned {
+            assert_eq!(phased_todos.phases.len(), 1);
+            assert_eq!(phased_todos.phases[0].todos.len(), 1);
+            assert_eq!(phased_todos.phases[0].todos[0].id, "1");
+        } else {
+            panic!("Expected TodosUpdated event");
+        }
+    }
+
+    #[test]
+    fn test_tool_event_ace_variants() {
+        // Test ACE event variants can be created and cloned
+        let event1 = ToolEvent::ArtifactCreated {
+            id: "UC-WON-123-001".to_string(),
+            artifact_type: "use-case".to_string(),
+        };
+        let cloned1 = event1.clone();
+        if let ToolEvent::ArtifactCreated { id, artifact_type } = cloned1 {
+            assert_eq!(id, "UC-WON-123-001");
+            assert_eq!(artifact_type, "use-case");
+        }
+
+        let event2 = ToolEvent::TaskStatusChanged {
+            id: "TASK-WON-123-001".to_string(),
+            old_status: "backlog".to_string(),
+            new_status: "in_progress".to_string(),
+        };
+        let cloned2 = event2.clone();
+        if let ToolEvent::TaskStatusChanged { id, old_status, new_status } = cloned2 {
+            assert_eq!(id, "TASK-WON-123-001");
+            assert_eq!(old_status, "backlog");
+            assert_eq!(new_status, "in_progress");
+        }
     }
 }
