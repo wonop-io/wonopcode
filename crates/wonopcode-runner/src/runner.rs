@@ -28,7 +28,7 @@ use wonopcode_provider::{
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
-use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolRegistry};
+use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolEvent, ToolRegistry};
 use wonopcode_tui::{
     AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, McpStatusUpdate,
     PermissionRequestUpdate, PhaseUpdate, SaveScope, TodoUpdate,
@@ -66,6 +66,7 @@ fn convert_phased_todos_to_updates(
                     status: t.status.as_str().to_string(),
                     priority: t.priority.as_str().to_string(),
                     phase_id: Some(p.id.clone()),
+                    parents: t.parents.clone(),
                 })
                 .collect(),
         })
@@ -82,6 +83,7 @@ fn convert_phased_todos_to_updates(
                 status: t.status.as_str().to_string(),
                 priority: t.priority.as_str().to_string(),
                 phase_id: Some(p.id.clone()),
+                parents: t.parents.clone(),
             })
         })
         .collect();
@@ -235,6 +237,7 @@ fn parse_markdown_todo_line(line: &str) -> Option<todo::TodoItem> {
         content,
         status,
         priority,
+        parents: vec![],
     })
 }
 
@@ -408,9 +411,14 @@ impl Runner {
         tools.register(Arc::new(wonopcode_tools::bash::BashTool));
         tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
 
-        // TODO tools are registered initially - they may be replaced later if MCP TODO tools are detected
-        tools.register(Arc::new(todo::TodoWriteTool::new(todo_store.clone())));
-        tools.register(Arc::new(todo::TodoReadTool::new(todo_store.clone())));
+        // ACE tools for structured workflow (replaces legacy todowrite/todoread)
+        tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
+        tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
+        tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
+        tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
+        tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
+        tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
+        tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
 
         tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
             lsp_client.clone(),
@@ -844,14 +852,14 @@ impl Runner {
             new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
             new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
 
-            // Conditionally register TODO tools based on MCP availability and configuration
-            if !has_mcp_todo_tools || !prefer_mcp_todo {
-                new_tools.register(Arc::new(todo::TodoWriteTool::new(self.todo_store.clone())));
-                new_tools.register(Arc::new(todo::TodoReadTool::new(self.todo_store.clone())));
-                info!("Registered native TODO tools");
-            } else {
-                info!("Skipping native TODO tools - using MCP TODO tools");
-            }
+            // ACE tools for structured workflow (replaces legacy todowrite/todoread)
+            new_tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
+            new_tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
 
             new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
                 self.lsp_client.clone(),
@@ -1043,6 +1051,42 @@ impl Runner {
         // Create a channel for LoopUpdate events
         let (loop_update_tx, mut loop_update_rx) = mpsc::unbounded_channel::<LoopUpdate>();
 
+        // Create a channel for ToolEvents (like TodosUpdated from ACE tools)
+        let (tool_event_tx, mut tool_event_rx) = mpsc::unbounded_channel::<ToolEvent>();
+
+        // Spawn a task to forward ToolEvents to AppUpdates
+        let update_tx_for_tool_events = update_tx.clone();
+        let tool_event_forward_task = tokio::spawn(async move {
+            while let Some(event) = tool_event_rx.recv().await {
+                match event {
+                    ToolEvent::TodosUpdated(phased_todos) => {
+                        debug!("Forwarding TodosUpdated from tool event channel");
+                        let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
+                        let _ = update_tx_for_tool_events.send(AppUpdate::TodosUpdated { phases, todos });
+                    }
+                    // Other events are logged but not forwarded yet
+                    ToolEvent::ArtifactCreated { id, artifact_type } => {
+                        debug!("Tool event: ArtifactCreated {} ({})", id, artifact_type);
+                    }
+                    ToolEvent::ArtifactUpdated { id } => {
+                        debug!("Tool event: ArtifactUpdated {}", id);
+                    }
+                    ToolEvent::TaskStatusChanged { id, old_status, new_status } => {
+                        debug!("Tool event: TaskStatusChanged {} ({} -> {})", id, old_status, new_status);
+                    }
+                    ToolEvent::PhaseCompleted { phase } => {
+                        debug!("Tool event: PhaseCompleted {}", phase);
+                    }
+                    ToolEvent::CheckpointRequested { checkpoint } => {
+                        debug!("Tool event: CheckpointRequested {}", checkpoint);
+                    }
+                    ToolEvent::WorkflowComplete => {
+                        debug!("Tool event: WorkflowComplete");
+                    }
+                }
+            }
+        });
+
         // Get MCP TODO tool mappings for intercepting TODO tool completions
         let mcp_todo_mappings = self.mcp_todo_adapter.as_ref().map(|a| a.tool_mappings());
 
@@ -1063,12 +1107,10 @@ impl Runner {
                         output,
                         metadata,
                     } => {
-                        // Check if this is a TODO tool and emit TodosUpdated if so.
-                        // This handles both cases:
-                        // 1. When MCP adapter is available (mcp_todo_mappings is Some)
-                        // 2. When MCP tools are observed from external execution (e.g., Claude CLI)
-                        //    even without local MCP setup (mcp_todo_mappings is None)
-                        let is_todo_tool = if let Some(ref mappings) = mcp_todo_mappings {
+                        // Check if this is a legacy TODO tool (from MCP) and emit TodosUpdated if so.
+                        // Note: ACE tools (ace_todo_write, ace_todo_update) emit events directly
+                        // through the tool_event_tx channel, so they don't need interception here.
+                        let is_legacy_todo_tool = if let Some(ref mappings) = mcp_todo_mappings {
                             // Check registered MCP TODO tools
                             mappings.contains_key(&name)
                         } else {
@@ -1077,8 +1119,8 @@ impl Runner {
                             mcp_todo_adapter::McpTodoAdapter::is_mcp_todo_write_tool_static(&name)
                         };
 
-                        if is_todo_tool {
-                            debug!(tool = %name, "Intercepting TODO tool completion");
+                        if is_legacy_todo_tool {
+                            debug!(tool = %name, "Intercepting legacy TODO tool completion");
                             // Parse the output as TODO data
                             if let Ok(phased_todos) = parse_mcp_todo_output_simple(&output) {
                                 let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
@@ -1172,6 +1214,7 @@ impl Runner {
             compaction_config: &compaction_config,
             update_tx: &loop_update_tx,
             session_id: "default".to_string(),
+            tool_event_tx: Some(tool_event_tx),
         };
 
         // Run the agent loop
@@ -1183,6 +1226,9 @@ impl Runner {
         // Drop the update channel to signal the forward task to stop
         drop(loop_update_tx);
         let _ = forward_task.await;
+
+        // Abort the tool event forward task (sender was moved to ctx and dropped)
+        tool_event_forward_task.abort();
 
         // === SESSION PERSISTENCE: Save assistant messages (with tool calls) ===
         // IMPORTANT: We save the actual messages from the agent loop, not synthetic text-only messages.

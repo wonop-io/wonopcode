@@ -33,6 +33,15 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::search::WebSearchTool::new()));
         registry.register(Arc::new(crate::search::CodeSearchTool::new()));
 
+        // Register ACE tools
+        registry.register(Arc::new(crate::ace::AceCreateArtifactTool));
+        registry.register(Arc::new(crate::ace::AceReadArtifactTool));
+        registry.register(Arc::new(crate::ace::AceTodoReadTool));
+        registry.register(Arc::new(crate::ace::AceTodoWriteTool));
+        registry.register(Arc::new(crate::ace::AceTodoUpdateTool));
+        registry.register(Arc::new(crate::ace::AceWhatNowTool));
+        registry.register(Arc::new(crate::ace::AceSubmitCheckpointTool));
+
         registry
     }
 
@@ -191,6 +200,15 @@ mod tests {
         assert!(tools.contains(&"edit"));
         assert!(tools.contains(&"glob"));
         assert!(tools.contains(&"grep"));
+
+        // Should have ACE tools
+        assert!(tools.contains(&"ace_create_artifact"));
+        assert!(tools.contains(&"ace_read_artifact"));
+        assert!(tools.contains(&"ace_todo_read"));
+        assert!(tools.contains(&"ace_todo_write"));
+        assert!(tools.contains(&"ace_todo_update"));
+        assert!(tools.contains(&"ace_what_now"));
+        assert!(tools.contains(&"ace_submit_checkpoint"));
     }
 
     #[test]

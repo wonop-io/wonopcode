@@ -210,6 +210,9 @@ pub struct TodoItem {
     pub content: String,
     pub status: TodoStatus,
     pub priority: TodoPriority,
+    /// Parent artifact IDs (e.g., ["REQ-WON-135-001", "DES-WON-135-003"])
+    #[serde(default)]
+    pub parents: Vec<String>,
 }
 
 /// Todo status.
@@ -624,6 +627,7 @@ impl TodoItemInput {
             content: self.content,
             status: TodoStatus::parse(&self.status),
             priority: TodoPriority::parse(&self.priority),
+            parents: vec![],
         }
     }
 }

@@ -302,6 +302,8 @@ pub struct TodoUpdate {
     pub priority: String,
     /// Optional phase ID this todo belongs to.
     pub phase_id: Option<String>,
+    /// Parent artifact IDs (e.g., ["REQ-WON-135-001", "DES-WON-135-003"])
+    pub parents: Vec<String>,
 }
 
 /// Updates that can be received by the UI.

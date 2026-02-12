@@ -126,6 +126,9 @@ pub struct TodoInfo {
     /// Optional phase ID this todo belongs to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase_id: Option<String>,
+    /// Parent artifact IDs (e.g., ["REQ-WON-135-001", "DES-WON-135-003"])
+    #[serde(default)]
+    pub parents: Vec<String>,
 }
 
 /// LSP server info.

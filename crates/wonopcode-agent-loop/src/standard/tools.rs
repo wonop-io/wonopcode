@@ -3,12 +3,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
-use wonopcode_tools::{ToolContext, ToolError, ToolOutput, ToolRegistry};
+use wonopcode_tools::{ToolContext, ToolError, ToolEvent, ToolOutput, ToolRegistry};
 use wonopcode_util::FileTimeState;
 
 /// Executes tools with permission checking and parallel execution support.
@@ -17,6 +18,7 @@ pub struct ToolExecutor<'a> {
     snapshot_store: Option<Arc<SnapshotStore>>,
     file_time: Arc<FileTimeState>,
     sandbox: Option<Arc<dyn SandboxRuntime>>,
+    event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
 }
 
 impl<'a> ToolExecutor<'a> {
@@ -32,6 +34,27 @@ impl<'a> ToolExecutor<'a> {
             snapshot_store,
             file_time,
             sandbox,
+            event_tx: None,
+        }
+    }
+
+    /// Create a new tool executor with an event channel.
+    ///
+    /// The event channel allows tools to emit events (like `TodosUpdated`)
+    /// that can be forwarded to the UI for real-time updates.
+    pub fn with_event_tx(
+        tools: &'a ToolRegistry,
+        snapshot_store: Option<Arc<SnapshotStore>>,
+        file_time: Arc<FileTimeState>,
+        sandbox: Option<Arc<dyn SandboxRuntime>>,
+        event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+    ) -> Self {
+        Self {
+            tools,
+            snapshot_store,
+            file_time,
+            sandbox,
+            event_tx,
         }
     }
 
@@ -77,7 +100,7 @@ impl<'a> ToolExecutor<'a> {
             snapshot: self.snapshot_store.clone(),
             file_time: Some(self.file_time.clone()),
             sandbox: self.sandbox.clone(),
-            event_tx: None,
+            event_tx: self.event_tx.clone(),
         };
 
         // Execute

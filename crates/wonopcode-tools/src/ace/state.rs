@@ -1,0 +1,477 @@
+//! Workstream state management.
+//!
+//! Manages the workflow state stored in `.wonopcode/state.yaml`.
+
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+
+use super::types::{PhaseStatus, WorkflowPhase};
+
+/// Workstream-specific state stored in .wonopcode/state.yaml.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkstreamState {
+    /// Ticket ID this workstream is associated with.
+    pub ticket_id: String,
+    /// Ticket title (optional).
+    #[serde(default)]
+    pub ticket_title: Option<String>,
+    /// Source of the ticket (linear, github_issues, etc.).
+    #[serde(default)]
+    pub ticket_source: Option<String>,
+    /// When this workstream was created.
+    pub created_at: DateTime<Utc>,
+    /// When this workstream was last updated.
+    pub updated_at: DateTime<Utc>,
+    /// Workflow state.
+    pub workflow: WorkflowState,
+    /// Currently active task ID.
+    #[serde(default)]
+    pub active_task: Option<String>,
+    /// Sequence counters for artifact ID generation.
+    #[serde(default)]
+    pub sequences: SequenceCounters,
+}
+
+/// Workflow state tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowState {
+    /// Current workflow phase.
+    pub current_phase: WorkflowPhase,
+    /// Status of each phase.
+    pub phases: HashMap<String, PhaseState>,
+}
+
+/// State of a single workflow phase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseState {
+    /// Current status of the phase.
+    pub status: PhaseStatus,
+    /// When the phase was started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    /// When the phase was completed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl Default for PhaseState {
+    fn default() -> Self {
+        Self {
+            status: PhaseStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        }
+    }
+}
+
+/// Sequence counters for generating artifact IDs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SequenceCounters {
+    /// Use case sequence counter.
+    #[serde(rename = "use-case", default)]
+    pub use_case: u32,
+    /// Requirement sequence counter.
+    #[serde(default)]
+    pub requirement: u32,
+    /// Design sequence counter.
+    #[serde(default)]
+    pub design: u32,
+    /// Test case sequence counter.
+    #[serde(rename = "test-case", default)]
+    pub test_case: u32,
+    /// Task sequence counter.
+    #[serde(default)]
+    pub task: u32,
+}
+
+impl WorkstreamState {
+    /// Create a new workstream state for a ticket.
+    pub fn new(ticket_id: &str) -> Self {
+        let now = Utc::now();
+        let mut phases = HashMap::new();
+
+        // Initialize all phases - requirements starts as in_progress
+        for phase in WorkflowPhase::all() {
+            let status = if *phase == WorkflowPhase::Requirements {
+                PhaseStatus::InProgress
+            } else {
+                PhaseStatus::Pending
+            };
+            phases.insert(
+                phase.as_str().to_string(),
+                PhaseState {
+                    status,
+                    started_at: if *phase == WorkflowPhase::Requirements {
+                        Some(now)
+                    } else {
+                        None
+                    },
+                    completed_at: None,
+                },
+            );
+        }
+
+        Self {
+            ticket_id: ticket_id.to_string(),
+            ticket_title: None,
+            ticket_source: None,
+            created_at: now,
+            updated_at: now,
+            workflow: WorkflowState {
+                current_phase: WorkflowPhase::Requirements,
+                phases,
+            },
+            active_task: None,
+            sequences: SequenceCounters::default(),
+        }
+    }
+
+    /// Load state from .wonopcode/state.yaml.
+    ///
+    /// If the state file doesn't exist but we're in a worktree with a ticket-style
+    /// name (e.g., `feature-won-125--description`), auto-create the state.
+    ///
+    /// Returns None if no state file exists AND we can't infer a ticket ID.
+    pub fn load(root_dir: &Path) -> Result<Option<Self>> {
+        let state_path = root_dir.join(".wonopcode").join("state.yaml");
+
+        if state_path.exists() {
+            let content = std::fs::read_to_string(&state_path)
+                .with_context(|| format!("Failed to read {}", state_path.display()))?;
+
+            let state: Self = serde_yaml::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", state_path.display()))?;
+
+            return Ok(Some(state));
+        }
+
+        // Try to infer ticket ID from worktree directory name
+        // Pattern: feature-{TICKET_ID}--{description} or {prefix}-{TICKET_ID}-{suffix}
+        if let Some(dir_name) = root_dir.file_name().and_then(|n| n.to_str()) {
+            if let Some(ticket_id) = Self::extract_ticket_id(dir_name) {
+                // Auto-create state for this workstream
+                let mut state = Self::new(&ticket_id);
+                state.ticket_title = Self::extract_title(dir_name);
+
+                // Save the state so it persists
+                state.save(root_dir)?;
+
+                return Ok(Some(state));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Extract ticket ID from a worktree directory name.
+    ///
+    /// Supports patterns like:
+    /// - `feature-WON-125--description` → `WON-125`
+    /// - `feature/won-125--description` → `WON-125`
+    /// - `bugfix-PROJ-42--fix-thing` → `PROJ-42`
+    fn extract_ticket_id(dir_name: &str) -> Option<String> {
+        // Common prefixes to strip
+        let prefixes = ["feature-", "feature/", "bugfix-", "bugfix/", "fix-", "fix/", "hotfix-", "hotfix/"];
+        
+        let mut name = dir_name;
+        for prefix in &prefixes {
+            if let Some(stripped) = name.strip_prefix(prefix) {
+                name = stripped;
+                break;
+            }
+        }
+
+        // Look for ticket pattern: {PROJECT}-{NUMBER} (e.g., WON-125, PROJ-42)
+        // The pattern is: letters/numbers, dash, numbers, optionally followed by -- or -
+        use std::sync::OnceLock;
+        static RE: OnceLock<regex::Regex> = OnceLock::new();
+        let re = RE.get_or_init(|| {
+            regex::Regex::new(r"^([A-Za-z0-9]+-\d+)").unwrap()
+        });
+
+        re.captures(name)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_uppercase())
+    }
+
+    /// Extract a human-readable title from the directory name.
+    fn extract_title(dir_name: &str) -> Option<String> {
+        // Look for the part after -- which is typically the description
+        if let Some(idx) = dir_name.find("--") {
+            let desc = &dir_name[idx + 2..];
+            if !desc.is_empty() {
+                // Convert kebab-case to Title Case
+                let title = desc
+                    .split('-')
+                    .map(|word| {
+                        let mut chars = word.chars();
+                        match chars.next() {
+                            None => String::new(),
+                            Some(first) => first.to_uppercase().chain(chars).collect(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Some(title);
+            }
+        }
+        None
+    }
+
+    /// Save state to .wonopcode/state.yaml.
+    pub fn save(&mut self, root_dir: &Path) -> Result<()> {
+        self.updated_at = Utc::now();
+
+        let wonopcode_dir = root_dir.join(".wonopcode");
+        std::fs::create_dir_all(&wonopcode_dir)?;
+
+        let state_path = wonopcode_dir.join("state.yaml");
+        let content = serde_yaml::to_string(self)?;
+        std::fs::write(&state_path, content)?;
+
+        Ok(())
+    }
+
+    /// Get the next sequence number for an artifact type.
+    ///
+    /// This increments the counter and returns the new value.
+    pub fn next_sequence(&mut self, artifact_type: &str) -> u32 {
+        let counter = match artifact_type {
+            "use-case" | "use-cases" => &mut self.sequences.use_case,
+            "requirement" | "requirements" => &mut self.sequences.requirement,
+            "design" | "designs" => &mut self.sequences.design,
+            "test-case" | "tests" => &mut self.sequences.test_case,
+            "task" | "tasks" => &mut self.sequences.task,
+            _ => return 1,
+        };
+        *counter += 1;
+        *counter
+    }
+
+    /// Get the current phase status.
+    pub fn current_phase_status(&self) -> PhaseStatus {
+        self.workflow
+            .phases
+            .get(self.workflow.current_phase.as_str())
+            .map(|p| p.status)
+            .unwrap_or(PhaseStatus::Pending)
+    }
+
+    /// Advance to the next workflow phase.
+    ///
+    /// Returns the new phase, or None if already at the final phase.
+    pub fn advance_phase(&mut self) -> Option<WorkflowPhase> {
+        let now = Utc::now();
+
+        // Mark current phase as completed
+        if let Some(current_state) = self
+            .workflow
+            .phases
+            .get_mut(self.workflow.current_phase.as_str())
+        {
+            current_state.status = PhaseStatus::Completed;
+            current_state.completed_at = Some(now);
+        }
+
+        // Advance to next phase
+        if let Some(next_phase) = self.workflow.current_phase.next() {
+            self.workflow.current_phase = next_phase;
+
+            // Start the new phase
+            if let Some(next_state) = self.workflow.phases.get_mut(next_phase.as_str()) {
+                next_state.status = PhaseStatus::InProgress;
+                next_state.started_at = Some(now);
+            }
+
+            Some(next_phase)
+        } else {
+            None
+        }
+    }
+
+    /// Set phase to awaiting approval.
+    pub fn set_awaiting_approval(&mut self, phase: &str) {
+        if let Some(state) = self.workflow.phases.get_mut(phase) {
+            state.status = PhaseStatus::AwaitingApproval;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_new_workstream_state() {
+        let state = WorkstreamState::new("WON-123");
+
+        assert_eq!(state.ticket_id, "WON-123");
+        assert_eq!(state.workflow.current_phase, WorkflowPhase::Requirements);
+        assert!(state.active_task.is_none());
+        assert_eq!(state.sequences.use_case, 0);
+
+        // Requirements should be in_progress
+        let req_status = state
+            .workflow
+            .phases
+            .get("requirements")
+            .unwrap()
+            .status;
+        assert_eq!(req_status, PhaseStatus::InProgress);
+
+        // Other phases should be pending
+        let design_status = state.workflow.phases.get("design").unwrap().status;
+        assert_eq!(design_status, PhaseStatus::Pending);
+    }
+
+    #[test]
+    fn test_next_sequence() {
+        let mut state = WorkstreamState::new("WON-123");
+
+        assert_eq!(state.next_sequence("use-case"), 1);
+        assert_eq!(state.next_sequence("use-case"), 2);
+        assert_eq!(state.next_sequence("requirement"), 1);
+        assert_eq!(state.next_sequence("task"), 1);
+        assert_eq!(state.next_sequence("task"), 2);
+    }
+
+    #[test]
+    fn test_save_and_load() {
+        let dir = tempdir().unwrap();
+        let mut state = WorkstreamState::new("WON-456");
+        state.ticket_title = Some("Test ticket".to_string());
+        state.next_sequence("use-case");
+        state.next_sequence("use-case");
+
+        state.save(dir.path()).unwrap();
+
+        let loaded = WorkstreamState::load(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ticket_id, "WON-456");
+        assert_eq!(loaded.ticket_title, Some("Test ticket".to_string()));
+        assert_eq!(loaded.sequences.use_case, 2);
+    }
+
+    #[test]
+    fn test_load_missing() {
+        // A temp dir has a random name, so no ticket ID can be inferred
+        let dir = tempdir().unwrap();
+        let result = WorkstreamState::load(dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_ticket_id() {
+        // Standard feature branch format
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("feature-WON-125--test-calculator"),
+            Some("WON-125".to_string())
+        );
+        
+        // With slash prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("feature/won-42--description"),
+            Some("WON-42".to_string())
+        );
+
+        // Different project prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("bugfix-PROJ-999--fix-bug"),
+            Some("PROJ-999".to_string())
+        );
+
+        // Without prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("ABC-123--some-feature"),
+            Some("ABC-123".to_string())
+        );
+
+        // No ticket ID
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("some-random-directory"),
+            None
+        );
+
+        // Just numbers (not a valid ticket)
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("feature-123"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_title() {
+        assert_eq!(
+            WorkstreamState::extract_title("feature-WON-125--test-calculator"),
+            Some("Test Calculator".to_string())
+        );
+
+        assert_eq!(
+            WorkstreamState::extract_title("bugfix-PROJ-42--fix-memory-leak"),
+            Some("Fix Memory Leak".to_string())
+        );
+
+        // No description after --
+        assert_eq!(
+            WorkstreamState::extract_title("feature-WON-125--"),
+            None
+        );
+
+        // No -- separator
+        assert_eq!(
+            WorkstreamState::extract_title("feature-WON-125"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_auto_create_state_from_worktree_name() {
+        // Create a temp dir with a ticket-style name
+        let parent = tempdir().unwrap();
+        let worktree_dir = parent.path().join("feature-WON-999--test-auto-create");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Load should auto-create state
+        let state = WorkstreamState::load(&worktree_dir).unwrap().unwrap();
+        assert_eq!(state.ticket_id, "WON-999");
+        assert_eq!(state.ticket_title, Some("Test Auto Create".to_string()));
+
+        // State file should now exist
+        let state_path = worktree_dir.join(".wonopcode").join("state.yaml");
+        assert!(state_path.exists());
+    }
+
+    #[test]
+    fn test_advance_phase() {
+        let mut state = WorkstreamState::new("WON-789");
+
+        assert_eq!(state.workflow.current_phase, WorkflowPhase::Requirements);
+
+        let next = state.advance_phase();
+        assert_eq!(next, Some(WorkflowPhase::Analysis));
+        assert_eq!(state.workflow.current_phase, WorkflowPhase::Analysis);
+
+        // Requirements should be completed
+        let req_state = state.workflow.phases.get("requirements").unwrap();
+        assert_eq!(req_state.status, PhaseStatus::Completed);
+        assert!(req_state.completed_at.is_some());
+
+        // Analysis should be in_progress
+        let analysis_state = state.workflow.phases.get("analysis").unwrap();
+        assert_eq!(analysis_state.status, PhaseStatus::InProgress);
+        assert!(analysis_state.started_at.is_some());
+    }
+
+    #[test]
+    fn test_advance_phase_final() {
+        let mut state = WorkstreamState::new("WON-999");
+        state.workflow.current_phase = WorkflowPhase::Deployment;
+
+        let next = state.advance_phase();
+        assert!(next.is_none());
+        assert_eq!(state.workflow.current_phase, WorkflowPhase::Deployment);
+    }
+}

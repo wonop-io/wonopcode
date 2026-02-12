@@ -1,0 +1,756 @@
+//! Task management tools (ace_todo_read, ace_todo_write, ace_todo_update).
+
+use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+
+use crate::ace::{Artifact, ArtifactStore, ArtifactType, Priority, Progress, WorkstreamState};
+use crate::todo::{Phase, PhasedTodos, TodoItem, TodoPriority, TodoStatus};
+use crate::{Tool, ToolContext, ToolError, ToolEvent, ToolOutput, ToolResult};
+
+// ============================================================================
+// Helper Functions for Plan View Integration
+// ============================================================================
+
+/// Build PhasedTodos from ACE Task artifacts for UI synchronization.
+///
+/// This converts ACE artifacts into the PhasedTodos format expected by the
+/// Plan View in the desktop UI.
+fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
+    let mut phased_todos = PhasedTodos::new();
+
+    // Group tasks by progress status (matching ace_todo_read display order)
+    let statuses = [
+        ("in_progress", "In Progress"),
+        ("blocked", "Blocked"),
+        ("backlog", "Backlog"),
+        ("parked", "Parked"),
+        ("ready_to_validate", "Ready to Validate"),
+        ("done", "Done"),
+        ("discarded", "Discarded"),
+    ];
+
+    for (status_key, status_name) in statuses {
+        let status_tasks: Vec<_> = tasks
+            .iter()
+            .filter(|t| t.metadata.progress.as_str() == status_key)
+            .collect();
+
+        if !status_tasks.is_empty() {
+            let mut phase = Phase::new(status_key.to_string(), status_name.to_string());
+            for task in status_tasks {
+                let todo_status = match task.metadata.progress {
+                    Progress::InProgress => TodoStatus::InProgress,
+                    Progress::Done => TodoStatus::Completed,
+                    Progress::Discarded => TodoStatus::Cancelled,
+                    _ => TodoStatus::Pending,
+                };
+                let todo_priority = match task.metadata.priority {
+                    Priority::High => TodoPriority::High,
+                    Priority::Medium => TodoPriority::Medium,
+                    Priority::Low => TodoPriority::Low,
+                };
+                phase.add_todo(TodoItem {
+                    id: task.metadata.id.clone(),
+                    content: task.title.clone(),
+                    status: todo_status,
+                    priority: todo_priority,
+                    parents: task.metadata.parents.clone(),
+                });
+            }
+            phased_todos.add_phase(phase);
+        }
+    }
+
+    phased_todos
+}
+
+/// Emit TodosUpdated event with all current tasks.
+///
+/// This reads all tasks from the artifact store and emits a `ToolEvent::TodosUpdated`
+/// so the Plan View in the desktop UI updates immediately.
+fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore) {
+    if let Some(ref event_tx) = ctx.event_tx {
+        tracing::info!("emit_todos_updated: event_tx is available, reading tasks...");
+        if let Ok(tasks) = store.list_artifacts(ArtifactType::Task) {
+            tracing::info!("emit_todos_updated: found {} tasks, building phased todos", tasks.len());
+            let phased_todos = build_phased_todos_from_tasks(&tasks);
+            tracing::info!("emit_todos_updated: built {} phases", phased_todos.phases.len());
+            if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(phased_todos)) {
+                tracing::warn!("emit_todos_updated: Failed to send TodosUpdated event: {}", e);
+            } else {
+                tracing::info!("emit_todos_updated: Successfully sent TodosUpdated event");
+            }
+        } else {
+            tracing::warn!("emit_todos_updated: Failed to list tasks from store");
+        }
+    } else {
+        tracing::warn!("emit_todos_updated: event_tx is None, cannot emit event!");
+    }
+}
+
+/// ace_todo_read tool - reads the current task tree.
+pub struct AceTodoReadTool;
+
+#[async_trait]
+impl Tool for AceTodoReadTool {
+    fn id(&self) -> &str {
+        "ace_todo_read"
+    }
+
+    fn description(&self) -> &str {
+        "Read the current task tree organized by progress status and parent artifacts."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
+
+    async fn execute(&self, _args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
+        let state = WorkstreamState::load(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?;
+
+        // Return early if no workstream is initialized
+        if state.is_none() {
+            return Ok(ToolOutput::new(
+                "No workstream initialized - STOP",
+                "## ⛔ No Workstream Initialized\n\n\
+                 **STOP: You cannot proceed without a workstream.**\n\n\
+                 This worktree does not have an active workstream. The workstream must be \
+                 initialized by Wonop Code Desktop before any work can begin.\n\n\
+                 **⚠️ DO NOT:**\n\
+                 - Create `.wonopcode/` directory or files\n\
+                 - Create `state.yaml` manually\n\
+                 - Use `todowrite` or other tools to track work\n\
+                 - Start implementing code\n\n\
+                 **✅ Tell the user:**\n\
+                 \"This worktree needs to be initialized. Please open Wonop Code Desktop \
+                 and select or create a workstream for this worktree, then try again.\"",
+            ));
+        }
+
+        let state = state.unwrap();
+        let store = ArtifactStore::new(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
+
+        let tasks = store
+            .list_artifacts(ArtifactType::Task)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to list tasks: {e}")))?;
+
+        if tasks.is_empty() {
+            let mut output = String::new();
+            output.push_str(&format!("## Ticket: {}\n", state.ticket_id));
+            output.push_str(&format!("## Phase: {}\n\n", state.workflow.current_phase));
+            output.push_str("No tasks found for this workstream.\n\n");
+            output.push_str("Create tasks with:\n");
+            output.push_str("```\nace_todo_write(tasks=[{content: \"...\", parent: \"REQ-...\"}])\n```");
+
+            return Ok(ToolOutput::new("No tasks", output));
+        }
+
+        // Group tasks by progress
+        let mut by_progress: HashMap<&str, Vec<_>> = HashMap::new();
+        for task in &tasks {
+            by_progress
+                .entry(task.metadata.progress.as_str())
+                .or_default()
+                .push(task);
+        }
+
+        let mut output = String::new();
+
+        output.push_str(&format!("## Ticket: {}\n", state.ticket_id));
+        output.push_str(&format!("## Phase: {}\n\n", state.workflow.current_phase));
+
+        if let Some(ref active) = state.active_task {
+            output.push_str(&format!("**Active Task:** `{}`\n\n", active));
+        }
+
+        output.push_str("---\n\n");
+
+        // Display tasks grouped by status
+        for (status, icon) in [
+            ("in_progress", "▶"),
+            ("blocked", "⊘"),
+            ("backlog", "○"),
+            ("parked", "⏸"),
+            ("ready_to_validate", "◎"),
+            ("done", "●"),
+            ("discarded", "✗"),
+        ] {
+            if let Some(tasks) = by_progress.get(status) {
+                output.push_str(&format!(
+                    "\n### {} {} ({})\n\n",
+                    icon,
+                    status.replace('_', " ").to_uppercase(),
+                    tasks.len()
+                ));
+                for task in tasks {
+                    let priority_char = match task.metadata.priority {
+                        Priority::High => "H",
+                        Priority::Medium => "M",
+                        Priority::Low => "L",
+                    };
+                    output.push_str(&format!(
+                        "- [{}] **{}** `{}`\n",
+                        priority_char, task.title, task.metadata.id,
+                    ));
+                    if !task.metadata.parents.is_empty() {
+                        output.push_str(&format!(
+                            "  Parent: {}\n",
+                            task.metadata.parents.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+
+        let counts = (
+            by_progress.get("backlog").map(|v| v.len()).unwrap_or(0),
+            by_progress.get("in_progress").map(|v| v.len()).unwrap_or(0),
+            by_progress.get("done").map(|v| v.len()).unwrap_or(0),
+        );
+
+        Ok(ToolOutput::new(
+            format!(
+                "{} tasks: {} backlog, {} in progress, {} done",
+                tasks.len(),
+                counts.0,
+                counts.1,
+                counts.2
+            ),
+            output,
+        )
+        .with_metadata(json!({
+            "total": tasks.len(),
+            "backlog": counts.0,
+            "in_progress": counts.1,
+            "done": counts.2,
+        })))
+    }
+}
+
+/// ace_todo_update tool - updates an artifact's progress status.
+pub struct AceTodoUpdateTool;
+
+#[derive(Debug, Deserialize)]
+struct TodoUpdateArgs {
+    node_id: String,
+    status: String,
+}
+
+#[async_trait]
+impl Tool for AceTodoUpdateTool {
+    fn id(&self) -> &str {
+        "ace_todo_update"
+    }
+
+    fn description(&self) -> &str {
+        r#"Update an artifact's progress status.
+
+Valid statuses:
+- backlog: Not yet started
+- in_progress: Currently being worked on (only ONE task at a time)
+- blocked: Waiting on external dependency
+- parked: Temporarily set aside
+- ready_to_validate: Work complete, awaiting verification
+- done: Completed successfully
+- discarded: No longer needed
+
+Note: Setting a task to in_progress will fail if another task is already active.
+Use 'parked' or 'done' on the current active task first."#
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["node_id", "status"],
+            "properties": {
+                "node_id": {
+                    "type": "string",
+                    "description": "The artifact ID to update (e.g., TASK-WON-122-001)"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["backlog", "in_progress", "blocked", "parked", "ready_to_validate", "done", "discarded"],
+                    "description": "New progress status"
+                }
+            }
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
+        let args: TodoUpdateArgs = serde_json::from_value(args)
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
+
+        let progress = Progress::from_str(&args.status)
+            .ok_or_else(|| ToolError::validation(format!("Invalid status: {}", args.status)))?;
+
+        let store = ArtifactStore::new(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
+
+        // Load state (managed by Wonop Code Desktop, not by the agent)
+        let mut state = WorkstreamState::load(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
+            .ok_or_else(|| ToolError::execution_failed(
+                "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
+                 Tell the user to open Wonop Code Desktop and initialize this worktree first."
+            ))?;
+
+        // Get old status for event
+        let old_artifact = store
+            .read_artifact(&args.node_id)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to read artifact: {e}")))?
+            .ok_or_else(|| {
+                ToolError::execution_failed(format!("Artifact not found: {}", args.node_id))
+            })?;
+
+        let old_status = old_artifact.metadata.progress.as_str().to_string();
+
+        // Enforce single active task constraint
+        if progress == Progress::InProgress {
+            if let Some(ref active) = state.active_task {
+                if active != &args.node_id {
+                    return Err(ToolError::execution_failed(format!(
+                        "Cannot set {} to in_progress: {} is already active.\n\n\
+                         First update the active task:\n\
+                         - `ace_todo_update(node_id=\"{}\", status=\"parked\")` to pause it\n\
+                         - `ace_todo_update(node_id=\"{}\", status=\"done\")` to complete it",
+                        args.node_id, active, active, active
+                    )));
+                }
+            }
+            state.active_task = Some(args.node_id.clone());
+        } else if state.active_task.as_ref() == Some(&args.node_id) {
+            state.active_task = None;
+        }
+
+        // Update artifact
+        let artifact = store
+            .update_artifact_progress(&args.node_id, progress)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to update artifact: {e}")))?;
+
+        // Save state
+        state
+            .save(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
+
+        // Emit TaskStatusChanged event
+        if let Some(ref event_tx) = ctx.event_tx {
+            let _ = event_tx.send(ToolEvent::TaskStatusChanged {
+                id: args.node_id.clone(),
+                old_status: old_status.clone(),
+                new_status: args.status.clone(),
+            });
+        }
+
+        // Emit TodosUpdated so Plan View updates immediately
+        emit_todos_updated(ctx, &store);
+
+        let active_info = if progress == Progress::InProgress {
+            format!("\n\n**Active task:** `{}`", args.node_id)
+        } else if state.active_task.is_none() {
+            "\n\n**No active task.** Use `ace_todo_update(node_id=\"...\", status=\"in_progress\")` to start one.".to_string()
+        } else {
+            format!("\n\n**Active task:** `{}`", state.active_task.unwrap_or_default())
+        };
+
+        Ok(ToolOutput::new(
+            format!("{}: {} → {}", args.node_id, old_status, args.status),
+            format!(
+                "Updated `{}` from **{}** to **{}**{}",
+                artifact.metadata.id, old_status, args.status, active_info
+            ),
+        )
+        .with_metadata(json!({
+            "id": artifact.metadata.id,
+            "old_status": old_status,
+            "new_status": args.status,
+        })))
+    }
+}
+
+/// ace_todo_write tool - creates tasks.
+pub struct AceTodoWriteTool;
+
+#[derive(Debug, Deserialize)]
+struct TodoWriteArgs {
+    tasks: Vec<TaskInput>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskInput {
+    content: String,
+    #[serde(default)]
+    parent: Option<String>,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+}
+
+#[async_trait]
+impl Tool for AceTodoWriteTool {
+    fn id(&self) -> &str {
+        "ace_todo_write"
+    }
+
+    fn description(&self) -> &str {
+        r#"Create tasks for the current workstream.
+
+Each task requires a parent artifact (requirement, design, or test-case).
+Tasks are created in the specs/tasks/ directory.
+
+Example:
+```json
+{
+  "tasks": [
+    {"content": "Implement login endpoint", "parent": "REQ-WON-122-001", "priority": "high"},
+    {"content": "Add unit tests", "parent": "REQ-WON-122-001", "priority": "medium"}
+  ]
+}
+```"#
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["tasks"],
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["content", "parent"],
+                        "properties": {
+                            "content": {
+                                "type": "string",
+                                "description": "Task description (becomes the title)"
+                            },
+                            "parent": {
+                                "type": "string",
+                                "description": "Parent artifact ID (requirement, design, or test-case)"
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                                "description": "Task priority (default: medium)"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["backlog", "in_progress"],
+                                "description": "Initial status (default: backlog)"
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
+        let args: TodoWriteArgs = serde_json::from_value(args)
+            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
+
+        if args.tasks.is_empty() {
+            return Err(ToolError::validation("No tasks provided".to_string()));
+        }
+
+        let store = ArtifactStore::new(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
+
+        store
+            .ensure_directories()
+            .map_err(|e| ToolError::execution_failed(format!("Failed to create directories: {e}")))?;
+
+        let mut state = WorkstreamState::load(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
+            .ok_or_else(|| ToolError::execution_failed(
+                "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
+                 Tell the user to open Wonop Code Desktop and initialize this worktree first."
+            ))?;
+
+        let mut created_ids = Vec::new();
+
+        for task_input in args.tasks {
+            let parent = task_input.parent.ok_or_else(|| {
+                ToolError::validation(
+                    "Task requires a parent artifact (requirement, design, or test-case)"
+                        .to_string(),
+                )
+            })?;
+
+            let priority = task_input
+                .priority
+                .as_deref()
+                .and_then(Priority::from_str)
+                .unwrap_or(Priority::Medium);
+
+            let artifact = store
+                .create_artifact(
+                    &mut state,
+                    ArtifactType::Task,
+                    &task_input.content,
+                    "", // Tasks don't need content body
+                    vec![parent],
+                    priority,
+                    false, // Tasks go directly to specs, not staging
+                )
+                .map_err(|e| ToolError::execution_failed(format!("Failed to create task: {e}")))?;
+
+            // If status is in_progress, update it
+            if task_input.status.as_deref() == Some("in_progress") {
+                if state.active_task.is_some() {
+                    return Err(ToolError::execution_failed(
+                        "Cannot create task as in_progress: another task is already active"
+                            .to_string(),
+                    ));
+                }
+                store
+                    .update_artifact_progress(&artifact.metadata.id, Progress::InProgress)
+                    .map_err(|e| {
+                        ToolError::execution_failed(format!("Failed to update task status: {e}"))
+                    })?;
+                state.active_task = Some(artifact.metadata.id.clone());
+            }
+
+            created_ids.push((artifact.metadata.id, task_input.content));
+        }
+
+        state
+            .save(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
+
+        // Emit TodosUpdated so Plan View updates immediately
+        emit_todos_updated(ctx, &store);
+
+        let output = format!(
+            "Created {} task(s):\n\n{}",
+            created_ids.len(),
+            created_ids
+                .iter()
+                .map(|(id, content)| format!("- `{}`: {}", id, content))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        Ok(ToolOutput::new(
+            format!("Created {} tasks", created_ids.len()),
+            output,
+        )
+        .with_metadata(json!({
+            "created": created_ids.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+    use tokio_util::sync::CancellationToken;
+
+    fn test_context(root_dir: PathBuf) -> ToolContext {
+        ToolContext {
+            session_id: "test_session".to_string(),
+            message_id: "test_message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: root_dir.clone(),
+            cwd: root_dir,
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_todo_read_no_workstream() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        // No state created - should return info message, not error
+        let tool = AceTodoReadTool;
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        assert!(result.output.contains("No Workstream Initialized"));
+        assert!(result.output.contains("DO NOT"));
+        assert!(result.output.contains("Wonop Code Desktop"));
+    }
+
+    #[tokio::test]
+    async fn test_todo_read_empty() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let tool = AceTodoReadTool;
+        let result = tool.execute(json!({}), &ctx).await.unwrap();
+
+        assert!(result.output.contains("No tasks"));
+    }
+
+    #[tokio::test]
+    async fn test_create_and_read_tasks() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let store = ArtifactStore::new(dir.path()).unwrap();
+        store.ensure_directories().unwrap();
+
+        // Create a requirement first
+        let req = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::UseCase,
+                "Test UC",
+                "Content",
+                vec![],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let req2 = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Requirement,
+                "Test REQ",
+                "Content",
+                vec![req.metadata.id],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        state.save(dir.path()).unwrap();
+
+        // Create tasks
+        let write_tool = AceTodoWriteTool;
+        let result = write_tool
+            .execute(
+                json!({
+                    "tasks": [
+                        {"content": "Task 1", "parent": req2.metadata.id, "priority": "high"},
+                        {"content": "Task 2", "parent": req2.metadata.id, "priority": "low"}
+                    ]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.output.contains("Created 2 task"));
+
+        // Read tasks
+        let read_tool = AceTodoReadTool;
+        let result = read_tool.execute(json!({}), &ctx).await.unwrap();
+
+        assert!(result.output.contains("Task 1"));
+        assert!(result.output.contains("Task 2"));
+        assert!(result.output.contains("BACKLOG"));
+    }
+
+    #[tokio::test]
+    async fn test_single_active_task_constraint() {
+        let dir = tempdir().unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let mut state = WorkstreamState::new("WON-123");
+        state.save(dir.path()).unwrap();
+
+        let store = ArtifactStore::new(dir.path()).unwrap();
+        store.ensure_directories().unwrap();
+
+        // Create parent artifacts
+        let uc = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::UseCase,
+                "UC",
+                "",
+                vec![],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let req = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Requirement,
+                "REQ",
+                "",
+                vec![uc.metadata.id],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        // Create two tasks
+        let task1 = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Task,
+                "Task 1",
+                "",
+                vec![req.metadata.id.clone()],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let task2 = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Task,
+                "Task 2",
+                "",
+                vec![req.metadata.id],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        state.save(dir.path()).unwrap();
+
+        let update_tool = AceTodoUpdateTool;
+
+        // Set task1 to in_progress
+        update_tool
+            .execute(
+                json!({
+                    "node_id": task1.metadata.id,
+                    "status": "in_progress"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Try to set task2 to in_progress - should fail
+        let result = update_tool
+            .execute(
+                json!({
+                    "node_id": task2.metadata.id,
+                    "status": "in_progress"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already active"));
+    }
+}

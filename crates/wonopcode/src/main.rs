@@ -1483,6 +1483,7 @@ async fn run_headless(
                                     status: t.status.clone(),
                                     priority: t.priority.clone(),
                                     phase_id: t.phase_id.clone(),
+                                    parents: t.parents.clone(),
                                 })
                                 .collect(),
                         })
@@ -1495,6 +1496,7 @@ async fn run_headless(
                             status: t.status.clone(),
                             priority: t.priority.clone(),
                             phase_id: t.phase_id.clone(),
+                            parents: t.parents.clone(),
                         })
                         .collect();
                 }
@@ -1609,6 +1611,7 @@ async fn run_headless(
                                     status: t.status,
                                     priority: t.priority,
                                     phase_id: t.phase_id,
+                                    parents: t.parents,
                                 })
                                 .collect(),
                         })
@@ -1621,6 +1624,7 @@ async fn run_headless(
                             status: t.status,
                             priority: t.priority,
                             phase_id: t.phase_id,
+                            parents: t.parents,
                         })
                         .collect(),
                 },
@@ -1686,6 +1690,10 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::GitStatusUpdated(_)
                 | wonopcode_tui::AppUpdate::GitHistoryUpdated(_)
                 | wonopcode_tui::AppUpdate::GitOperationResult { .. } => {
+                    continue;
+                }
+                // BusyStateChanged is handled internally by the runner
+                wonopcode_tui::AppUpdate::BusyStateChanged(_) => {
                     continue;
                 }
             };
@@ -1932,6 +1940,7 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                         status: t.status,
                         priority: t.priority,
                         phase_id: t.phase_id,
+                        parents: t.parents,
                     })
                     .collect(),
             })
@@ -1945,6 +1954,7 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
                 status: t.status,
                 priority: t.priority,
                 phase_id: t.phase_id,
+                parents: t.parents,
             })
             .collect();
         if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::TodosUpdated { phases, todos }) {

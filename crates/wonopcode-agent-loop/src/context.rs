@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use wonopcode_provider::{BoxedLanguageModel, Message as ProviderMessage, ToolDefinition};
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
-use wonopcode_tools::ToolRegistry;
+use wonopcode_tools::{ToolEvent, ToolRegistry};
 use wonopcode_util::FileTimeState;
 
 /// Configuration for the agent loop.
@@ -190,6 +190,13 @@ pub struct LoopContext<'a> {
 
     /// Session ID (for tracking).
     pub session_id: String,
+
+    /// Optional channel for tools to emit events (like `TodosUpdated`).
+    ///
+    /// When set, tools can send events through this channel to notify
+    /// the system of state changes (e.g., task creation, status updates).
+    /// These events can be forwarded to the UI for real-time updates.
+    pub tool_event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
 }
 
 impl<'a> LoopContext<'a> {

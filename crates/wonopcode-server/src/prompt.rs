@@ -401,6 +401,7 @@ impl ServerPromptRunner {
                                             content,
                                             status,
                                             priority,
+                                            parents: vec![],
                                         })
                                     })
                                     .collect();
