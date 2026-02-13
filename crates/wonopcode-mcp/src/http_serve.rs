@@ -48,7 +48,7 @@ use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use tokio::sync::{mpsc, RwLock};
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// State for MCP HTTP server.
 #[derive(Clone)]
@@ -148,14 +148,14 @@ impl McpHttpState {
                 created_at: Instant::now(),
             },
         );
-        info!(session_id = %session_id, "MCP session registered");
+        debug!(session_id = %session_id, "MCP session registered");
     }
 
     /// Unregister a session.
     async fn unregister_session(&self, session_id: &str) {
         let mut sessions = self.sessions.write().await;
         if sessions.remove(session_id).is_some() {
-            info!(session_id = %session_id, "MCP session unregistered");
+            debug!(session_id = %session_id, "MCP session unregistered");
         }
     }
 
@@ -201,7 +201,7 @@ impl McpHttpState {
 
     /// Handle the initialize request.
     fn handle_initialize(&self, id: u64) -> JsonRpcResponse {
-        info!(name = %self.name, version = %self.version, "Initializing MCP HTTP server");
+        debug!(name = %self.name, version = %self.version, "Initializing MCP HTTP server");
 
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION.to_string(),
@@ -408,7 +408,7 @@ pub fn create_mcp_router(state: McpHttpState) -> Router {
 
     // Only add auth middleware if API key is configured
     let router = if has_auth {
-        info!("MCP API key authentication enabled");
+        debug!("MCP API key authentication enabled");
         router.layer(axum::middleware::from_fn_with_state(
             state.clone(),
             api_key_auth,
@@ -439,7 +439,7 @@ pub async fn mcp_sse(
     // Build message URL with session ID
     let message_url = format!("{}?sessionId={}", state.message_url, session_id);
 
-    info!(session_id = %session_id, message_url = %message_url, "MCP SSE connection established");
+    debug!(session_id = %session_id, message_url = %message_url, "MCP SSE connection established");
 
     let state_clone = state.clone();
     let session_id_clone = session_id.clone();

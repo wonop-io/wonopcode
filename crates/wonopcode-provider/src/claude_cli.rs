@@ -58,7 +58,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
-use tracing::{debug, info, warn};
+use tracing::{debug, trace, warn};
 
 /// Cache for the Claude CLI binary path.
 /// This is cached because finding the binary can be slow if it's not in PATH.
@@ -121,7 +121,7 @@ pub fn build_enhanced_path() -> String {
 fn find_claude_cli() -> Option<PathBuf> {
     CLAUDE_CLI_PATH
         .get_or_init(|| {
-            info!("Searching for Claude CLI...");
+            debug!("Searching for Claude CLI...");
             
             // Build enhanced PATH to ensure Node.js is available
             // Claude CLI uses #!/usr/bin/env node, so node must be in PATH
@@ -132,7 +132,7 @@ fn find_claude_cli() -> Option<PathBuf> {
             if let Ok(custom_path) = std::env::var("WONOPCODE_CLAUDE_CLI_PATH") {
                 if !custom_path.is_empty() {
                     let path = PathBuf::from(&custom_path);
-                    info!(path = %path.display(), "Checking custom Claude CLI path from WONOPCODE_CLAUDE_CLI_PATH");
+                    debug!(path = %path.display(), "Checking custom Claude CLI path from WONOPCODE_CLAUDE_CLI_PATH");
                     
                     if path.exists() {
                         let mut cmd = Command::new(&path);
@@ -141,7 +141,7 @@ fn find_claude_cli() -> Option<PathBuf> {
                         
                         match cmd.output() {
                             Ok(output) if output.status.success() => {
-                                info!(path = %path.display(), "Using custom Claude CLI path");
+                                debug!(path = %path.display(), "Using custom Claude CLI path");
                                 return Some(path);
                             }
                             Ok(output) => {
@@ -169,7 +169,7 @@ fn find_claude_cli() -> Option<PathBuf> {
             
             match cmd.output() {
                 Ok(output) if output.status.success() => {
-                    info!("Found claude in PATH");
+                    debug!("Found claude in PATH");
                     return Some(PathBuf::from("claude"));
                 }
                 Ok(output) => {
@@ -220,7 +220,7 @@ fn find_claude_cli() -> Option<PathBuf> {
                     
                     match cmd.output() {
                         Ok(output) if output.status.success() => {
-                            info!(path = %path.display(), "Found Claude CLI at non-PATH location");
+                            debug!(path = %path.display(), "Found Claude CLI at non-PATH location");
                             return Some(path);
                         }
                         Ok(output) => {
@@ -254,7 +254,7 @@ fn find_claude_cli() -> Option<PathBuf> {
                             if p.exists() {
                                 if let Ok(output) = Command::new(&p).arg("--version").output() {
                                     if output.status.success() {
-                                        info!(path = %p.display(), "Found Claude CLI via npm root");
+                                        debug!(path = %p.display(), "Found Claude CLI via npm root");
                                         return Some(p);
                                     }
                                 }
@@ -382,7 +382,7 @@ impl ClaudeCliProvider {
         // Verify CLI is available
         Self::check_cli_available()?;
 
-        info!(model = %model.id, "Created Claude CLI provider (no custom tools)");
+        debug!(model = %model.id, "Created Claude CLI provider (no custom tools)");
 
         Ok(Self {
             model,
@@ -396,7 +396,7 @@ impl ClaudeCliProvider {
     pub fn with_mcp_config(model: ModelInfo, mcp_config: McpCliConfig) -> ProviderResult<Self> {
         Self::check_cli_available()?;
 
-        info!(
+        debug!(
             model = %model.id,
             use_custom_tools = mcp_config.use_custom_tools,
             "Created Claude CLI provider with MCP config"
@@ -415,7 +415,7 @@ impl ClaudeCliProvider {
     /// This sets the current working directory when spawning the Claude CLI,
     /// which affects where the CLI and any tools it invokes execute.
     pub fn set_working_directory(&mut self, dir: PathBuf) {
-        info!(working_directory = %dir.display(), "Set working directory for Claude CLI");
+        debug!(working_directory = %dir.display(), "Set working directory for Claude CLI");
         self.working_directory = Some(dir);
     }
 
@@ -426,7 +426,7 @@ impl ClaudeCliProvider {
     ) -> ProviderResult<Self> {
         Self::check_cli_available()?;
 
-        info!(
+        debug!(
             model = %model.id,
             working_directory = %working_directory.display(),
             "Created Claude CLI provider with working directory"
@@ -635,7 +635,7 @@ impl ClaudeCliProvider {
 
         mcp_servers.insert("wonopcode-tools".to_string(), server_config);
 
-        info!(
+        debug!(
             url = %mcp_config.transport.url,
             has_auth = !mcp_config.transport.headers.is_empty(),
             "Generated MCP HTTP config"
@@ -657,7 +657,7 @@ impl ClaudeCliProvider {
                 }),
             );
 
-            info!(
+            debug!(
                 server_name = %name,
                 command = %server.command,
                 args = ?server.args,
@@ -910,7 +910,7 @@ impl LanguageModel for ClaudeCliProvider {
             None
         };
 
-        info!(
+        debug!(
             model = %self.model.id,
             prompt_len = prompt.len(),
             use_custom_tools = use_custom_tools,
@@ -978,7 +978,7 @@ impl LanguageModel for ClaudeCliProvider {
         // dangerous operations. The TUI should display these prompts to the user.
 
         // Log the full command for debugging
-        info!(
+        trace!(
             command = "claude",
             args = ?args,
             working_directory = ?self.working_directory,
@@ -1053,12 +1053,12 @@ impl LanguageModel for ClaudeCliProvider {
                     continue;
                 }
 
-                tracing::info!(line_len = line.len(), line_preview = %line.chars().take(100).collect::<String>(), "🔄 CLAUDE CLI: Received line from CLI");
+                tracing::trace!(line_len = line.len(), line_preview = %line.chars().take(100).collect::<String>(), "Received line from CLI");
 
                 // Try to parse as our message type
                 match serde_json::from_str::<CliMessage>(&line) {
                     Ok(CliMessage::Assistant { message, session_id }) => {
-                        tracing::info!(content_blocks = message.content.len(), session_id = ?session_id, "✅ CLAUDE CLI: Parsed assistant message");
+                        tracing::trace!(content_blocks = message.content.len(), session_id = ?session_id, "Parsed assistant message");
                         // Capture session ID if we haven't already
                         if captured_session_id.is_none() {
                             if let Some(sid) = session_id {
@@ -1072,11 +1072,11 @@ impl LanguageModel for ClaudeCliProvider {
                                 ContentBlock::Text { text } => {
                                     if !text.is_empty() {
                                         if !text_started {
-                                            tracing::info!("🎬 CLAUDE CLI: Starting text stream");
+                                            tracing::trace!("Starting text stream");
                                             yield StreamChunk::TextStart;
                                             text_started = true;
                                         }
-                                        tracing::info!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "📝 CLAUDE CLI: Yielding TextDelta");
+                                        tracing::trace!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "Yielding TextDelta");
                                         total_text.push_str(&text);
                                         yield StreamChunk::TextDelta(text);
                                     }
@@ -1171,7 +1171,7 @@ impl LanguageModel for ClaudeCliProvider {
                                 yield StreamChunk::TextStart;
                                 text_started = true;
                             }
-                            info!(result_len = result.len(), "Using result as text (no streaming)");
+                            debug!(result_len = result.len(), "Using result as text (no streaming)");
                             yield StreamChunk::TextDelta(result);
                         }
 
@@ -1203,7 +1203,7 @@ impl LanguageModel for ClaudeCliProvider {
                             finish_reason,
                         };
 
-                        info!(input_tokens, output_tokens, "Stream completed");
+                        debug!(input_tokens, output_tokens, "Stream completed");
                         break;
                     }
                     Ok(CliMessage::System { session_id }) => {
@@ -1218,7 +1218,7 @@ impl LanguageModel for ClaudeCliProvider {
                     }
                     Err(e) => {
                         // Not all lines are valid JSON messages (could be debug output)
-                        tracing::info!(error = %e, line_preview = %line.chars().take(100).collect::<String>(), "❌ CLAUDE CLI: Failed to parse JSON line");
+                        tracing::trace!(error = %e, line_preview = %line.chars().take(100).collect::<String>(), "Failed to parse JSON line (may be debug output)");
                     }
                 }
             }
@@ -1235,7 +1235,7 @@ impl LanguageModel for ClaudeCliProvider {
             if let Some(sid) = captured_session_id {
                 let mut session_lock = session_id_handle.write().await;
                 if session_lock.is_none() {
-                    info!(session_id = %sid, "Stored CLI session ID for resumption");
+                    debug!(session_id = %sid, "Stored CLI session ID for resumption");
                     *session_lock = Some(sid);
                 }
             }

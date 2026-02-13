@@ -442,7 +442,7 @@ impl Runner {
         let agent_loop: BoxedAgentLoop =
             agent_loop.unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::new()));
 
-        info!(
+        debug!(
             loop_name = agent_loop.name(),
             "Runner created with agent loop"
         );
@@ -560,9 +560,9 @@ impl Runner {
                 for rule in PermissionManager::rules_from_config(perm_config) {
                     runner.permission_manager.add_rule(rule).await;
                 }
-                info!("Permission manager initialized with default rules and config-based rules");
+                debug!("Permission manager initialized with default rules and config-based rules");
             } else {
-                info!("Permission manager initialized with default rules");
+                debug!("Permission manager initialized with default rules");
             }
         }
 
@@ -572,7 +572,7 @@ impl Runner {
 
         match SnapshotStore::new(snapshot_dir, cwd.to_path_buf(), SnapshotConfig::default()).await {
             Ok(store) => {
-                info!("Snapshot store initialized");
+                debug!("Snapshot store initialized");
                 runner.snapshot_store = Some(Arc::new(store));
             }
             Err(e) => {
@@ -581,9 +581,9 @@ impl Runner {
         }
 
         // Initialize sandbox manager if configured (using lazy detection for faster startup)
-        info!(sandbox_config = ?core_config.sandbox, "Checking sandbox configuration");
+        debug!(sandbox_config = ?core_config.sandbox, "Checking sandbox configuration");
         if let Some(sandbox_cfg) = &core_config.sandbox {
-            info!(enabled = ?sandbox_cfg.enabled, runtime = ?sandbox_cfg.runtime, "Sandbox config found");
+            debug!(enabled = ?sandbox_cfg.enabled, runtime = ?sandbox_cfg.runtime, "Sandbox config found");
             if sandbox_cfg.enabled.unwrap_or(false) {
                 let sandbox_config = convert_sandbox_config(sandbox_cfg);
                 // Use lazy initialization to avoid blocking startup with runtime detection
@@ -594,7 +594,7 @@ impl Runner {
                 if let Some(rt) = runtime_type {
                     // Runtime was explicitly configured (not Auto)
                     if !matches!(rt, SandboxRuntimeType::None) {
-                        info!(runtime = ?rt, "Sandbox manager initialized");
+                        debug!(runtime = ?rt, "Sandbox manager initialized");
                         runner
                             .bus
                             .publish(SandboxStatusChanged {
@@ -618,7 +618,7 @@ impl Runner {
                 } else {
                     // Auto mode - defer detection, assume available for now
                     // Actual detection will happen when sandbox is first used
-                    info!("Sandbox manager initialized with lazy runtime detection");
+                    debug!("Sandbox manager initialized with lazy runtime detection");
                     runner
                         .bus
                         .publish(SandboxStatusChanged {
@@ -647,9 +647,9 @@ impl Runner {
                 .unwrap_or(true);
 
             if allow_all {
-                info!("Sandbox configured with allow_all_in_sandbox=true (rules applied when sandbox is running)");
+                debug!("Sandbox configured with allow_all_in_sandbox=true (rules applied when sandbox is running)");
             } else {
-                info!(
+                debug!(
                     "Sandbox configured but allow_all_in_sandbox=false, write operations will prompt"
                 );
             }
@@ -696,7 +696,7 @@ impl Runner {
                         drop(config); // Release read lock before acquiring write lock
                         let mut provider = runner.provider.write().await;
                         *provider = new_provider;
-                        info!(
+                        debug!(
                             sandbox_enabled = sandbox_enabled,
                             allow_all_for_mcp = allow_all_for_mcp,
                             "Recreated Claude CLI provider with sandbox state"
@@ -735,7 +735,7 @@ impl Runner {
             match svc.load_history().await {
                 Ok(history) => {
                     if !history.is_empty() {
-                        info!(
+                        debug!(
                             message_count = history.len(),
                             "Loaded conversation history from session"
                         );
@@ -810,7 +810,7 @@ impl Runner {
         for (name, result) in results {
             match result {
                 Ok(()) => {
-                    info!(server = %name, "MCP server connected");
+                    debug!(server = %name, "MCP server connected");
                     connected_servers += 1;
                 }
                 Err(e) => {
@@ -825,7 +825,7 @@ impl Runner {
             let builder = McpToolsBuilder::new(mcp_client.clone()).with_prefix("mcp");
             let mcp_tools = builder.build_all().await;
 
-            info!(
+            debug!(
                 servers = connected_servers,
                 tools = mcp_tools.len(),
                 "MCP initialized"
@@ -840,7 +840,7 @@ impl Runner {
             let prefer_mcp_todo = true;
 
             if has_mcp_todo_tools {
-                info!(
+                debug!(
                     mcp_todo_tools = %mcp_todo_adapter.get_summary(),
                     prefer_mcp = prefer_mcp_todo,
                     "Detected MCP TODO tools"
@@ -887,7 +887,7 @@ impl Runner {
             // Store the MCP TODO adapter for event bridging
             if has_mcp_todo_tools && prefer_mcp_todo {
                 self.mcp_todo_adapter = Some(mcp_todo_adapter);
-                info!("MCP TODO adapter initialized for event bridging");
+                debug!("MCP TODO adapter initialized for event bridging");
             }
         }
     }
@@ -1603,7 +1603,7 @@ impl Runner {
                     send_update(&update_tx, AppUpdate::Started);
 
                     // Run the prompt with concurrent cancellation handling
-                    info!(prompt_len = text.len(), "Running prompt");
+                    debug!(prompt_len = text.len(), "Running prompt");
 
                     // Get a clone of the cancel token for checking
                     let cancel_token = self.get_cancel_token().await;
@@ -1625,12 +1625,12 @@ impl Runner {
                             Some(inner_action) = action_rx.recv() => {
                                 match inner_action {
                                     AppAction::Cancel => {
-                                        info!("Cancelling current operation");
+                                        debug!("Cancelling current operation");
                                         cancel_token.cancel();
                                         // Don't break - let the prompt handle the cancellation
                                     }
                                     AppAction::Quit => {
-                                        info!("Quit requested during prompt");
+                                        debug!("Quit requested during prompt");
                                         cancel_token.cancel();
                                         // Return after prompt finishes
                                     }
@@ -1641,7 +1641,7 @@ impl Runner {
                                     } => {
                                         // Permission responses must be handled even during prompt execution
                                         // because MCP tools wait for them
-                                        info!(
+                                        debug!(
                                             request_id = %request_id,
                                             allow = allow,
                                             remember = remember,
@@ -1675,7 +1675,7 @@ impl Runner {
 
                     match result {
                         Ok(result_text) => {
-                            info!(
+                            debug!(
                                 result_len = result_text.len(),
                                 "Prompt completed successfully"
                             );
@@ -1690,7 +1690,7 @@ impl Runner {
                         Err(e) => {
                             let err_str = e.to_string();
                             if err_str.contains("Cancelled") {
-                                info!("Prompt was cancelled");
+                                debug!("Prompt was cancelled");
                                 send_update(&update_tx, AppUpdate::Error("Cancelled".to_string()));
                             } else if err_str.contains("timed out") {
                                 error!("Prompt operation timed out - this prevents UI from getting stuck");
@@ -1711,7 +1711,7 @@ impl Runner {
                     break;
                 }
                 AppAction::SwitchSession(session_id) => {
-                    info!(session_id = %session_id, "Switching session");
+                    debug!(session_id = %session_id, "Switching session");
                     // Clear history for session switch
                     {
                         let mut history = self.history.write().await;
@@ -1737,14 +1737,14 @@ impl Runner {
                     }
                 }
                 AppAction::ChangeAgent(agent_name) => {
-                    info!(agent = %agent_name, "Changing agent");
+                    debug!(agent = %agent_name, "Changing agent");
                     // Agent change is mostly a TUI concern for now
                     // Future: could change tool permissions, system prompt, etc.
                     let _ =
                         update_tx.send(AppUpdate::Status(format!("Agent changed to {agent_name}")));
                 }
                 AppAction::NewSession => {
-                    info!("Creating new session");
+                    debug!("Creating new session");
                     // Clear history for new session
                     {
                         let mut history = self.history.write().await;
@@ -1755,17 +1755,17 @@ impl Runner {
                     // Editor is handled synchronously in the TUI, nothing to do here
                 }
                 AppAction::Undo => {
-                    info!("Undo requested");
+                    debug!("Undo requested");
                     // For now, history sync is handled by the TUI
                     // Future: could sync with runner's history
                 }
                 AppAction::Redo => {
-                    info!("Redo requested");
+                    debug!("Redo requested");
                     // For now, history sync is handled by the TUI
                     // Future: could sync with runner's history
                 }
                 AppAction::Revert { message_id } => {
-                    info!(message_id = %message_id, "Revert requested");
+                    debug!(message_id = %message_id, "Revert requested");
                     send_update(
                         &update_tx,
                         AppUpdate::Status(format!("Reverting to message {message_id}...")),
@@ -1807,7 +1807,7 @@ impl Runner {
                     }
                 }
                 AppAction::Unrevert => {
-                    info!("Unrevert requested");
+                    debug!("Unrevert requested");
 
                     // Create SessionRevert and perform unrevert
                     let project_id = self.instance.project_id().await;
@@ -1831,7 +1831,7 @@ impl Runner {
                     }
                 }
                 AppAction::Compact => {
-                    info!("Compact requested");
+                    debug!("Compact requested");
                     let _ =
                         update_tx.send(AppUpdate::Status("Compacting conversation...".to_string()));
 
@@ -1879,7 +1879,7 @@ impl Runner {
                             } else {
                                 "pruned tool outputs from"
                             };
-                            info!(
+                            debug!(
                                 action = action,
                                 messages_summarized = messages_summarized,
                                 new_count = new_messages.len(),
@@ -1921,7 +1921,7 @@ impl Runner {
                     }
                 }
                 AppAction::RenameSession { title } => {
-                    info!(title = %title, "Rename session requested");
+                    debug!(title = %title, "Rename session requested");
                     // Session rename is persisted via the Instance/SessionRepository
                     // The title is already updated in the TUI state
                     let project_id = self.instance.project_id().await;
@@ -1938,7 +1938,7 @@ impl Runner {
                         update_tx.send(AppUpdate::Status(format!("Session renamed to: {title}")));
                 }
                 AppAction::McpToggle { name } => {
-                    info!(server = %name, "MCP toggle requested");
+                    debug!(server = %name, "MCP toggle requested");
                     if let Some(ref mcp_client) = self.mcp_client {
                         match mcp_client.toggle_server(&name).await {
                             Ok(enabled) => {
@@ -1968,7 +1968,7 @@ impl Runner {
                     }
                 }
                 AppAction::McpReconnect { name } => {
-                    info!(server = %name, "MCP reconnect requested");
+                    debug!(server = %name, "MCP reconnect requested");
                     if let Some(ref mcp_client) = self.mcp_client {
                         send_update(
                             &update_tx,
@@ -2002,7 +2002,7 @@ impl Runner {
                     }
                 }
                 AppAction::ForkSession { message_id } => {
-                    info!(message_id = ?message_id, "Fork session requested");
+                    debug!(message_id = ?message_id, "Fork session requested");
                     let project_id = self.instance.project_id().await;
                     let session_repo = self.instance.session_repo();
 
@@ -2012,7 +2012,7 @@ impl Runner {
                         .await
                     {
                         Ok(forked) => {
-                            info!(forked_id = %forked.id, "Session forked successfully");
+                            debug!(forked_id = %forked.id, "Session forked successfully");
                             // Clear runner's history for the new session
                             {
                                 let mut history = self.history.write().await;
@@ -2033,7 +2033,7 @@ impl Runner {
                     }
                 }
                 AppAction::ShareSession => {
-                    info!("Share session requested");
+                    debug!("Share session requested");
                     let project_id = self.instance.project_id().await;
 
                     // Use the share module to create a share
@@ -2047,7 +2047,7 @@ impl Runner {
                     .await
                     {
                         Ok(share_info) => {
-                            info!(url = %share_info.url, "Session shared successfully");
+                            debug!(url = %share_info.url, "Session shared successfully");
                             send_update(
                                 &update_tx,
                                 AppUpdate::Status(format!("Shared at: {}", share_info.url)),
@@ -2060,7 +2060,7 @@ impl Runner {
                     }
                 }
                 AppAction::UnshareSession => {
-                    info!("Unshare session requested");
+                    debug!("Unshare session requested");
                     // Unsharing requires the share secret which we don't store in the TUI
                     // This would need to be retrieved from session metadata
                     send_update(
@@ -2072,7 +2072,7 @@ impl Runner {
                     );
                 }
                 AppAction::GotoMessage { message_id } => {
-                    info!(message_id = %message_id, "Go to message requested");
+                    debug!(message_id = %message_id, "Go to message requested");
                     // This is handled in the TUI (scroll to message)
                     send_update(
                         &update_tx,
@@ -2080,20 +2080,20 @@ impl Runner {
                     );
                 }
                 AppAction::SandboxStart => {
-                    info!("Sandbox start requested");
+                    debug!("Sandbox start requested");
                     self.handle_sandbox_start(&update_tx).await;
                 }
                 AppAction::SandboxStop => {
-                    info!("Sandbox stop requested");
+                    debug!("Sandbox stop requested");
                     self.handle_sandbox_stop(&update_tx).await;
                 }
                 AppAction::SandboxRestart => {
-                    info!("Sandbox restart requested");
+                    debug!("Sandbox restart requested");
                     self.handle_sandbox_stop(&update_tx).await;
                     self.handle_sandbox_start(&update_tx).await;
                 }
                 AppAction::SaveSettings { scope, config } => {
-                    info!("Saving settings to {:?}", scope);
+                    debug!("Saving settings to {:?}", scope);
                     let project_dir = match scope {
                         SaveScope::Project => Some(self.instance.directory()),
                         SaveScope::Global => None,
