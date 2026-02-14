@@ -254,6 +254,11 @@ pub enum ServerPayload {
     AvailableModels {
         models: Vec<ModelInfoSummary>,
     },
+    
+    /// Allow-all mode changed.
+    AllowAllChanged {
+        enabled: bool,
+    },
 }
 
 /// Simplified model info for transmission
@@ -345,6 +350,7 @@ impl ServerPayload {
             ServerPayload::AgentStopped => "agent_stopped",
             ServerPayload::SessionStats { .. } => "session_stats",
             ServerPayload::AvailableModels { .. } => "available_models",
+            ServerPayload::AllowAllChanged { .. } => "allow_all_changed",
         }
     }
 }

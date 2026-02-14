@@ -2092,6 +2092,14 @@ impl Runner {
                     self.handle_sandbox_stop(&update_tx).await;
                     self.handle_sandbox_start(&update_tx).await;
                 }
+                AppAction::SetAllowAll { enabled } => {
+                    info!(enabled = enabled, "Setting allow-all mode");
+                    self.permission_manager.set_allow_all(enabled);
+                    send_update(
+                        &update_tx,
+                        AppUpdate::AllowAllChanged { enabled },
+                    );
+                }
                 AppAction::SaveSettings { scope, config } => {
                     debug!("Saving settings to {:?}", scope);
                     let project_dir = match scope {
@@ -2155,6 +2163,18 @@ impl Runner {
                     );
                     self.permission_manager
                         .respond(&request_id, allow, remember)
+                        .await;
+                }
+                AppAction::EnableAllowAll { request_id } => {
+                    info!(
+                        request_id = %request_id,
+                        "Enabling 'allow all' mode - all tool executions will be auto-approved"
+                    );
+                    // Apply sandbox rules to allow all operations
+                    self.permission_manager.apply_sandbox_rules().await;
+                    // Also respond to the current pending request
+                    self.permission_manager
+                        .respond(&request_id, true, false)
                         .await;
                 }
                 AppAction::GitStatus => {

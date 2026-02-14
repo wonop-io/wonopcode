@@ -679,6 +679,7 @@ fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol
         AppAction::SandboxStart => Action::SandboxStart,
         AppAction::SandboxStop => Action::SandboxStop,
         AppAction::SandboxRestart => Action::SandboxRestart,
+        AppAction::SetAllowAll { enabled } => Action::SetAllowAll { enabled },
         AppAction::SaveSettings { scope, config } => {
             let protocol_scope = match scope {
                 crate::SaveScope::Project => wonopcode_protocol::SaveScope::Project,
@@ -710,6 +711,7 @@ fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol
             allow,
             remember,
         },
+        AppAction::EnableAllowAll { request_id } => Action::EnableAllowAll { request_id },
         // OpenEditor is handled locally, not sent to server
         AppAction::OpenEditor { .. } => {
             return Err(BackendError::RequestFailed(
@@ -1086,6 +1088,7 @@ fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayloa
         AppAction::SandboxStart => ClientPayload::SandboxStart,
         AppAction::SandboxStop => ClientPayload::SandboxStop,
         AppAction::SandboxRestart => ClientPayload::SandboxRestart,
+        AppAction::SetAllowAll { enabled } => ClientPayload::SetAllowAll { enabled },
         AppAction::SaveSettings { scope, config } => {
             let message_scope = match scope {
                 crate::SaveScope::Project => wonopcode_message::SaveScope::Project,
@@ -1106,6 +1109,7 @@ fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayloa
             allow,
             remember,
         },
+        AppAction::EnableAllowAll { request_id } => ClientPayload::EnableAllowAll { request_id },
         // OpenEditor is handled locally, not sent to server
         AppAction::OpenEditor { .. } => {
             return Err(BackendError::RequestFailed(
@@ -1298,6 +1302,7 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::SandboxError { .. }
         | ServerPayload::AgentStopped
         | ServerPayload::SessionStats { .. }
-        | ServerPayload::AvailableModels { .. } => return None,
+        | ServerPayload::AvailableModels { .. }
+        | ServerPayload::AllowAllChanged { .. } => return None,
     })
 }

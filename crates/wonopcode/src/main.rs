@@ -1327,6 +1327,8 @@ async fn run_headless(
                     emulate_tool_observed,
                     emulate_streaming,
                 },
+                Action::SetAllowAll { enabled } => wonopcode_tui::AppAction::SetAllowAll { enabled },
+                Action::EnableAllowAll { request_id } => wonopcode_tui::AppAction::EnableAllowAll { request_id },
             };
 
             if app_action_tx.send(app_action).is_err() {
@@ -1694,6 +1696,10 @@ async fn run_headless(
                 }
                 // BusyStateChanged is handled internally by the runner
                 wonopcode_tui::AppUpdate::BusyStateChanged(_) => {
+                    continue;
+                }
+                // AllowAllChanged is also internal state
+                wonopcode_tui::AppUpdate::AllowAllChanged { .. } => {
                     continue;
                 }
             };

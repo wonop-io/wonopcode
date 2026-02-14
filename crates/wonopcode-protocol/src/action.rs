@@ -56,6 +56,9 @@ pub enum Action {
     /// Restart the sandbox.
     SandboxRestart,
 
+    /// Set "allow all" mode - when enabled, all tool executions are auto-approved.
+    SetAllowAll { enabled: bool },
+
     /// Toggle an MCP server.
     McpToggle { name: String },
 
@@ -82,6 +85,11 @@ pub enum Action {
         request_id: String,
         allow: bool,
         remember: bool,
+    },
+
+    /// Enable "allow all" mode - allow all tool executions without prompting.
+    EnableAllowAll {
+        request_id: String,
     },
 
     /// Update test provider settings.
@@ -126,6 +134,7 @@ impl Action {
             Action::SandboxStart => "/action/sandbox/start",
             Action::SandboxStop => "/action/sandbox/stop",
             Action::SandboxRestart => "/action/sandbox/restart",
+            Action::SetAllowAll { .. } => "/action/allow-all",
             Action::McpToggle { .. } => "/action/mcp/toggle",
             Action::McpReconnect { .. } => "/action/mcp/reconnect",
             Action::ShareSession => "/action/session/share",
@@ -133,6 +142,7 @@ impl Action {
             Action::GotoMessage { .. } => "/action/goto",
             Action::SaveSettings { .. } => "/action/settings",
             Action::PermissionResponse { .. } => "/action/permission",
+            Action::EnableAllowAll { .. } => "/action/permission/allow-all",
             Action::UpdateTestProviderSettings { .. } => "/action/test-settings",
             Action::Quit => "/action/quit",
         }

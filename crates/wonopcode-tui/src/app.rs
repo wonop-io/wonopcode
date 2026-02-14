@@ -234,6 +234,8 @@ pub enum AppAction {
     SandboxStop,
     /// Restart the sandbox.
     SandboxRestart,
+    /// Set "allow all" mode - when enabled, all tool executions are auto-approved.
+    SetAllowAll { enabled: bool },
     /// Save settings to config file.
     SaveSettings {
         /// Where to save (project or global).
@@ -256,6 +258,12 @@ pub enum AppAction {
         allow: bool,
         /// Remember this decision for future requests.
         remember: bool,
+    },
+    /// Enable "allow all" mode - allow all tool executions without prompting.
+    /// Also responds to the current pending permission request.
+    EnableAllowAll {
+        /// The request ID of the current permission request to respond to.
+        request_id: String,
     },
     /// Git: Get repository status.
     GitStatus,
@@ -379,6 +387,8 @@ pub enum AppUpdate {
     /// Agent busy state changed (processing started/finished).
     /// Used for workstream state synchronization.
     BusyStateChanged(bool),
+    /// Allow-all mode changed.
+    AllowAllChanged { enabled: bool },
 }
 
 /// Git status update from the runner.
@@ -3476,6 +3486,11 @@ async function fetchUserData(userId) {
             AppUpdate::BusyStateChanged(busy) => {
                 // Sync the busy state from workstream
                 self.set_busy(busy);
+            }
+            AppUpdate::AllowAllChanged { enabled } => {
+                // Allow-all mode changed - currently just log it
+                // The desktop frontend will handle updating the UI toggle
+                tracing::info!(enabled = enabled, "Allow-all mode changed");
             }
         }
     }

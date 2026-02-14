@@ -390,6 +390,9 @@ pub fn client_payload_to_app_action(payload: &ClientPayload) -> Option<wonopcode
         ClientPayload::SandboxStart => Some(wonopcode_tui::AppAction::SandboxStart),
         ClientPayload::SandboxStop => Some(wonopcode_tui::AppAction::SandboxStop),
         ClientPayload::SandboxRestart => Some(wonopcode_tui::AppAction::SandboxRestart),
+        ClientPayload::SetAllowAll { enabled } => {
+            Some(wonopcode_tui::AppAction::SetAllowAll { enabled: *enabled })
+        }
         ClientPayload::McpToggle { name } => {
             Some(wonopcode_tui::AppAction::McpToggle { name: name.clone() })
         }
@@ -423,6 +426,11 @@ pub fn client_payload_to_app_action(payload: &ClientPayload) -> Option<wonopcode
             allow: *allow,
             remember: *remember,
         }),
+        ClientPayload::EnableAllowAll { request_id } => {
+            Some(wonopcode_tui::AppAction::EnableAllowAll {
+                request_id: request_id.clone(),
+            })
+        }
         ClientPayload::Quit => Some(wonopcode_tui::AppAction::Quit),
         // Control actions handled separately
         ClientPayload::Ping | ClientPayload::RequestState | ClientPayload::GetAvailableModels => None,
@@ -615,6 +623,15 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                 "Agent is idle".to_string()
             },
         },
+        // Allow-all mode changed - send as status for now
+        // The desktop frontend uses its own state tracking
+        wonopcode_tui::AppUpdate::AllowAllChanged { enabled } => ServerPayload::Status {
+            message: if *enabled {
+                "Allow-all mode enabled".to_string()
+            } else {
+                "Allow-all mode disabled".to_string()
+            },
+        },
     }
 }
 
@@ -667,6 +684,9 @@ pub fn client_payload_to_legacy_action(
         ClientPayload::SandboxStart => Some(wonopcode_protocol::Action::SandboxStart),
         ClientPayload::SandboxStop => Some(wonopcode_protocol::Action::SandboxStop),
         ClientPayload::SandboxRestart => Some(wonopcode_protocol::Action::SandboxRestart),
+        ClientPayload::SetAllowAll { enabled } => {
+            Some(wonopcode_protocol::Action::SetAllowAll { enabled: *enabled })
+        }
         ClientPayload::McpToggle { name } => {
             Some(wonopcode_protocol::Action::McpToggle { name: name.clone() })
         }
@@ -692,6 +712,11 @@ pub fn client_payload_to_legacy_action(
             allow: *allow,
             remember: *remember,
         }),
+        ClientPayload::EnableAllowAll { request_id } => {
+            Some(wonopcode_protocol::Action::EnableAllowAll {
+                request_id: request_id.clone(),
+            })
+        }
         // Control actions are handled separately
         ClientPayload::Ping | ClientPayload::RequestState | ClientPayload::Quit | ClientPayload::GetAvailableModels => None,
         // Workstream actions are Pro-only

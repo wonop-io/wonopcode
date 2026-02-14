@@ -119,6 +119,9 @@ pub enum ClientPayload {
     /// Restart the sandbox.
     SandboxRestart,
 
+    /// Set "allow all" mode - when enabled, all tool executions are auto-approved.
+    SetAllowAll { enabled: bool },
+
     // === MCP Actions ===
     /// Toggle an MCP server on/off.
     McpToggle { name: String },
@@ -138,6 +141,12 @@ pub enum ClientPayload {
         request_id: String,
         allow: bool,
         remember: bool,
+    },
+
+    /// Enable "allow all" mode - allow all tool executions without prompting.
+    /// Also responds to the current pending permission request.
+    EnableAllowAll {
+        request_id: String,
     },
 
     // === Workstream Actions (Pro Edition) ===

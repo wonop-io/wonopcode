@@ -173,6 +173,9 @@ pub struct PermissionManager {
     /// Shared sandbox runtime (set when sandbox starts).
     /// Stored as Any so we can downcast to the concrete type when needed.
     sandbox_runtime: RwLock<Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>>,
+    /// When true, all permission checks return true without prompting.
+    /// This is the "allow all" mode that can be toggled from the UI.
+    allow_all: std::sync::atomic::AtomicBool,
 }
 
 impl PermissionManager {
@@ -185,7 +188,24 @@ impl PermissionManager {
             bus,
             sandbox_running: std::sync::atomic::AtomicBool::new(false),
             sandbox_runtime: RwLock::new(None),
+            allow_all: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Set "allow all" mode. When enabled, all permission checks return true.
+    pub fn set_allow_all(&self, enabled: bool) {
+        self.allow_all
+            .store(enabled, std::sync::atomic::Ordering::SeqCst);
+        tracing::info!(
+            allow_all = enabled,
+            "Allow-all mode {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+    }
+
+    /// Check if "allow all" mode is enabled.
+    pub fn is_allow_all(&self) -> bool {
+        self.allow_all.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Set sandbox running state and optionally the runtime.
@@ -286,6 +306,16 @@ impl PermissionManager {
         check: PermissionCheck,
         sandbox_running: bool,
     ) -> bool {
+        // If "allow all" mode is enabled, always return true without prompting
+        if self.is_allow_all() {
+            tracing::debug!(
+                tool = %check.tool,
+                action = %check.action,
+                "Permission auto-approved (allow-all mode enabled)"
+            );
+            return true;
+        }
+
         // If sandbox is running, check sandbox rules first
         if sandbox_running {
             for rule in Self::sandbox_allow_all_rules() {
