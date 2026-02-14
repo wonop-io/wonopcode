@@ -1334,6 +1334,12 @@ impl Runner {
                         tool_results_updated = tool_results_updated,
                         "SESSION PERSISTENCE: Completed saving messages"
                     );
+                    
+                    // Signal that turn messages have been persisted.
+                    // This allows the workstream server to safely clear streaming state
+                    // without losing the last message when clients reconnect.
+                    let _ = update_tx.send(AppUpdate::TurnPersisted);
+                    info!("SESSION PERSISTENCE: Sent TurnPersisted event");
                 }
             }
         }

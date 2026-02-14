@@ -389,6 +389,10 @@ pub enum AppUpdate {
     BusyStateChanged(bool),
     /// Allow-all mode changed.
     AllowAllChanged { enabled: bool },
+    /// Turn messages have been persisted to session storage.
+    /// This is sent AFTER Completed, once all messages from the turn
+    /// have been saved to the session. Used to safely clear streaming state.
+    TurnPersisted,
 }
 
 /// Git status update from the runner.
@@ -3491,6 +3495,11 @@ async function fetchUserData(userId) {
                 // Allow-all mode changed - currently just log it
                 // The desktop frontend will handle updating the UI toggle
                 tracing::info!(enabled = enabled, "Allow-all mode changed");
+            }
+            AppUpdate::TurnPersisted => {
+                // Turn messages have been persisted to session storage.
+                // This is an internal event used by Pro server to safely clear streaming state.
+                // The TUI doesn't need to react to this - it has already handled Completed.
             }
         }
     }

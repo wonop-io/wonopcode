@@ -632,6 +632,11 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                 "Allow-all mode disabled".to_string()
             },
         },
+        // TurnPersisted - internal signal that messages have been saved to session.
+        // Convert to status for external clients.
+        wonopcode_tui::AppUpdate::TurnPersisted => ServerPayload::Status {
+            message: "Turn persisted".to_string(),
+        },
     }
 }
 
