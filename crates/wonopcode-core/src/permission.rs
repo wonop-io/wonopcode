@@ -425,12 +425,18 @@ impl PermissionManager {
 
         // Log that we're waiting for user permission
         tracing::warn!(
+            request_id = %check.id,
             tool = %check.tool,
             action = %check.action,
             "Waiting for user permission (no matching rule found)"
         );
 
         // Publish permission request event
+        tracing::info!(
+            request_id = %check.id,
+            tool = %check.tool,
+            "Publishing PermissionRequest to bus"
+        );
         self.bus
             .publish(PermissionRequest {
                 id: check.id.clone(),
@@ -442,6 +448,10 @@ impl PermissionManager {
                 details: check.details,
             })
             .await;
+        tracing::info!(
+            request_id = %check.id,
+            "PermissionRequest published to bus, now waiting for response"
+        );
 
         // Wait for response (with timeout)
         match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
@@ -459,13 +469,33 @@ impl PermissionManager {
 
     /// Respond to a permission request.
     pub async fn respond(&self, request_id: &str, allowed: bool, remember: bool) {
+        tracing::info!(
+            request_id = %request_id,
+            allowed = allowed,
+            remember = remember,
+            "PermissionManager::respond called"
+        );
+        
         // Remove the pending request and get its info
         let pending_req = {
             let mut pending = self.pending.write().await;
+            let pending_count = pending.len();
+            let pending_ids: Vec<_> = pending.keys().cloned().collect();
+            tracing::debug!(
+                request_id = %request_id,
+                pending_count = pending_count,
+                pending_ids = ?pending_ids,
+                "Looking for request in pending map"
+            );
             pending.remove(request_id)
         };
 
         if let Some(req) = pending_req {
+            tracing::info!(
+                request_id = %request_id,
+                tool = %req.tool,
+                "Found pending request, sending response"
+            );
             // Send response to the waiting task
             let _ = req.tx.send(allowed);
 
@@ -502,6 +532,11 @@ impl PermissionManager {
 
                 self.add_session_rule(&req.session_id, rule).await;
             }
+        } else {
+            tracing::warn!(
+                request_id = %request_id,
+                "No pending request found for this ID - may have timed out or wrong ID"
+            );
         }
 
         // Publish response event

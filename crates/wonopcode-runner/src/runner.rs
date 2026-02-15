@@ -1542,8 +1542,15 @@ impl Runner {
         let mut permission_rx = self.bus.subscribe::<BusPermissionRequest>().await;
         let permission_update_tx = update_tx.clone();
         tokio::spawn(async move {
+            info!("Permission request forwarding task started");
             while let Ok(req) = permission_rx.recv().await {
-                let _ = permission_update_tx.send(AppUpdate::PermissionRequest(
+                info!(
+                    request_id = %req.id,
+                    tool = %req.tool,
+                    action = %req.action,
+                    "Runner received permission request from bus, forwarding to TUI"
+                );
+                if let Err(e) = permission_update_tx.send(AppUpdate::PermissionRequest(
                     PermissionRequestUpdate {
                         id: req.id,
                         tool: req.tool,
@@ -1551,8 +1558,11 @@ impl Runner {
                         description: req.description,
                         path: req.path,
                     },
-                ));
+                )) {
+                    warn!("Failed to forward permission request to TUI: {}", e);
+                }
             }
+            info!("Permission request forwarding task ended");
         });
 
         // Send initial model info
