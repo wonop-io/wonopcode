@@ -1657,6 +1657,19 @@ impl Runner {
                                             .respond(&request_id, allow, remember)
                                             .await;
                                     }
+                                    AppAction::SetAllowAll { enabled } => {
+                                        // Allow-all mode changes must be handled during prompt execution
+                                        // so users can toggle it while the agent is working
+                                        info!(
+                                            enabled = enabled,
+                                            "Setting allow-all mode during prompt execution"
+                                        );
+                                        self.permission_manager.set_allow_all(enabled);
+                                        send_update(
+                                            &update_tx,
+                                            AppUpdate::AllowAllChanged { enabled },
+                                        );
+                                    }
                                     _ => {
                                         // Ignore other actions during prompt execution
                                         debug!("Ignoring action during prompt execution: {:?}", inner_action);
