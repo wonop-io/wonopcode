@@ -166,6 +166,12 @@ pub enum ServerPayload {
         path: Option<String>,
     },
 
+    /// Permission request was resolved (broadcast to dismiss dialogs on all clients).
+    PermissionResolved {
+        request_id: String,
+        allowed: bool,
+    },
+
     /// Full state synchronization.
     State(Box<AgentState>),
 
@@ -327,6 +333,7 @@ impl ServerPayload {
             ServerPayload::SystemMessage { .. } => "system_message",
             ServerPayload::AgentChanged { .. } => "agent_changed",
             ServerPayload::PermissionRequest { .. } => "permission_request",
+            ServerPayload::PermissionResolved { .. } => "permission_resolved",
             ServerPayload::State(_) => "state",
             ServerPayload::WorkstreamList { .. } => "workstream_list",
             ServerPayload::WorkstreamCreated { .. } => "workstream_created",

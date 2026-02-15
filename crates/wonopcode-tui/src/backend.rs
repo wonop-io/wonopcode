@@ -1303,6 +1303,7 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::AgentStopped
         | ServerPayload::SessionStats { .. }
         | ServerPayload::AvailableModels { .. }
-        | ServerPayload::AllowAllChanged { .. } => return None,
+        | ServerPayload::AllowAllChanged { .. }
+        | ServerPayload::PermissionResolved { .. } => return None,
     })
 }
