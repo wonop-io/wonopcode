@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -11,6 +12,46 @@ use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
 use wonopcode_tools::{ToolEvent, ToolRegistry};
 use wonopcode_util::FileTimeState;
+
+/// Details for a permission check request.
+#[derive(Debug, Clone)]
+pub struct PermissionCheckRequest {
+    /// Unique identifier for this permission request.
+    pub id: String,
+    /// Tool name (e.g., "bash", "write", "edit").
+    pub tool: String,
+    /// Action being performed (e.g., "execute", "write", "read").
+    pub action: String,
+    /// Optional path involved in the operation.
+    pub path: Option<String>,
+    /// Human-readable description of the operation.
+    pub description: String,
+    /// Additional details (e.g., command being executed).
+    pub details: serde_json::Value,
+}
+
+/// Trait for checking tool execution permissions.
+///
+/// This trait abstracts permission checking so the agent loop doesn't need
+/// to depend on the full permission system. Implementations can integrate
+/// with the PermissionManager or provide alternative behavior.
+#[async_trait]
+pub trait PermissionChecker: Send + Sync {
+    /// Check if a tool operation is allowed.
+    ///
+    /// Returns `true` if the operation is allowed, `false` if denied.
+    /// Implementations may block waiting for user input.
+    async fn check_permission(
+        &self,
+        session_id: &str,
+        request: PermissionCheckRequest,
+    ) -> bool;
+
+    /// Check if sandbox is currently running.
+    ///
+    /// When sandbox is running, some tools may be auto-approved.
+    fn is_sandbox_running(&self) -> bool;
+}
 
 /// Configuration for the agent loop.
 #[derive(Debug, Clone)]
@@ -197,6 +238,12 @@ pub struct LoopContext<'a> {
     /// the system of state changes (e.g., task creation, status updates).
     /// These events can be forwarded to the UI for real-time updates.
     pub tool_event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+
+    /// Optional permission checker for tool execution.
+    ///
+    /// When set, tool execution will check permissions before running.
+    /// If permission is denied, the tool will not execute.
+    pub permission_checker: Option<Arc<dyn PermissionChecker>>,
 }
 
 impl<'a> LoopContext<'a> {

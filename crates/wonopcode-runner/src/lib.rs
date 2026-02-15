@@ -18,8 +18,8 @@ mod runner;
 
 pub use compaction::{CompactionConfig, CompactionResult};
 pub use runner::{
-    get_auth_method, get_provider_status, get_server_config, has_credentials, load_api_key, Runner,
-    RunnerConfig, SandboxRuntimeWrapper,
+    get_auth_method, get_provider_status, get_server_config, has_credentials, load_api_key,
+    PermissionCheckerAdapter, Runner, RunnerConfig, SandboxRuntimeWrapper,
 };
 
 // Re-export agent loop types for convenience

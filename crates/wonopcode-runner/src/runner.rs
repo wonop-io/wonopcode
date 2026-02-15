@@ -1,6 +1,7 @@
 //! Runner module - connects the TUI to the AI prompt loop.
 // @ace:implements COMP-T90R9Q-8J4
 
+use async_trait::async_trait;
 use futures::future::join_all;
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopUpdate,
+    PermissionCheckRequest, PermissionChecker,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
@@ -37,6 +39,49 @@ use wonopcode_util::FileTimeState;
 
 use crate::compaction;
 use crate::compaction::{CompactionConfig, CompactionResult};
+
+/// Adapter that implements `PermissionChecker` for `PermissionManager`.
+///
+/// This allows the agent loop to check permissions without directly depending
+/// on the full `wonopcode-core` permission system.
+pub struct PermissionCheckerAdapter {
+    permission_manager: Arc<PermissionManager>,
+}
+
+impl PermissionCheckerAdapter {
+    /// Create a new adapter wrapping a permission manager.
+    pub fn new(permission_manager: Arc<PermissionManager>) -> Self {
+        Self { permission_manager }
+    }
+}
+
+#[async_trait]
+impl PermissionChecker for PermissionCheckerAdapter {
+    async fn check_permission(
+        &self,
+        session_id: &str,
+        request: PermissionCheckRequest,
+    ) -> bool {
+        // Convert the request to PermissionCheck format used by PermissionManager
+        let check = wonopcode_core::permission::PermissionCheck {
+            id: request.id,
+            tool: request.tool,
+            action: request.action,
+            path: request.path,
+            description: request.description,
+            details: request.details,
+        };
+
+        let has_sandbox = self.permission_manager.is_sandbox_running();
+        self.permission_manager
+            .check_with_sandbox(session_id, check, has_sandbox)
+            .await
+    }
+
+    fn is_sandbox_running(&self) -> bool {
+        self.permission_manager.is_sandbox_running()
+    }
+}
 
 /// Helper to send updates to the TUI with proper error logging.
 /// This replaces `let _ = update_tx.send(...)` to avoid silent failures.
@@ -1199,6 +1244,10 @@ impl Runner {
         // Get provider (read lock)
         let provider = self.provider.read().await;
 
+        // Create permission checker adapter
+        let permission_checker: Arc<dyn PermissionChecker> =
+            Arc::new(PermissionCheckerAdapter::new(self.permission_manager.clone()));
+
         // Build LoopContext
         let mut ctx = LoopContext {
             cwd,
@@ -1215,6 +1264,7 @@ impl Runner {
             update_tx: &loop_update_tx,
             session_id: "default".to_string(),
             tool_event_tx: Some(tool_event_tx),
+            permission_checker: Some(permission_checker),
         };
 
         // Run the agent loop

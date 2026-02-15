@@ -5,12 +5,14 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
 use wonopcode_tools::{ToolContext, ToolError, ToolEvent, ToolOutput, ToolRegistry};
 use wonopcode_util::FileTimeState;
+
+use crate::context::{PermissionCheckRequest, PermissionChecker};
 
 /// Executes tools with permission checking and parallel execution support.
 pub struct ToolExecutor<'a> {
@@ -19,6 +21,7 @@ pub struct ToolExecutor<'a> {
     file_time: Arc<FileTimeState>,
     sandbox: Option<Arc<dyn SandboxRuntime>>,
     event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+    permission_checker: Option<Arc<dyn PermissionChecker>>,
 }
 
 impl<'a> ToolExecutor<'a> {
@@ -35,6 +38,7 @@ impl<'a> ToolExecutor<'a> {
             file_time,
             sandbox,
             event_tx: None,
+            permission_checker: None,
         }
     }
 
@@ -55,6 +59,29 @@ impl<'a> ToolExecutor<'a> {
             file_time,
             sandbox,
             event_tx,
+            permission_checker: None,
+        }
+    }
+
+    /// Create a new tool executor with permission checking.
+    ///
+    /// When a permission checker is provided, tool execution will check
+    /// permissions before running. If permission is denied, an error is returned.
+    pub fn with_permissions(
+        tools: &'a ToolRegistry,
+        snapshot_store: Option<Arc<SnapshotStore>>,
+        file_time: Arc<FileTimeState>,
+        sandbox: Option<Arc<dyn SandboxRuntime>>,
+        event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+        permission_checker: Option<Arc<dyn PermissionChecker>>,
+    ) -> Self {
+        Self {
+            tools,
+            snapshot_store,
+            file_time,
+            sandbox,
+            event_tx,
+            permission_checker,
         }
     }
 
@@ -88,6 +115,52 @@ impl<'a> ToolExecutor<'a> {
                 return Err(ToolError::validation(format!("Unknown tool: {tool_name}")));
             }
         };
+
+        // Check permissions if a permission checker is configured
+        if let Some(ref checker) = self.permission_checker {
+            // Extract path from args for file-related tools
+            let path = input
+                .get("filePath")
+                .or_else(|| input.get("path"))
+                .or_else(|| input.get("file"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
+            let has_sandbox = checker.is_sandbox_running();
+            let request = PermissionCheckRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                tool: normalized_name.to_string(),
+                action: "execute".to_string(),
+                path: path.clone(),
+                description: format!("Execute tool: {normalized_name}"),
+                details: input.clone(),
+            };
+
+            info!(
+                tool = %normalized_name,
+                path = ?path,
+                sandbox_running = has_sandbox,
+                "Checking permission for tool execution"
+            );
+
+            let allowed = checker.check_permission(session_id, request).await;
+
+            if !allowed {
+                warn!(
+                    tool = %normalized_name,
+                    path = ?path,
+                    "Permission denied for tool execution"
+                );
+                return Err(ToolError::permission_denied(format!(
+                    "Permission denied for tool '{normalized_name}'"
+                )));
+            }
+
+            debug!(
+                tool = %normalized_name,
+                "Permission granted for tool execution"
+            );
+        }
 
         // Build context
         let ctx = ToolContext {

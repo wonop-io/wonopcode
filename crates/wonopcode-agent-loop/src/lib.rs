@@ -49,7 +49,10 @@ pub mod traits;
 
 // Re-exports for convenience
 pub use capabilities::LoopCapabilities;
-pub use context::{CompactionConfig, LoopConfig, LoopContext, LoopUpdate};
+pub use context::{
+    CompactionConfig, LoopConfig, LoopContext, LoopUpdate, PermissionCheckRequest,
+    PermissionChecker,
+};
 pub use error::{LoopError, LoopResult};
 pub use standard::StandardLoop;
 pub use traits::{AgentLoop, BoxedAgentLoop};

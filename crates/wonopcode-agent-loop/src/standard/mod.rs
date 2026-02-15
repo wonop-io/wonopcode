@@ -435,12 +435,13 @@ impl AgentLoop for StandardLoop {
             }
 
             // Execute tool calls
-            let tool_executor = ToolExecutor::with_event_tx(
+            let tool_executor = ToolExecutor::with_permissions(
                 ctx.tools,
                 ctx.snapshot_store.cloned(),
                 ctx.file_time.clone(),
                 ctx.sandbox.clone(),
                 ctx.tool_event_tx.clone(),
+                ctx.permission_checker.clone(),
             );
 
             let mut tool_results = Vec::new();
