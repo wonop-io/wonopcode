@@ -14,7 +14,8 @@ use wonopcode_agent_loop::{
     PermissionCheckRequest, PermissionChecker,
 };
 use wonopcode_core::bus::{
-    Bus, PermissionRequest as BusPermissionRequest, SandboxState, SandboxStatusChanged,
+    Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
+    SandboxState, SandboxStatusChanged,
 };
 use wonopcode_core::config::{McpConfig, McpRemoteConfig, SandboxConfig as CoreSandboxConfig};
 use wonopcode_core::permission::{Decision, PermissionManager};
@@ -61,21 +62,45 @@ impl PermissionChecker for PermissionCheckerAdapter {
         &self,
         session_id: &str,
         request: PermissionCheckRequest,
+        timeout: Option<std::time::Duration>,
     ) -> bool {
         // Convert the request to PermissionCheck format used by PermissionManager
         let check = wonopcode_core::permission::PermissionCheck {
-            id: request.id,
-            tool: request.tool,
-            action: request.action,
-            path: request.path,
-            description: request.description,
-            details: request.details,
+            id: request.id.clone(),
+            tool: request.tool.clone(),
+            action: request.action.clone(),
+            path: request.path.clone(),
+            description: request.description.clone(),
+            details: request.details.clone(),
         };
 
         let has_sandbox = self.permission_manager.is_sandbox_running();
-        self.permission_manager
-            .check_with_sandbox(session_id, check, has_sandbox)
-            .await
+        let permission_future = self
+            .permission_manager
+            .check_with_sandbox(session_id, check, has_sandbox);
+
+        // Apply timeout if specified
+        if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, permission_future).await {
+                Ok(result) => result,
+                Err(_) => {
+                    // Timeout expired - cancel the pending request and deny
+                    tracing::warn!(
+                        request_id = %request.id,
+                        tool = %request.tool,
+                        timeout_secs = timeout_duration.as_secs(),
+                        "Permission request timed out (provider timeout)"
+                    );
+                    // Note: The pending request in PermissionManager will remain
+                    // until its own internal timeout expires, but the tool execution
+                    // will be denied immediately.
+                    false
+                }
+            }
+        } else {
+            // No timeout - wait indefinitely (use PermissionManager's internal timeout)
+            permission_future.await
+        }
     }
 
     fn is_sandbox_running(&self) -> bool {
@@ -1563,6 +1588,29 @@ impl Runner {
                 }
             }
             info!("Permission request forwarding task ended");
+        });
+
+        // Subscribe to permission responses from the bus and forward to TUI
+        // This allows the TUI to dismiss permission dialogs when resolved by other means
+        // (e.g., timeout, allow-all, or another connected client)
+        let mut permission_response_rx = self.bus.subscribe::<BusPermissionResponse>().await;
+        let permission_resolved_tx = update_tx.clone();
+        tokio::spawn(async move {
+            info!("Permission response forwarding task started");
+            while let Ok(resp) = permission_response_rx.recv().await {
+                debug!(
+                    request_id = %resp.id,
+                    allowed = resp.allowed,
+                    "Runner received permission response from bus, forwarding to TUI"
+                );
+                if let Err(e) = permission_resolved_tx.send(AppUpdate::PermissionResolved {
+                    request_id: resp.id,
+                    allowed: resp.allowed,
+                }) {
+                    warn!("Failed to forward permission response to TUI: {}", e);
+                }
+            }
+            info!("Permission response forwarding task ended");
         });
 
         // Send initial model info

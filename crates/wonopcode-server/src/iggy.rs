@@ -592,6 +592,13 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             description: req.description.clone(),
             path: req.path.clone(),
         },
+        wonopcode_tui::AppUpdate::PermissionResolved {
+            request_id,
+            allowed,
+        } => ServerPayload::PermissionResolved {
+            request_id: request_id.clone(),
+            allowed: *allowed,
+        },
         // Git updates - not in unified protocol yet, convert to Status
         wonopcode_tui::AppUpdate::GitStatusUpdated(_) => ServerPayload::Status {
             message: "Git status updated".to_string(),
@@ -893,6 +900,13 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             action: action.clone(),
             description: description.clone(),
             path: path.clone(),
+        },
+        wonopcode_protocol::Update::PermissionResolved {
+            request_id,
+            allowed,
+        } => ServerPayload::PermissionResolved {
+            request_id: request_id.clone(),
+            allowed: *allowed,
         },
     }
 }

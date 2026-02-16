@@ -1683,6 +1683,13 @@ async fn run_headless(
                     description: req.description,
                     path: req.path,
                 },
+                wonopcode_tui::AppUpdate::PermissionResolved {
+                    request_id,
+                    allowed,
+                } => Update::PermissionResolved {
+                    request_id,
+                    allowed,
+                },
                 wonopcode_tui::AppUpdate::SessionLoaded { .. } => {
                     // SessionLoaded is only used by the TUI when connecting to a server,
                     // it doesn't need to be broadcast from the headless server
@@ -1700,6 +1707,10 @@ async fn run_headless(
                 }
                 // AllowAllChanged is also internal state
                 wonopcode_tui::AppUpdate::AllowAllChanged { .. } => {
+                    continue;
+                }
+                // TurnPersisted is handled internally
+                wonopcode_tui::AppUpdate::TurnPersisted => {
                     continue;
                 }
             };

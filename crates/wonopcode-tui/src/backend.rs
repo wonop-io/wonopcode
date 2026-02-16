@@ -882,6 +882,13 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
             description,
             path,
         }),
+        Update::PermissionResolved {
+            request_id,
+            allowed,
+        } => AppUpdate::PermissionResolved {
+            request_id,
+            allowed,
+        },
     }
 }
 
@@ -1270,6 +1277,13 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
             description,
             path,
         }),
+        ServerPayload::PermissionResolved {
+            request_id,
+            allowed,
+        } => AppUpdate::PermissionResolved {
+            request_id,
+            allowed,
+        },
         // State payload contains full state - convert to session loaded
         ServerPayload::State(state) => {
             // For now, just send status - full state handling TBD
@@ -1303,7 +1317,6 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::AgentStopped
         | ServerPayload::SessionStats { .. }
         | ServerPayload::AvailableModels { .. }
-        | ServerPayload::AllowAllChanged { .. }
-        | ServerPayload::PermissionResolved { .. } => return None,
+        | ServerPayload::AllowAllChanged { .. } => return None,
     })
 }

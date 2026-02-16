@@ -128,6 +128,17 @@ pub trait LanguageModel: Send + Sync {
     async fn set_cli_session_id(&self, _session_id: Option<String>) {
         // Default implementation does nothing
     }
+
+    /// Get the tool execution timeout for this provider, if any.
+    ///
+    /// When set, tool calls (including permission requests) will be cancelled
+    /// after this duration. This is needed for providers like Claude CLI that
+    /// have a hard timeout on MCP tool calls.
+    ///
+    /// Returns `None` by default, meaning no timeout (wait indefinitely).
+    fn tool_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// A boxed language model for dynamic dispatch.

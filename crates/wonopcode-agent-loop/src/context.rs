@@ -41,10 +41,15 @@ pub trait PermissionChecker: Send + Sync {
     ///
     /// Returns `true` if the operation is allowed, `false` if denied.
     /// Implementations may block waiting for user input.
+    ///
+    /// The `timeout` parameter specifies how long to wait for a permission
+    /// decision. If `None`, the implementation should wait indefinitely.
+    /// If the timeout expires before a decision is made, returns `false`.
     async fn check_permission(
         &self,
         session_id: &str,
         request: PermissionCheckRequest,
+        timeout: Option<std::time::Duration>,
     ) -> bool;
 
     /// Check if sandbox is currently running.

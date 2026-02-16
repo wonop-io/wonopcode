@@ -54,10 +54,31 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             details: args.clone(),
         };
 
-        let allowed = self
+        // Apply timeout to permission check.
+        // Claude CLI has a ~60 second timeout for MCP tool calls, so we use 45 seconds
+        // to ensure we cancel before Claude CLI times out.
+        // This gives a clear error message rather than a generic timeout.
+        let permission_timeout = std::time::Duration::from_secs(45);
+        let permission_future = self
             .permissions
-            .check_with_sandbox(&ctx.session_id, check, has_sandbox)
-            .await;
+            .check_with_sandbox(&ctx.session_id, check, has_sandbox);
+
+        let allowed = match tokio::time::timeout(permission_timeout, permission_future).await {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::warn!(
+                    tool = %tool_name,
+                    timeout_secs = permission_timeout.as_secs(),
+                    "Permission request timed out - Claude CLI may have a hard timeout on MCP calls"
+                );
+                return Err(format!(
+                    "Permission request timed out after {} seconds. \
+                    The user did not approve the tool in time. \
+                    Please try again and ask the user to approve the permission request promptly.",
+                    permission_timeout.as_secs()
+                ));
+            }
+        };
 
         if !allowed {
             return Err(format!("Permission denied for tool '{tool_name}'."));

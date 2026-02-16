@@ -63,6 +63,11 @@ impl PermissionDialog {
         }
     }
 
+    /// Get the request ID for this dialog.
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
     /// Handle a key event. Returns Some(result) if a choice was made.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<PermissionResult> {
         match key.code {

@@ -48,6 +48,8 @@ pub use instance::Instance;
 pub use message::{Message, MessagePart};
 pub use message_convert::{ConversionContext, ConvertedMessage};
 pub use permission::{Decision, PermissionCheck, PermissionManager, PermissionRule};
+// Re-export timeout constant from wonopcode-util for convenience
+pub use wonopcode_util::DEFAULT_PERMISSION_TIMEOUT_SECS;
 pub use project::Project;
 pub use prompt::{PromptConfig, PromptLoop, PromptResult};
 pub use retry::{

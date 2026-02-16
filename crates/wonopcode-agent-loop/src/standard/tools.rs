@@ -22,6 +22,9 @@ pub struct ToolExecutor<'a> {
     sandbox: Option<Arc<dyn SandboxRuntime>>,
     event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
     permission_checker: Option<Arc<dyn PermissionChecker>>,
+    /// Optional timeout for tool execution (including permission checks).
+    /// When set, permission requests will be cancelled after this duration.
+    tool_timeout: Option<std::time::Duration>,
 }
 
 impl<'a> ToolExecutor<'a> {
@@ -39,6 +42,7 @@ impl<'a> ToolExecutor<'a> {
             sandbox,
             event_tx: None,
             permission_checker: None,
+            tool_timeout: None,
         }
     }
 
@@ -60,6 +64,7 @@ impl<'a> ToolExecutor<'a> {
             sandbox,
             event_tx,
             permission_checker: None,
+            tool_timeout: None,
         }
     }
 
@@ -67,6 +72,11 @@ impl<'a> ToolExecutor<'a> {
     ///
     /// When a permission checker is provided, tool execution will check
     /// permissions before running. If permission is denied, an error is returned.
+    ///
+    /// The `tool_timeout` parameter specifies the maximum time to wait for
+    /// permission decisions. Providers like Claude CLI have a hard timeout
+    /// on MCP tool calls, so we need to cancel permission requests before
+    /// the provider times out.
     pub fn with_permissions(
         tools: &'a ToolRegistry,
         snapshot_store: Option<Arc<SnapshotStore>>,
@@ -74,6 +84,7 @@ impl<'a> ToolExecutor<'a> {
         sandbox: Option<Arc<dyn SandboxRuntime>>,
         event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
         permission_checker: Option<Arc<dyn PermissionChecker>>,
+        tool_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {
             tools,
@@ -82,6 +93,7 @@ impl<'a> ToolExecutor<'a> {
             sandbox,
             event_tx,
             permission_checker,
+            tool_timeout,
         }
     }
 
@@ -140,10 +152,13 @@ impl<'a> ToolExecutor<'a> {
                 tool = %normalized_name,
                 path = ?path,
                 sandbox_running = has_sandbox,
+                timeout = ?self.tool_timeout,
                 "Checking permission for tool execution"
             );
 
-            let allowed = checker.check_permission(session_id, request).await;
+            let allowed = checker
+                .check_permission(session_id, request, self.tool_timeout)
+                .await;
 
             if !allowed {
                 warn!(

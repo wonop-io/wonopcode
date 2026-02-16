@@ -97,6 +97,12 @@ pub enum Update {
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },
+
+    /// Permission request was resolved (dismiss dialog).
+    PermissionResolved {
+        request_id: String,
+        allowed: bool,
+    },
 }
 
 /// Session info for session list updates.
@@ -180,6 +186,7 @@ impl Update {
             Update::SystemMessage { .. } => "system_message",
             Update::AgentChanged { .. } => "agent_changed",
             Update::PermissionRequest { .. } => "permission_request",
+            Update::PermissionResolved { .. } => "permission_resolved",
         }
     }
 }
@@ -402,6 +409,10 @@ mod tests {
                 description: "".to_string(),
                 path: None,
             },
+            Update::PermissionResolved {
+                request_id: "".to_string(),
+                allowed: true,
+            },
         ];
 
         for update in updates {
@@ -432,6 +443,7 @@ mod tests {
             status: "pending".to_string(),
             priority: "high".to_string(),
             phase_id: Some("phase_1".to_string()),
+            parents: vec![],
         };
         let json = serde_json::to_string(&todo).unwrap();
         let _: TodoInfo = serde_json::from_str(&json).unwrap();

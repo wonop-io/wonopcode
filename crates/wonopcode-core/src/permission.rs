@@ -453,15 +453,24 @@ impl PermissionManager {
             "PermissionRequest published to bus, now waiting for response"
         );
 
-        // Wait for response (with timeout)
-        match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+        // Wait for response (with timeout).
+        // Uses DEFAULT_PERMISSION_TIMEOUT_SECS as the fallback timeout.
+        // Providers with stricter timeouts (like Claude CLI) override this via
+        // the tool_timeout() method on LanguageModel.
+        let timeout_secs = wonopcode_util::DEFAULT_PERMISSION_TIMEOUT_SECS;
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
             Ok(Ok(allowed)) => allowed,
             Ok(Err(_)) => {
                 tracing::warn!("Permission request channel closed");
                 false
             }
             Err(_) => {
-                tracing::warn!("Permission request timed out after 300 seconds");
+                tracing::warn!(
+                    request_id = %check.id,
+                    tool = %check.tool,
+                    timeout_secs = timeout_secs,
+                    "Permission request timed out"
+                );
                 false
             }
         }

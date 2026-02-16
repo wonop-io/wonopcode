@@ -372,6 +372,11 @@ pub enum AppUpdate {
     AgentChanged(String),
     /// Permission request from the runner.
     PermissionRequest(PermissionRequestUpdate),
+    /// Permission request was resolved (dismiss dialog if matching).
+    PermissionResolved {
+        request_id: String,
+        allowed: bool,
+    },
     /// Session loaded with messages (used when connecting to remote server).
     SessionLoaded {
         id: String,
@@ -3410,6 +3415,63 @@ async function fetchUserData(userId) {
                 }
                 // Update pending count (current dialog + queue size)
                 let pending_count = 1 + self.permission_queue.len();
+                self.footer.set_pending_permissions(pending_count);
+            }
+            AppUpdate::PermissionResolved {
+                request_id,
+                allowed,
+            } => {
+                tracing::debug!(
+                    request_id = %request_id,
+                    allowed = allowed,
+                    "Permission resolved, checking if dialog should be dismissed"
+                );
+
+                // Check if this matches the current dialog
+                let current_matches = self
+                    .permission_dialog
+                    .as_ref()
+                    .map(|d| d.request_id() == request_id)
+                    .unwrap_or(false);
+
+                if current_matches {
+                    tracing::debug!(
+                        request_id = %request_id,
+                        "Dismissing current permission dialog"
+                    );
+                    self.permission_dialog = None;
+                    self.dialog = ActiveDialog::None;
+
+                    // Show next queued request if any
+                    if let Some(next_req) = self.permission_queue.pop_front() {
+                        self.permission_dialog = Some(PermissionDialog::new(
+                            next_req.id,
+                            next_req.tool,
+                            next_req.action,
+                            next_req.description,
+                            next_req.path,
+                        ));
+                        self.dialog = ActiveDialog::Permission;
+                    }
+                } else {
+                    // Check if it's in the queue and remove it
+                    let queue_len_before = self.permission_queue.len();
+                    self.permission_queue
+                        .retain(|req| req.id != request_id);
+                    if self.permission_queue.len() != queue_len_before {
+                        tracing::debug!(
+                            request_id = %request_id,
+                            "Removed resolved permission from queue"
+                        );
+                    }
+                }
+
+                // Update pending count
+                let pending_count = if self.permission_dialog.is_some() {
+                    1 + self.permission_queue.len()
+                } else {
+                    0
+                };
                 self.footer.set_pending_permissions(pending_count);
             }
             AppUpdate::SessionLoaded {

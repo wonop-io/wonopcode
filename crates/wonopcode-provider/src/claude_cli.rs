@@ -1258,6 +1258,13 @@ impl LanguageModel for ClaudeCliProvider {
     fn provider_id(&self) -> &str {
         "anthropic-cli"
     }
+
+    fn tool_timeout(&self) -> Option<std::time::Duration> {
+        // Claude CLI has a ~60 second timeout for MCP tool calls.
+        // We use 45 seconds to ensure we cancel before Claude CLI times out,
+        // giving a clear error message rather than a generic timeout.
+        Some(std::time::Duration::from_secs(45))
+    }
 }
 
 impl std::fmt::Debug for ClaudeCliProvider {

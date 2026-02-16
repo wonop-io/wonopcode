@@ -435,6 +435,8 @@ impl AgentLoop for StandardLoop {
             }
 
             // Execute tool calls
+            // Get the provider's tool timeout (if any) for permission checking
+            let tool_timeout = ctx.provider.tool_timeout();
             let tool_executor = ToolExecutor::with_permissions(
                 ctx.tools,
                 ctx.snapshot_store.cloned(),
@@ -442,6 +444,7 @@ impl AgentLoop for StandardLoop {
                 ctx.sandbox.clone(),
                 ctx.tool_event_tx.clone(),
                 ctx.permission_checker.clone(),
+                tool_timeout,
             );
 
             let mut tool_results = Vec::new();
