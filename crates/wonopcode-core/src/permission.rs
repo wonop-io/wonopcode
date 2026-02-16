@@ -458,22 +458,55 @@ impl PermissionManager {
         // Providers with stricter timeouts (like Claude CLI) override this via
         // the tool_timeout() method on LanguageModel.
         let timeout_secs = wonopcode_util::DEFAULT_PERMISSION_TIMEOUT_SECS;
+        let request_id = check.id.clone();
         match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
             Ok(Ok(allowed)) => allowed,
             Ok(Err(_)) => {
                 tracing::warn!("Permission request channel closed");
+                self.cleanup_timed_out_request(&request_id).await;
                 false
             }
             Err(_) => {
                 tracing::warn!(
-                    request_id = %check.id,
+                    request_id = %request_id,
                     tool = %check.tool,
                     timeout_secs = timeout_secs,
                     "Permission request timed out"
                 );
+                self.cleanup_timed_out_request(&request_id).await;
                 false
             }
         }
+    }
+
+    /// Clean up a timed-out permission request and notify connected clients.
+    ///
+    /// This method removes the pending request from the internal map and publishes
+    /// a `PermissionResponse` event to dismiss the permission dialog on all connected
+    /// clients.
+    ///
+    /// Call this when an external timeout (e.g., provider-level timeout) fires before
+    /// the internal permission manager timeout, to ensure the dialog is dismissed.
+    pub async fn cleanup_timed_out_request(&self, request_id: &str) {
+        // Remove the pending request
+        {
+            let mut pending = self.pending.write().await;
+            pending.remove(request_id);
+        }
+
+        // Publish PermissionResponse event to dismiss the dialog on all connected clients
+        self.bus
+            .publish(PermissionResponse {
+                id: request_id.to_string(),
+                allowed: false,
+                remember: false,
+            })
+            .await;
+
+        tracing::info!(
+            request_id = %request_id,
+            "Published PermissionResponse for timed-out request to dismiss dialogs"
+        );
     }
 
     /// Respond to a permission request.

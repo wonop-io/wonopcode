@@ -59,6 +59,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
         // to ensure we cancel before Claude CLI times out.
         // This gives a clear error message rather than a generic timeout.
         let permission_timeout = std::time::Duration::from_secs(45);
+        let request_id = check.id.clone();
         let permission_future = self
             .permissions
             .check_with_sandbox(&ctx.session_id, check, has_sandbox);
@@ -68,9 +69,12 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             Err(_) => {
                 tracing::warn!(
                     tool = %tool_name,
+                    request_id = %request_id,
                     timeout_secs = permission_timeout.as_secs(),
                     "Permission request timed out - Claude CLI may have a hard timeout on MCP calls"
                 );
+                // Clean up the pending request and notify clients to dismiss the dialog
+                self.permissions.cleanup_timed_out_request(&request_id).await;
                 return Err(format!(
                     "Permission request timed out after {} seconds. \
                     The user did not approve the tool in time. \

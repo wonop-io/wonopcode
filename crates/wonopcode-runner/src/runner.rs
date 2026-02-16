@@ -91,9 +91,10 @@ impl PermissionChecker for PermissionCheckerAdapter {
                         timeout_secs = timeout_duration.as_secs(),
                         "Permission request timed out (provider timeout)"
                     );
-                    // Note: The pending request in PermissionManager will remain
-                    // until its own internal timeout expires, but the tool execution
-                    // will be denied immediately.
+                    // Clean up the pending request and notify clients to dismiss the dialog
+                    self.permission_manager
+                        .cleanup_timed_out_request(&request.id)
+                        .await;
                     false
                 }
             }
