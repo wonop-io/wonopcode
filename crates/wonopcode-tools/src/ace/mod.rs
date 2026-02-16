@@ -32,7 +32,9 @@ pub mod types;
 pub use config::{AceConfig, WonopCodeConfig};
 pub use state::WorkstreamState;
 pub use store::ArtifactStore;
-pub use types::{Artifact, ArtifactMetadata, ArtifactType, PhaseStatus, Priority, Progress, WorkflowPhase};
+pub use types::{
+    Artifact, ArtifactMetadata, ArtifactType, PhaseStatus, Priority, Progress, WorkflowPhase,
+};
 
 // Re-export tools for registration
 pub use tools::{

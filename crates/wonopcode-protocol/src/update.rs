@@ -99,10 +99,7 @@ pub enum Update {
     },
 
     /// Permission request was resolved (dismiss dialog).
-    PermissionResolved {
-        request_id: String,
-        allowed: bool,
-    },
+    PermissionResolved { request_id: String, allowed: bool },
 }
 
 /// Session info for session list updates.

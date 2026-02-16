@@ -1247,6 +1247,7 @@ mod tests {
                 attachments: None,
             },
             metadata: None,
+            order: None,
         });
         repo.save_part(&tool_part).await.unwrap();
 

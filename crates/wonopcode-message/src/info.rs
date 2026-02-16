@@ -122,6 +122,7 @@ mod tests {
             status: "pending".to_string(),
             priority: "high".to_string(),
             phase_id: Some("phase_1".to_string()),
+            parents: vec![],
         };
 
         let json = serde_json::to_string(&info).unwrap();
@@ -139,6 +140,7 @@ mod tests {
             status: "in_progress".to_string(),
             priority: "medium".to_string(),
             phase_id: None,
+            parents: vec![],
         };
 
         let json = serde_json::to_string(&info).unwrap();

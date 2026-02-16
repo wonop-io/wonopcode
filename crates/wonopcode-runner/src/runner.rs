@@ -75,9 +75,9 @@ impl PermissionChecker for PermissionCheckerAdapter {
         };
 
         let has_sandbox = self.permission_manager.is_sandbox_running();
-        let permission_future = self
-            .permission_manager
-            .check_with_sandbox(session_id, check, has_sandbox);
+        let permission_future =
+            self.permission_manager
+                .check_with_sandbox(session_id, check, has_sandbox);
 
         // Apply timeout if specified
         if let Some(timeout_duration) = timeout {
@@ -291,11 +291,13 @@ fn parse_markdown_todo_line(line: &str) -> Option<todo::TodoItem> {
                 (content, id)
             } else {
                 // Generate a simple ID based on content hash if no ID found
-                let hash = rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
+                let hash =
+                    rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
                 (rest.to_string(), format!("todo_{:x}", hash))
             }
         } else {
-            let hash = rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
+            let hash =
+                rest.len() as u64 * 31 + rest.as_bytes().iter().map(|&b| b as u64).sum::<u64>();
             (rest.to_string(), format!("todo_{:x}", hash))
         }
     } else {
@@ -1133,7 +1135,8 @@ impl Runner {
                     ToolEvent::TodosUpdated(phased_todos) => {
                         debug!("Forwarding TodosUpdated from tool event channel");
                         let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
-                        let _ = update_tx_for_tool_events.send(AppUpdate::TodosUpdated { phases, todos });
+                        let _ = update_tx_for_tool_events
+                            .send(AppUpdate::TodosUpdated { phases, todos });
                     }
                     // Other events are logged but not forwarded yet
                     ToolEvent::ArtifactCreated { id, artifact_type } => {
@@ -1142,8 +1145,15 @@ impl Runner {
                     ToolEvent::ArtifactUpdated { id } => {
                         debug!("Tool event: ArtifactUpdated {}", id);
                     }
-                    ToolEvent::TaskStatusChanged { id, old_status, new_status } => {
-                        debug!("Tool event: TaskStatusChanged {} ({} -> {})", id, old_status, new_status);
+                    ToolEvent::TaskStatusChanged {
+                        id,
+                        old_status,
+                        new_status,
+                    } => {
+                        debug!(
+                            "Tool event: TaskStatusChanged {} ({} -> {})",
+                            id, old_status, new_status
+                        );
                     }
                     ToolEvent::PhaseCompleted { phase } => {
                         debug!("Tool event: PhaseCompleted {}", phase);
@@ -1194,8 +1204,10 @@ impl Runner {
                             debug!(tool = %name, "Intercepting legacy TODO tool completion");
                             // Parse the output as TODO data
                             if let Ok(phased_todos) = parse_mcp_todo_output_simple(&output) {
-                                let (phases, todos) = convert_phased_todos_to_updates(&phased_todos);
-                                let _ = update_tx_clone.send(AppUpdate::TodosUpdated { phases, todos });
+                                let (phases, todos) =
+                                    convert_phased_todos_to_updates(&phased_todos);
+                                let _ =
+                                    update_tx_clone.send(AppUpdate::TodosUpdated { phases, todos });
                             }
                         }
                         AppUpdate::ToolCompleted {
@@ -1204,7 +1216,7 @@ impl Runner {
                             output,
                             metadata,
                         }
-                    },
+                    }
                     LoopUpdate::ResponseComplete { text } => AppUpdate::Completed { text },
                     LoopUpdate::TokenUsage {
                         input,
@@ -1271,8 +1283,9 @@ impl Runner {
         let provider = self.provider.read().await;
 
         // Create permission checker adapter
-        let permission_checker: Arc<dyn PermissionChecker> =
-            Arc::new(PermissionCheckerAdapter::new(self.permission_manager.clone()));
+        let permission_checker: Arc<dyn PermissionChecker> = Arc::new(
+            PermissionCheckerAdapter::new(self.permission_manager.clone()),
+        );
 
         // Build LoopContext
         let mut ctx = LoopContext {
@@ -1315,39 +1328,44 @@ impl Runner {
                 if let Some(ref parent_id) = user_msg_id {
                     // Only process messages that were added during this turn
                     // (skip the ones that existed before the loop ran)
-                    let new_messages: Vec<_> = messages.iter().skip(messages_count_before_loop).collect();
-                    
+                    let new_messages: Vec<_> =
+                        messages.iter().skip(messages_count_before_loop).collect();
+
                     info!(
                         messages_before = messages_count_before_loop,
                         messages_after = messages.len(),
                         new_message_count = new_messages.len(),
                         "SESSION PERSISTENCE: Processing new messages for storage"
                     );
-                    
+
                     let mut last_saved_id = parent_id.clone();
                     let mut assistant_count = 0;
                     let mut tool_count = 0;
-                    
+
                     // Track the last saved assistant message ID for updating tool results
                     let mut current_assistant_msg_id: Option<String> = None;
                     let mut tool_results_updated = 0;
-                    
+
                     for msg in new_messages {
                         match msg.role {
                             wonopcode_provider::Role::Assistant => {
                                 assistant_count += 1;
                                 // Count tool use parts in this message
-                                let tools_in_msg = msg.content.iter().filter(|c| {
-                                    matches!(c, wonopcode_provider::ContentPart::ToolUse { .. })
-                                }).count();
+                                let tools_in_msg = msg
+                                    .content
+                                    .iter()
+                                    .filter(|c| {
+                                        matches!(c, wonopcode_provider::ContentPart::ToolUse { .. })
+                                    })
+                                    .count();
                                 tool_count += tools_in_msg;
-                                
+
                                 info!(
                                     content_parts = msg.content.len(),
                                     tool_use_parts = tools_in_msg,
                                     "SESSION PERSISTENCE: Saving assistant message"
                                 );
-                                
+
                                 // This message may contain ContentPart::ToolUse parts
                                 // which will be converted to MessagePart::Tool by save_assistant_message
                                 match svc.save_assistant_message(msg, &last_saved_id).await {
@@ -1371,10 +1389,15 @@ impl Runner {
                                 // These come from both internal tool execution and observed (CLI) tools
                                 if let Some(ref assistant_msg_id) = current_assistant_msg_id {
                                     for content in &msg.content {
-                                        if let wonopcode_provider::ContentPart::ToolResult { tool_use_id, content: result_content, is_error } = content {
+                                        if let wonopcode_provider::ContentPart::ToolResult {
+                                            tool_use_id,
+                                            content: result_content,
+                                            is_error,
+                                        } = content
+                                        {
                                             let output = result_content.clone();
                                             let success = !is_error.unwrap_or(false);
-                                            
+
                                             debug!(
                                                 assistant_msg_id = %assistant_msg_id,
                                                 tool_use_id = %tool_use_id,
@@ -1382,14 +1405,17 @@ impl Runner {
                                                 output_len = output.len(),
                                                 "SESSION PERSISTENCE: Updating tool result"
                                             );
-                                            
-                                            if let Err(e) = svc.update_tool_result(
-                                                assistant_msg_id,
-                                                tool_use_id,
-                                                output,
-                                                success,
-                                                None,
-                                            ).await {
+
+                                            if let Err(e) = svc
+                                                .update_tool_result(
+                                                    assistant_msg_id,
+                                                    tool_use_id,
+                                                    output,
+                                                    success,
+                                                    None,
+                                                )
+                                                .await
+                                            {
                                                 warn!(error = %e, tool_use_id = %tool_use_id, "Failed to update tool result");
                                             } else {
                                                 tool_results_updated += 1;
@@ -1403,14 +1429,14 @@ impl Runner {
                             }
                         }
                     }
-                    
+
                     info!(
                         assistant_messages_saved = assistant_count,
                         total_tool_parts = tool_count,
                         tool_results_updated = tool_results_updated,
                         "SESSION PERSISTENCE: Completed saving messages"
                     );
-                    
+
                     // Signal that turn messages have been persisted.
                     // This allows the workstream server to safely clear streaming state
                     // without losing the last message when clients reconnect.
@@ -1509,11 +1535,14 @@ impl Runner {
         // because Claude CLI sessions are tied to specific models
         let (old_provider_id, old_model_id) = {
             let provider = self.provider.read().await;
-            (provider.provider_id().to_string(), provider.model_info().id.clone())
+            (
+                provider.provider_id().to_string(),
+                provider.model_info().id.clone(),
+            )
         };
-        let cli_session_id = if old_provider_id == "anthropic-cli" 
+        let cli_session_id = if old_provider_id == "anthropic-cli"
             && provider_name == "anthropic"
-            && old_model_id == model_id 
+            && old_model_id == model_id
         {
             // Staying with same Claude CLI provider AND same model - preserve session
             let provider = self.provider.read().await;
@@ -1646,7 +1675,7 @@ impl Runner {
                 if manager.is_ready().await {
                     // Sandbox is already running, update permission manager state
                     self.permission_manager.set_sandbox_running(true);
-                    
+
                     // Get container ID from runtime info
                     let container_id = if let Ok(runtime) = manager.runtime().await {
                         let wrapper: Arc<dyn std::any::Any + Send + Sync> =
@@ -1658,7 +1687,7 @@ impl Runner {
                     } else {
                         None
                     };
-                    
+
                     (
                         wonopcode_tui::SandboxStatusUpdate {
                             state: "running".to_string(),
@@ -2223,10 +2252,7 @@ impl Runner {
                 AppAction::SetAllowAll { enabled } => {
                     info!(enabled = enabled, "Setting allow-all mode");
                     self.permission_manager.set_allow_all(enabled);
-                    send_update(
-                        &update_tx,
-                        AppUpdate::AllowAllChanged { enabled },
-                    );
+                    send_update(&update_tx, AppUpdate::AllowAllChanged { enabled });
                 }
                 AppAction::SaveSettings { scope, config } => {
                     debug!("Saving settings to {:?}", scope);
@@ -3474,7 +3500,7 @@ pub fn load_api_key(provider: &str) -> Option<String> {
     if let Some(creds_manager) = wonopcode_core::CredentialsManager::new() {
         return creds_manager.get_api_key(provider);
     }
-    
+
     // Fallback to direct env var check if CredentialsManager fails
     let env_var = match provider {
         "anthropic" => "ANTHROPIC_API_KEY",
@@ -3528,7 +3554,9 @@ pub fn get_provider_status(provider: &str) -> wonopcode_core::ProviderStatus {
         .as_ref()
         .map(|cm| cm.get_api_key(provider).is_some())
         .unwrap_or(false);
-    let auth_method = creds_manager.as_ref().and_then(|cm| cm.get_auth_method(provider));
+    let auth_method = creds_manager
+        .as_ref()
+        .and_then(|cm| cm.get_auth_method(provider));
 
     // Check CLI availability for anthropic
     let (cli_available, cli_authenticated) = if provider == "anthropic" {

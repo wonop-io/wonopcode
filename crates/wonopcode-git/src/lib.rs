@@ -178,11 +178,7 @@ pub fn push(worktree_path: &Path) -> Result<()> {
 /// Stage files, commit, and push in one operation
 ///
 /// This is a convenience function that combines stage_files, commit, and push.
-pub fn commit_and_push(
-    worktree_path: &Path,
-    files: &[String],
-    message: &str,
-) -> Result<()> {
+pub fn commit_and_push(worktree_path: &Path, files: &[String], message: &str) -> Result<()> {
     stage_files(worktree_path, files)?;
     commit(worktree_path, message)?;
     push(worktree_path)?;
@@ -245,7 +241,7 @@ pub fn get_diff_files(worktree_path: &Path, base_branch: &str) -> Result<Vec<Dif
 
     // Get name-status
     let status_output = Command::new("git")
-        .args(["diff", "--name-status", &format!("{}..HEAD", merge_base)])
+        .args(["diff", "--name-status", &format!("{merge_base}..HEAD")])
         .current_dir(worktree_path)
         .output()
         .context("Failed to run git diff --name-status")?;
@@ -259,7 +255,7 @@ pub fn get_diff_files(worktree_path: &Path, base_branch: &str) -> Result<Vec<Dif
 
     // Get numstat
     let numstat_output = Command::new("git")
-        .args(["diff", "--numstat", &format!("{}..HEAD", merge_base)])
+        .args(["diff", "--numstat", &format!("{merge_base}..HEAD")])
         .current_dir(worktree_path)
         .output()
         .context("Failed to run git diff --numstat")?;
@@ -273,16 +269,10 @@ pub fn get_diff_files(worktree_path: &Path, base_branch: &str) -> Result<Vec<Dif
 
     // Parse results
     let status_text = String::from_utf8_lossy(&status_output.stdout).to_string();
-    let status_lines: Vec<_> = status_text
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect();
+    let status_lines: Vec<_> = status_text.lines().filter(|l| !l.is_empty()).collect();
 
     let numstat_text = String::from_utf8_lossy(&numstat_output.stdout).to_string();
-    let numstat_lines: Vec<_> = numstat_text
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect();
+    let numstat_lines: Vec<_> = numstat_text.lines().filter(|l| !l.is_empty()).collect();
 
     let mut files = Vec::new();
 
@@ -306,7 +296,7 @@ pub fn get_diff_files(worktree_path: &Path, base_branch: &str) -> Result<Vec<Dif
 
         let numstat_parts: Vec<_> = numstat_line.splitn(3, '\t').collect();
         let additions = numstat_parts
-            .get(0)
+            .first()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         let deletions = numstat_parts
@@ -338,12 +328,12 @@ pub fn get_diff_files_with_compare(
 ) -> Result<Vec<DiffFileSummary>> {
     // Build diff spec
     let diff_spec = match (base, compare) {
-        (Some(b), Some(c)) => format!("{}..{}", b, c),
+        (Some(b), Some(c)) => format!("{b}..{c}"),
         (Some(b), None) => b.to_string(), // Compare against working tree
         (None, None) => "HEAD".to_string(), // HEAD vs working tree
         _ => return Ok(Vec::new()),
     };
-    
+
     // Get name-status
     let status_output = Command::new("git")
         .args(["diff", "--name-status", &diff_spec])
@@ -374,16 +364,10 @@ pub fn get_diff_files_with_compare(
 
     // Parse results
     let status_text = String::from_utf8_lossy(&status_output.stdout).to_string();
-    let status_lines: Vec<_> = status_text
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect();
+    let status_lines: Vec<_> = status_text.lines().filter(|l| !l.is_empty()).collect();
 
     let numstat_text = String::from_utf8_lossy(&numstat_output.stdout).to_string();
-    let numstat_lines: Vec<_> = numstat_text
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect();
+    let numstat_lines: Vec<_> = numstat_text.lines().filter(|l| !l.is_empty()).collect();
 
     let mut files = Vec::new();
 
@@ -449,7 +433,7 @@ pub fn get_file_diff(worktree_path: &Path, file_path: &str, base_branch: &str) -
         .args([
             "diff",
             "-U3",
-            &format!("{}..HEAD", merge_base),
+            &format!("{merge_base}..HEAD"),
             "--",
             file_path,
         ])
@@ -465,20 +449,32 @@ pub fn get_file_diff(worktree_path: &Path, file_path: &str, base_branch: &str) -
     }
 
     let diff_text = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse the diff
     let lines = parse_unified_diff(&diff_text)?;
-    
+
     // Count additions and deletions
-    let additions = lines.iter().filter(|l| matches!(l.line_type, DiffLineType::Added)).count();
-    let deletions = lines.iter().filter(|l| matches!(l.line_type, DiffLineType::Removed)).count();
-    
+    let additions = lines
+        .iter()
+        .filter(|l| matches!(l.line_type, DiffLineType::Added))
+        .count();
+    let deletions = lines
+        .iter()
+        .filter(|l| matches!(l.line_type, DiffLineType::Removed))
+        .count();
+
     // Determine status
     let status = if lines.is_empty() {
         "unchanged".to_string()
-    } else if lines.iter().all(|l| matches!(l.line_type, DiffLineType::Added)) {
+    } else if lines
+        .iter()
+        .all(|l| matches!(l.line_type, DiffLineType::Added))
+    {
         "added".to_string()
-    } else if lines.iter().all(|l| matches!(l.line_type, DiffLineType::Removed)) {
+    } else if lines
+        .iter()
+        .all(|l| matches!(l.line_type, DiffLineType::Removed))
+    {
         "deleted".to_string()
     } else {
         "modified".to_string()
@@ -504,7 +500,7 @@ pub fn get_file_diff_with_compare(
 ) -> Result<FileDiff> {
     // Build diff spec
     let diff_spec = match (base, compare) {
-        (Some(b), Some(c)) => format!("{}..{}", b, c),
+        (Some(b), Some(c)) => format!("{b}..{c}"),
         (Some(b), None) => b.to_string(), // Compare against working tree
         (None, None) => "HEAD".to_string(), // HEAD vs working tree
         _ => {
@@ -595,8 +591,11 @@ fn parse_unified_diff(diff_text: &str) -> Result<Vec<DiffLine>> {
 
     for line in diff_text.lines() {
         // Skip file headers
-        if line.starts_with("diff --git") || line.starts_with("index ") 
-            || line.starts_with("---") || line.starts_with("+++") {
+        if line.starts_with("diff --git")
+            || line.starts_with("index ")
+            || line.starts_with("---")
+            || line.starts_with("+++")
+        {
             continue;
         }
 
@@ -604,7 +603,7 @@ fn parse_unified_diff(diff_text: &str) -> Result<Vec<DiffLine>> {
         if line.starts_with("@@") {
             // Extract line numbers from @@ -old_start,old_count +new_start,new_count @@
             if let Some(header_part) = line.split("@@").nth(1) {
-                let parts: Vec<_> = header_part.trim().split_whitespace().collect();
+                let parts: Vec<_> = header_part.split_whitespace().collect();
                 if parts.len() >= 2 {
                     if let Some(old_part) = parts[0].strip_prefix('-') {
                         if let Some(start) = old_part.split(',').next() {
@@ -618,7 +617,7 @@ fn parse_unified_diff(diff_text: &str) -> Result<Vec<DiffLine>> {
                     }
                 }
             }
-            
+
             lines.push(DiffLine {
                 line_type: DiffLineType::Header,
                 old_line_num: None,
@@ -645,12 +644,12 @@ fn parse_unified_diff(diff_text: &str) -> Result<Vec<DiffLine>> {
                 content: line[1..].to_string(),
             });
             old_line_num += 1;
-        } else if line.starts_with(' ') {
+        } else if let Some(stripped) = line.strip_prefix(' ') {
             lines.push(DiffLine {
                 line_type: DiffLineType::Unchanged,
                 old_line_num: Some(old_line_num),
                 new_line_num: Some(new_line_num),
-                content: line[1..].to_string(),
+                content: stripped.to_string(),
             });
             old_line_num += 1;
             new_line_num += 1;

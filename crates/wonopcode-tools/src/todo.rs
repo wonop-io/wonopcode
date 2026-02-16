@@ -1061,12 +1061,14 @@ mod tests {
                 content: "Task 1".to_string(),
                 status: TodoStatus::Pending,
                 priority: TodoPriority::High,
+                parents: vec![],
             },
             TodoItem {
                 id: "2".to_string(),
                 content: "Task 2".to_string(),
                 status: TodoStatus::InProgress,
                 priority: TodoPriority::Medium,
+                parents: vec![],
             },
         ];
         store.set(&root, todos).unwrap();
@@ -1102,6 +1104,7 @@ mod tests {
             content: "Task 1".to_string(),
             status: TodoStatus::Completed,
             priority: TodoPriority::Low,
+            parents: vec![],
         }];
         store.set(dir.path(), todos).unwrap();
 
@@ -1142,6 +1145,7 @@ mod tests {
             content: "Shared task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         }];
         store.set(dir.path(), todos).unwrap();
 
@@ -1420,12 +1424,14 @@ mod tests {
                 content: "In progress task".to_string(),
                 status: TodoStatus::InProgress,
                 priority: TodoPriority::High,
+                parents: vec![],
             },
             TodoItem {
                 id: "2".to_string(),
                 content: "Pending task".to_string(),
                 status: TodoStatus::Pending,
                 priority: TodoPriority::Medium,
+                parents: vec![],
             },
         ];
 
@@ -1451,12 +1457,14 @@ mod tests {
                 content: "Completed".to_string(),
                 status: TodoStatus::Completed,
                 priority: TodoPriority::High,
+                parents: vec![],
             },
             TodoItem {
                 id: "2".to_string(),
                 content: "Cancelled".to_string(),
                 status: TodoStatus::Cancelled,
                 priority: TodoPriority::Low,
+                parents: vec![],
             },
         ];
 
@@ -1480,6 +1488,7 @@ mod tests {
                     content: "Test".to_string(),
                     status: TodoStatus::Pending,
                     priority: TodoPriority::High,
+                    parents: vec![],
                 }],
             )
             .unwrap();
@@ -1501,6 +1510,7 @@ mod tests {
                     content: "Test".to_string(),
                     status: TodoStatus::Pending,
                     priority: TodoPriority::High,
+                    parents: vec![],
                 }],
             )
             .unwrap();
@@ -1516,6 +1526,7 @@ mod tests {
             content: "Test content".to_string(),
             status: TodoStatus::InProgress,
             priority: TodoPriority::High,
+            parents: vec![],
         };
 
         let json = serde_json::to_string(&item).unwrap();
@@ -1561,6 +1572,7 @@ mod tests {
             content: "Task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         };
         phase.add_todo(todo);
         assert_eq!(phase.todos.len(), 1);
@@ -1579,6 +1591,7 @@ mod tests {
             content: "Pending".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::Medium,
+            parents: vec![],
         });
         assert_eq!(phase.status(), PhaseStatus::NotStarted);
 
@@ -1588,6 +1601,7 @@ mod tests {
             content: "In progress".to_string(),
             status: TodoStatus::InProgress,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         assert_eq!(phase.status(), PhaseStatus::InProgress);
     }
@@ -1600,12 +1614,14 @@ mod tests {
             content: "Done".to_string(),
             status: TodoStatus::Completed,
             priority: TodoPriority::Medium,
+            parents: vec![],
         });
         phase.add_todo(TodoItem {
             id: "2".to_string(),
             content: "Cancelled".to_string(),
             status: TodoStatus::Cancelled,
             priority: TodoPriority::Low,
+            parents: vec![],
         });
         assert_eq!(phase.status(), PhaseStatus::Finished);
     }
@@ -1618,24 +1634,28 @@ mod tests {
             content: "Pending".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phase.add_todo(TodoItem {
             id: "2".to_string(),
             content: "In progress".to_string(),
             status: TodoStatus::InProgress,
             priority: TodoPriority::Medium,
+            parents: vec![],
         });
         phase.add_todo(TodoItem {
             id: "3".to_string(),
             content: "Completed".to_string(),
             status: TodoStatus::Completed,
             priority: TodoPriority::Low,
+            parents: vec![],
         });
         phase.add_todo(TodoItem {
             id: "4".to_string(),
             content: "Cancelled".to_string(),
             status: TodoStatus::Cancelled,
             priority: TodoPriority::Low,
+            parents: vec![],
         });
 
         let (pending, in_progress, completed, cancelled) = phase.counts();
@@ -1669,6 +1689,7 @@ mod tests {
             content: "Task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phased.add_phase(phase);
         assert_eq!(phased.phases.len(), 1);
@@ -1686,6 +1707,7 @@ mod tests {
             content: "Pending".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
 
         let mut phase2 = Phase::new("phase2", "Phase 2");
@@ -1694,6 +1716,7 @@ mod tests {
             content: "Completed".to_string(),
             status: TodoStatus::Completed,
             priority: TodoPriority::Medium,
+            parents: vec![],
         });
 
         phased.add_phase(phase1);
@@ -1716,12 +1739,14 @@ mod tests {
             content: "Task 1".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phase1.add_todo(TodoItem {
             id: "2".to_string(),
             content: "Task 2".to_string(),
             status: TodoStatus::Completed,
             priority: TodoPriority::Medium,
+            parents: vec![],
         });
 
         let mut phase2 = Phase::new("phase2", "Phase 2");
@@ -1730,6 +1755,7 @@ mod tests {
             content: "Task 3".to_string(),
             status: TodoStatus::InProgress,
             priority: TodoPriority::Low,
+            parents: vec![],
         });
 
         phased.add_phase(phase1);
@@ -1856,6 +1882,7 @@ mod tests {
             content: "Task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phased_todos.add_phase(phase);
 
@@ -1881,6 +1908,7 @@ mod tests {
             content: "Task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phased_todos.add_phase(phase);
 
@@ -1907,6 +1935,7 @@ mod tests {
             content: "Task".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phased.add_phase(phase);
 
@@ -1926,6 +1955,7 @@ mod tests {
             content: "Write tests".to_string(),
             status: TodoStatus::InProgress,
             priority: TodoPriority::High,
+            parents: vec![],
         });
         phased.add_phase(phase);
 

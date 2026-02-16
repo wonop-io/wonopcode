@@ -373,10 +373,7 @@ pub enum AppUpdate {
     /// Permission request from the runner.
     PermissionRequest(PermissionRequestUpdate),
     /// Permission request was resolved (dismiss dialog if matching).
-    PermissionResolved {
-        request_id: String,
-        allowed: bool,
-    },
+    PermissionResolved { request_id: String, allowed: bool },
     /// Session loaded with messages (used when connecting to remote server).
     SessionLoaded {
         id: String,
@@ -1328,7 +1325,12 @@ impl<S: SidebarTrait> App<S> {
                         let theme_name = config.theme.clone();
                         let render_settings = dialog.get_render_settings();
                         let auth_changes = dialog.get_auth_changes();
-                        (Some(config), theme_name, Some(render_settings), auth_changes)
+                        (
+                            Some(config),
+                            theme_name,
+                            Some(render_settings),
+                            auth_changes,
+                        )
                     } else {
                         (None, None, None, None)
                     };
@@ -3456,8 +3458,7 @@ async function fetchUserData(userId) {
                 } else {
                     // Check if it's in the queue and remove it
                     let queue_len_before = self.permission_queue.len();
-                    self.permission_queue
-                        .retain(|req| req.id != request_id);
+                    self.permission_queue.retain(|req| req.id != request_id);
                     if self.permission_queue.len() != queue_len_before {
                         tracing::debug!(
                             request_id = %request_id,

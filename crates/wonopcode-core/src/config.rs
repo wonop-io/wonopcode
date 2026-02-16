@@ -1661,12 +1661,12 @@ impl CredentialsManager {
             credentials_path,
             credentials: HashMap::new(),
         };
-        
+
         // Load existing credentials
         if let Err(e) = manager.load() {
             warn!(error = %e, "Failed to load credentials");
         }
-        
+
         Some(manager)
     }
 
@@ -1676,11 +1676,11 @@ impl CredentialsManager {
             credentials_path,
             credentials: HashMap::new(),
         };
-        
+
         if let Err(e) = manager.load() {
             warn!(error = %e, "Failed to load credentials");
         }
-        
+
         manager
     }
 
@@ -1692,7 +1692,7 @@ impl CredentialsManager {
         }
 
         let content = std::fs::read_to_string(&self.credentials_path)?;
-        
+
         // Try parsing as new format first
         if let Ok(creds_file) = serde_json::from_str::<CredentialsFile>(&content) {
             self.credentials = creds_file.credentials;
@@ -1704,31 +1704,29 @@ impl CredentialsManager {
             );
             return Ok(());
         }
-        
+
         // Try legacy format: HashMap<String, String> or HashMap<String, Value>
         if let Ok(legacy) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&content) {
             for (provider, value) in legacy {
                 match value {
                     serde_json::Value::String(key) => {
                         // Simple key string
-                        self.credentials.insert(
-                            provider,
-                            ProviderCredential::ApiKey { key },
-                        );
+                        self.credentials
+                            .insert(provider, ProviderCredential::ApiKey { key });
                     }
                     serde_json::Value::Object(obj) => {
                         // Nested object - check for "key" or "type"
                         if let Some(key) = obj.get("key").and_then(|v| v.as_str()) {
                             self.credentials.insert(
                                 provider,
-                                ProviderCredential::ApiKey { key: key.to_string() },
+                                ProviderCredential::ApiKey {
+                                    key: key.to_string(),
+                                },
                             );
                         } else if obj.get("type").and_then(|v| v.as_str()) == Some("oauth") {
                             // OAuth = Claude CLI
-                            self.credentials.insert(
-                                provider,
-                                ProviderCredential::ClaudeCli,
-                            );
+                            self.credentials
+                                .insert(provider, ProviderCredential::ClaudeCli);
                         }
                     }
                     _ => {}
@@ -1741,7 +1739,7 @@ impl CredentialsManager {
                 "Loaded credentials from legacy format"
             );
         }
-        
+
         Ok(())
     }
 
@@ -1751,15 +1749,16 @@ impl CredentialsManager {
         if let Some(parent) = self.credentials_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
-        let content = serde_json::to_string_pretty(&self.credentials)
-            .map_err(|e| ConfigError::InvalidJson {
+
+        let content = serde_json::to_string_pretty(&self.credentials).map_err(|e| {
+            ConfigError::InvalidJson {
                 path: self.credentials_path.display().to_string(),
                 message: e.to_string(),
-            })?;
-        
+            }
+        })?;
+
         std::fs::write(&self.credentials_path, &content)?;
-        
+
         // Set restrictive permissions on Unix
         #[cfg(unix)]
         {
@@ -1767,7 +1766,7 @@ impl CredentialsManager {
             let perms = std::fs::Permissions::from_mode(0o600);
             std::fs::set_permissions(&self.credentials_path, perms)?;
         }
-        
+
         info!(path = %self.credentials_path.display(), "Saved credentials");
         Ok(())
     }
@@ -1783,7 +1782,7 @@ impl CredentialsManager {
             debug!(provider = %provider, source = "env", "Found API key");
             return Some(key);
         }
-        
+
         // 2. Check stored credentials
         if let Some(cred) = self.credentials.get(provider) {
             if let Some(key) = cred.api_key() {
@@ -1791,7 +1790,7 @@ impl CredentialsManager {
                 return Some(key.to_string());
             }
         }
-        
+
         debug!(provider = %provider, "No API key found");
         None
     }
@@ -1810,7 +1809,7 @@ impl CredentialsManager {
             "together" => "TOGETHER_API_KEY",
             _ => return None,
         };
-        
+
         std::env::var(env_var).ok().filter(|k| !k.is_empty())
     }
 
@@ -1818,17 +1817,17 @@ impl CredentialsManager {
     pub fn set_api_key(&mut self, provider: &str, key: &str) -> CoreResult<()> {
         self.credentials.insert(
             provider.to_string(),
-            ProviderCredential::ApiKey { key: key.to_string() },
+            ProviderCredential::ApiKey {
+                key: key.to_string(),
+            },
         );
         self.save()
     }
 
     /// Set a provider to use Claude CLI authentication.
     pub fn set_claude_cli(&mut self, provider: &str) -> CoreResult<()> {
-        self.credentials.insert(
-            provider.to_string(),
-            ProviderCredential::ClaudeCli,
-        );
+        self.credentials
+            .insert(provider.to_string(), ProviderCredential::ClaudeCli);
         self.save()
     }
 
@@ -1854,7 +1853,7 @@ impl CredentialsManager {
         if self.get_api_key_from_env(provider).is_some() {
             return true;
         }
-        
+
         // Check stored credentials
         if let Some(cred) = self.credentials.get(provider) {
             match cred {
@@ -1898,16 +1897,16 @@ pub struct AppSettings {
     /// If set, this path will be used instead of searching PATH.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_cli_path: Option<String>,
-    
+
     /// Default provider to use (e.g., "anthropic", "openai").
     /// If not set, uses the first available provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_provider: Option<String>,
-    
+
     /// Default model ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
-    
+
     /// Default base branch for new workstreams (e.g., "main", "master", "develop").
     /// If not set, defaults to "main".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1930,87 +1929,86 @@ impl AppSettingsManager {
             settings_path,
             settings: AppSettings::default(),
         };
-        
+
         if let Err(e) = manager.load() {
             debug!(error = %e, "Failed to load app settings");
         }
-        
+
         Some(manager)
     }
-    
+
     /// Load settings from file.
     fn load(&mut self) -> CoreResult<()> {
         if !self.settings_path.exists() {
             debug!(path = %self.settings_path.display(), "Settings file not found");
             return Ok(());
         }
-        
+
         let content = std::fs::read_to_string(&self.settings_path)?;
-        self.settings = serde_json::from_str(&content)
-            .map_err(|e| ConfigError::InvalidJson {
-                path: self.settings_path.display().to_string(),
-                message: e.to_string(),
-            })?;
-        
+        self.settings = serde_json::from_str(&content).map_err(|e| ConfigError::InvalidJson {
+            path: self.settings_path.display().to_string(),
+            message: e.to_string(),
+        })?;
+
         debug!(path = %self.settings_path.display(), "Loaded app settings");
         Ok(())
     }
-    
+
     /// Save settings to file.
     pub fn save(&self) -> CoreResult<()> {
         if let Some(parent) = self.settings_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
-        let content = serde_json::to_string_pretty(&self.settings)
-            .map_err(|e| ConfigError::InvalidJson {
+
+        let content =
+            serde_json::to_string_pretty(&self.settings).map_err(|e| ConfigError::InvalidJson {
                 path: self.settings_path.display().to_string(),
                 message: e.to_string(),
             })?;
-        
+
         std::fs::write(&self.settings_path, &content)?;
         info!(path = %self.settings_path.display(), "Saved app settings");
         Ok(())
     }
-    
+
     /// Get the Claude CLI path.
     pub fn get_claude_cli_path(&self) -> Option<&str> {
         self.settings.claude_cli_path.as_deref()
     }
-    
+
     /// Set the Claude CLI path.
     pub fn set_claude_cli_path(&mut self, path: Option<String>) -> CoreResult<()> {
         self.settings.claude_cli_path = path;
         self.save()
     }
-    
+
     /// Get the default provider.
     pub fn get_default_provider(&self) -> Option<&str> {
         self.settings.default_provider.as_deref()
     }
-    
+
     /// Set the default provider.
     pub fn set_default_provider(&mut self, provider: Option<String>) -> CoreResult<()> {
         self.settings.default_provider = provider;
         self.save()
     }
-    
+
     /// Get the default model.
     pub fn get_default_model(&self) -> Option<&str> {
         self.settings.default_model.as_deref()
     }
-    
+
     /// Set the default model.
     pub fn set_default_model(&mut self, model: Option<String>) -> CoreResult<()> {
         self.settings.default_model = model;
         self.save()
     }
-    
+
     /// Get the default base branch for new workstreams.
     pub fn get_default_base_branch(&self) -> Option<&str> {
         self.settings.default_base_branch.as_deref()
     }
-    
+
     /// Set the default base branch for new workstreams.
     pub fn set_default_base_branch(&mut self, branch: Option<String>) -> CoreResult<()> {
         self.settings.default_base_branch = branch;
@@ -2050,11 +2048,11 @@ impl ServerConfigManager {
             servers: HashMap::new(),
             defaults: ServerInstanceConfig::default(),
         };
-        
+
         if let Err(e) = manager.load() {
             warn!(error = %e, "Failed to load server configs");
         }
-        
+
         Some(manager)
     }
 
@@ -2063,9 +2061,9 @@ impl ServerConfigManager {
         if !self.config_path.exists() {
             return Ok(());
         }
-        
+
         let content = std::fs::read_to_string(&self.config_path)?;
-        
+
         #[derive(Deserialize)]
         struct ServerConfigFile {
             #[serde(default)]
@@ -2073,24 +2071,24 @@ impl ServerConfigManager {
             #[serde(default)]
             servers: HashMap<String, ServerInstanceConfig>,
         }
-        
-        let file: ServerConfigFile = serde_json::from_str(&content)
-            .map_err(|e| ConfigError::InvalidJson {
+
+        let file: ServerConfigFile =
+            serde_json::from_str(&content).map_err(|e| ConfigError::InvalidJson {
                 path: self.config_path.display().to_string(),
                 message: e.to_string(),
             })?;
-        
+
         if let Some(defaults) = file.defaults {
             self.defaults = defaults;
         }
         self.servers = file.servers;
-        
+
         debug!(
             path = %self.config_path.display(),
             servers = self.servers.len(),
             "Loaded server configurations"
         );
-        
+
         Ok(())
     }
 
@@ -2099,23 +2097,24 @@ impl ServerConfigManager {
         if let Some(parent) = self.config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         #[derive(Serialize)]
         struct ServerConfigFile<'a> {
             defaults: &'a ServerInstanceConfig,
             servers: &'a HashMap<String, ServerInstanceConfig>,
         }
-        
+
         let content = serde_json::to_string_pretty(&ServerConfigFile {
             defaults: &self.defaults,
             servers: &self.servers,
-        }).map_err(|e| ConfigError::InvalidJson {
+        })
+        .map_err(|e| ConfigError::InvalidJson {
             path: self.config_path.display().to_string(),
             message: e.to_string(),
         })?;
-        
+
         std::fs::write(&self.config_path, content)?;
-        
+
         info!(path = %self.config_path.display(), "Saved server configurations");
         Ok(())
     }
@@ -2125,7 +2124,10 @@ impl ServerConfigManager {
     /// Returns server-specific config if set, otherwise defaults.
     pub fn get_config(&self, repo_path: &Path) -> ServerInstanceConfig {
         let key = Self::hash_path(repo_path);
-        self.servers.get(&key).cloned().unwrap_or_else(|| self.defaults.clone())
+        self.servers
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| self.defaults.clone())
     }
 
     /// Set configuration for a server.
@@ -2144,8 +2146,12 @@ impl ServerConfigManager {
         auth_method: Option<AuthMethod>,
     ) -> CoreResult<()> {
         let key = Self::hash_path(repo_path);
-        let mut config = self.servers.get(&key).cloned().unwrap_or_else(|| self.defaults.clone());
-        
+        let mut config = self
+            .servers
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| self.defaults.clone());
+
         if let Some(p) = provider {
             config.provider = p;
         }
@@ -2155,7 +2161,7 @@ impl ServerConfigManager {
         if let Some(a) = auth_method {
             config.auth_method = a;
         }
-        
+
         self.servers.insert(key, config);
         self.save()
     }
@@ -2175,7 +2181,7 @@ impl ServerConfigManager {
     fn hash_path(path: &Path) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
         format!("{:016x}", hasher.finish())

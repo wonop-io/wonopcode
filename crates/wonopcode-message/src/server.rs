@@ -167,10 +167,7 @@ pub enum ServerPayload {
     },
 
     /// Permission request was resolved (broadcast to dismiss dialogs on all clients).
-    PermissionResolved {
-        request_id: String,
-        allowed: bool,
-    },
+    PermissionResolved { request_id: String, allowed: bool },
 
     /// Full state synchronization.
     State(Box<AgentState>),
@@ -221,50 +218,38 @@ pub enum ServerPayload {
         workstream_count: usize,
         uptime_secs: u64,
     },
-    
+
     // === Agent Control Updates ===
     /// Model changed successfully.
-    ModelChanged {
-        model: String,
-    },
-    
+    ModelChanged { model: String },
+
     /// Sandbox started successfully.
-    SandboxStarted {
-        container_id: String,
-    },
-    
+    SandboxStarted { container_id: String },
+
     /// Sandbox stopped successfully.
     SandboxStopped,
-    
+
     /// Sandbox restarted successfully.
-    SandboxRestarted {
-        container_id: String,
-    },
-    
+    SandboxRestarted { container_id: String },
+
     /// Sandbox error occurred.
-    SandboxError {
-        message: String,
-    },
-    
+    SandboxError { message: String },
+
     /// Agent stopped successfully.
     AgentStopped,
-    
+
     /// Session statistics update.
     SessionStats {
         total_cost: f64,
         tokens_in: u64,
         tokens_out: u64,
     },
-    
+
     /// Available models list.
-    AvailableModels {
-        models: Vec<ModelInfoSummary>,
-    },
-    
+    AvailableModels { models: Vec<ModelInfoSummary> },
+
     /// Allow-all mode changed.
-    AllowAllChanged {
-        enabled: bool,
-    },
+    AllowAllChanged { enabled: bool },
 }
 
 /// Simplified model info for transmission

@@ -39,31 +39,30 @@ pub trait Backend: Send + Sync {
 
     /// Get the backend type name (for display).
     fn backend_type(&self) -> &'static str;
-    
+
     /// Convenience method: Change the AI model
     async fn change_model(&self, model_id: String) -> BackendResult<()> {
         self.send_action(AppAction::ChangeModel(model_id)).await
     }
-    
+
     /// Convenience method: Start the sandbox (Docker)
-    /// 
+    ///
     /// This sends a start command and waits for the sandbox to report running status.
     /// Returns the container ID once available, or an error if start fails or times out.
     async fn start_sandbox(&self) -> BackendResult<String>;
 
-    
     /// Convenience method: Stop the sandbox (Docker)
     async fn stop_sandbox(&self) -> BackendResult<()> {
         self.send_action(AppAction::SandboxStop).await
     }
-    
+
     /// Convenience method: Restart the sandbox (Docker)
     async fn restart_sandbox(&self) -> BackendResult<String> {
         self.send_action(AppAction::SandboxRestart).await?;
         // TODO: Return actual container ID from backend response
         Ok("sandbox-container".to_string())
     }
-    
+
     /// Convenience method: Stop the agent
     async fn stop_agent(&self) -> BackendResult<()> {
         self.send_action(AppAction::Quit).await
@@ -84,7 +83,10 @@ impl LocalBackend {
         action_tx: mpsc::UnboundedSender<AppAction>,
         update_rx: tokio::sync::broadcast::Sender<AppUpdate>,
     ) -> Self {
-        Self { action_tx, update_rx }
+        Self {
+            action_tx,
+            update_rx,
+        }
     }
 }
 
@@ -107,11 +109,11 @@ impl Backend for LocalBackend {
     async fn start_sandbox(&self) -> BackendResult<String> {
         // Send the start action
         self.send_action(AppAction::SandboxStart).await?;
-        
+
         // Subscribe to updates to wait for the sandbox to start
         let mut rx = self.update_rx.subscribe();
         let timeout = tokio::time::Duration::from_secs(30);
-        
+
         match tokio::time::timeout(timeout, async {
             loop {
                 match rx.recv().await {
@@ -122,24 +124,25 @@ impl Backend for LocalBackend {
                                     return Ok(container_id);
                                 } else {
                                     return Err(BackendError::RequestFailed(
-                                        "Sandbox started but no container ID received".to_string()
+                                        "Sandbox started but no container ID received".to_string(),
                                     ));
                                 }
                             }
                             "error" => {
                                 return Err(BackendError::RequestFailed(
-                                    info.error.unwrap_or_else(|| "Unknown error".to_string())
+                                    info.error.unwrap_or_else(|| "Unknown error".to_string()),
                                 ));
                             }
-                            _ => continue,  // Keep waiting for "running" or "error"
+                            _ => continue, // Keep waiting for "running" or "error"
                         }
                     }
                     Err(e) => {
-                        return Err(BackendError::RequestFailed(
-                            format!("Failed to receive sandbox update: {}", e)
-                        ));
+                        return Err(BackendError::RequestFailed(format!(
+                            "Failed to receive sandbox update: {}",
+                            e
+                        )));
                     }
-                    _ => continue,  // Ignore other update types
+                    _ => continue, // Ignore other update types
                 }
             }
         })
@@ -147,22 +150,22 @@ impl Backend for LocalBackend {
         {
             Ok(result) => result,
             Err(_) => Err(BackendError::RequestFailed(
-                "Timeout waiting for sandbox to start".to_string()
+                "Timeout waiting for sandbox to start".to_string(),
             )),
         }
     }
-    
+
     async fn stop_sandbox(&self) -> BackendResult<()> {
         // Send the stop action
         self.send_action(AppAction::SandboxStop).await?;
-        
+
         // Subscribe to updates to wait for the sandbox to stop
         // This is CRITICAL for multi-workstream setups - we must wait for the
         // sandbox to fully stop and the PermissionManager to be cleared before
         // switching to another workstream, otherwise MCP tools will use stale runtime.
         let mut rx = self.update_rx.subscribe();
         let timeout = tokio::time::Duration::from_secs(10);
-        
+
         match tokio::time::timeout(timeout, async {
             loop {
                 match rx.recv().await {
@@ -175,15 +178,16 @@ impl Backend for LocalBackend {
                                 // Even on error, consider it stopped
                                 return Ok(());
                             }
-                            _ => continue,  // Keep waiting for "stopped" or "error"
+                            _ => continue, // Keep waiting for "stopped" or "error"
                         }
                     }
                     Err(e) => {
-                        return Err(BackendError::RequestFailed(
-                            format!("Failed to receive sandbox update: {}", e)
-                        ));
+                        return Err(BackendError::RequestFailed(format!(
+                            "Failed to receive sandbox update: {}",
+                            e
+                        )));
                     }
-                    _ => continue,  // Ignore other update types
+                    _ => continue, // Ignore other update types
                 }
             }
         })

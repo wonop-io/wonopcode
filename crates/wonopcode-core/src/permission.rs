@@ -517,7 +517,7 @@ impl PermissionManager {
             remember = remember,
             "PermissionManager::respond called"
         );
-        
+
         // Remove the pending request and get its info
         let pending_req = {
             let mut pending = self.pending.write().await;

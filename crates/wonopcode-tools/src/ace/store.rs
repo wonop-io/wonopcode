@@ -56,6 +56,7 @@ impl ArtifactStore {
     }
 
     /// Create a new artifact.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_artifact(
         &self,
         state: &mut WorkstreamState,
@@ -71,12 +72,7 @@ impl ArtifactStore {
 
         // Generate ID
         let seq = state.next_sequence(artifact_type.directory());
-        let id = format!(
-            "{}-{}-{:03}",
-            artifact_type.prefix(),
-            state.ticket_id,
-            seq
-        );
+        let id = format!("{}-{}-{:03}", artifact_type.prefix(), state.ticket_id, seq);
 
         // Create metadata
         let now = Utc::now();
@@ -220,7 +216,10 @@ impl ArtifactStore {
         let file_content = format_artifact(&metadata, &artifact.title, &artifact.content);
         std::fs::write(&artifact.path, &file_content)?;
 
-        Ok(Artifact { metadata, ..artifact })
+        Ok(Artifact {
+            metadata,
+            ..artifact
+        })
     }
 
     /// Update an artifact's content.
@@ -303,9 +302,7 @@ impl ArtifactStore {
             // Collect IDs first to avoid borrow issues
             let ids: Vec<String> = std::fs::read_dir(&staging_dir)?
                 .filter_map(|entry| entry.ok())
-                .filter(|entry| {
-                    entry.path().extension().map(|e| e == "md").unwrap_or(false)
-                })
+                .filter(|entry| entry.path().extension().map(|e| e == "md").unwrap_or(false))
                 .filter_map(|entry| {
                     let filename = entry.path().file_stem()?.to_string_lossy().to_string();
                     // Extract ID (first part before the title)
@@ -315,13 +312,15 @@ impl ArtifactStore {
                         Some(filename.split('-').take(3).collect::<Vec<_>>().join("-"))
                     } else {
                         // Full ID might be different format, try parsing from file
-                        self.parse_artifact_file(&entry.path()).ok().map(|a| a.metadata.id)
+                        self.parse_artifact_file(&entry.path())
+                            .ok()
+                            .map(|a| a.metadata.id)
                     }
                 })
                 .collect();
 
             for id in ids {
-                if let Ok(_) = self.promote_artifact(&id) {
+                if self.promote_artifact(&id).is_ok() {
                     count += 1;
                 }
             }
@@ -332,7 +331,10 @@ impl ArtifactStore {
 
     /// Check if an artifact is in staging.
     pub fn is_staged(&self, artifact: &Artifact) -> bool {
-        artifact.path.to_string_lossy().contains("/workspace/staging/")
+        artifact
+            .path
+            .to_string_lossy()
+            .contains("/workspace/staging/")
     }
 
     /// Validate that parents are valid for the given artifact type.
@@ -383,7 +385,10 @@ impl ArtifactStore {
         // Split frontmatter and content
         let parts: Vec<&str> = content.splitn(3, "---").collect();
         if parts.len() < 3 {
-            bail!("Invalid artifact format: missing frontmatter in {}", path.display());
+            bail!(
+                "Invalid artifact format: missing frontmatter in {}",
+                path.display()
+            );
         }
 
         let frontmatter = parts[1].trim();
@@ -465,7 +470,7 @@ mod tests {
 
     #[test]
     fn test_create_use_case() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         let artifact = store
@@ -492,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_create_requirement_with_parent() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         // First create a use case
@@ -527,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_create_requirement_without_parent_fails() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         let result = store.create_artifact(
@@ -549,7 +554,7 @@ mod tests {
 
     #[test]
     fn test_read_artifact() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         let created = store
@@ -573,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_list_artifacts() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         store
@@ -606,7 +611,7 @@ mod tests {
 
     #[test]
     fn test_update_progress() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         let created = store
@@ -630,16 +635,13 @@ mod tests {
         assert_eq!(updated.metadata.progress, Progress::InProgress);
 
         // Verify persisted
-        let read = store
-            .read_artifact(&created.metadata.id)
-            .unwrap()
-            .unwrap();
+        let read = store.read_artifact(&created.metadata.id).unwrap().unwrap();
         assert_eq!(read.metadata.progress, Progress::InProgress);
     }
 
     #[test]
     fn test_staging() {
-        let (dir, store) = create_test_store();
+        let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
         let artifact = store

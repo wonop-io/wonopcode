@@ -186,10 +186,15 @@ fn parse_worktree_list(output: &str, repo_root: &Path) -> Vec<PassiveWorkstream>
 /// Check if a git branch exists in the repository.
 fn branch_exists(repo_root: &Path, branch_name: &str) -> bool {
     let output = Command::new("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch_name)])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{}", branch_name),
+        ])
         .current_dir(repo_root)
         .output();
-    
+
     match output {
         Ok(output) => output.status.success(),
         Err(_) => false,
@@ -229,7 +234,7 @@ pub async fn create_worktree(
 
     // Check if branch already exists (e.g., from a previously closed worktree)
     let branch_already_exists = branch_exists(repo_root, branch_name);
-    
+
     let output = if branch_already_exists {
         // Branch exists - reuse it by creating worktree without -b flag
         info!(branch = %branch_name, "Branch already exists, reusing for worktree");

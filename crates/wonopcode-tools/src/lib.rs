@@ -53,14 +53,9 @@ pub enum ToolEvent {
     /// Todo list was updated with new phased structure (legacy, for backward compatibility).
     TodosUpdated(todo::PhasedTodos),
     /// An artifact was created.
-    ArtifactCreated {
-        id: String,
-        artifact_type: String,
-    },
+    ArtifactCreated { id: String, artifact_type: String },
     /// An artifact was updated.
-    ArtifactUpdated {
-        id: String,
-    },
+    ArtifactUpdated { id: String },
     /// A task's status changed.
     TaskStatusChanged {
         id: String,
@@ -68,13 +63,9 @@ pub enum ToolEvent {
         new_status: String,
     },
     /// A workflow phase was completed.
-    PhaseCompleted {
-        phase: String,
-    },
+    PhaseCompleted { phase: String },
     /// A checkpoint review was requested.
-    CheckpointRequested {
-        checkpoint: String,
-    },
+    CheckpointRequested { checkpoint: String },
     /// The workflow is complete.
     WorkflowComplete,
 }
@@ -285,6 +276,7 @@ mod tests {
             content: "Test".to_string(),
             status: todo::TodoStatus::Pending,
             priority: todo::TodoPriority::High,
+            parents: vec![],
         });
         phased.add_phase(phase);
 
@@ -308,8 +300,9 @@ mod tests {
             id: "UC-WON-123-001".to_string(),
             artifact_type: "use-case".to_string(),
         };
-        let cloned1 = event1.clone();
-        if let ToolEvent::ArtifactCreated { id, artifact_type } = cloned1 {
+        // Clone to test Clone derive works, then verify original
+        let _cloned1 = event1.clone();
+        if let ToolEvent::ArtifactCreated { id, artifact_type } = event1 {
             assert_eq!(id, "UC-WON-123-001");
             assert_eq!(artifact_type, "use-case");
         }
@@ -319,8 +312,14 @@ mod tests {
             old_status: "backlog".to_string(),
             new_status: "in_progress".to_string(),
         };
-        let cloned2 = event2.clone();
-        if let ToolEvent::TaskStatusChanged { id, old_status, new_status } = cloned2 {
+        // Clone to test Clone derive works, then verify original
+        let _cloned2 = event2.clone();
+        if let ToolEvent::TaskStatusChanged {
+            id,
+            old_status,
+            new_status,
+        } = event2
+        {
             assert_eq!(id, "TASK-WON-123-001");
             assert_eq!(old_status, "backlog");
             assert_eq!(new_status, "in_progress");

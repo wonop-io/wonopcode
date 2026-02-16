@@ -911,21 +911,22 @@ async fn session_todo(State(state): State<AppState>, Path(_id): Path<String>) ->
     // Get todos from the shared server state
     // The todo store is held by the server and updated by the prompt runner
     // Falls back to file-based storage if shared store is empty (for REST API mode)
-    
+
     // Get phased todos from file storage
     let instance = state.instance.read().await;
     let root_dir = instance.directory();
-    
+
     // Try to use SharedFileTodoStore first (respects WONOPCODE_TODO_FILE env var)
     // This ensures we read from the same location where MCP todowrite writes
-    let phased_todos = if let Some(shared_store) = wonopcode_tools::todo::SharedFileTodoStore::from_env() {
-        wonopcode_tools::todo::get_phased_todos(&shared_store, root_dir)
-    } else {
-        // Fallback to FileTodoStore (reads from .wonopcode/todos.json)
-        let store = wonopcode_tools::todo::FileTodoStore::new();
-        wonopcode_tools::todo::get_phased_todos(&store, root_dir)
-    };
-    
+    let phased_todos =
+        if let Some(shared_store) = wonopcode_tools::todo::SharedFileTodoStore::from_env() {
+            wonopcode_tools::todo::get_phased_todos(&shared_store, root_dir)
+        } else {
+            // Fallback to FileTodoStore (reads from .wonopcode/todos.json)
+            let store = wonopcode_tools::todo::FileTodoStore::new();
+            wonopcode_tools::todo::get_phased_todos(&store, root_dir)
+        };
+
     // Convert phased todos to JSON
     let phases_json: Vec<serde_json::Value> = phased_todos
         .phases
@@ -945,7 +946,7 @@ async fn session_todo(State(state): State<AppState>, Path(_id): Path<String>) ->
                     })
                 })
                 .collect();
-            
+
             let status = phase.status();
             serde_json::json!({
                 "id": phase.id,

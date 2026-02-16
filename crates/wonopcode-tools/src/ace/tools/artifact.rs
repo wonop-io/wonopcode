@@ -86,14 +86,14 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
         let args: CreateArtifactArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
-        let artifact_type = ArtifactType::from_str(&args.artifact_type).ok_or_else(|| {
+        let artifact_type = ArtifactType::parse(&args.artifact_type).ok_or_else(|| {
             ToolError::validation(format!("Invalid artifact type: {}", args.artifact_type))
         })?;
 
         let priority = args
             .priority
             .as_deref()
-            .and_then(Priority::from_str)
+            .and_then(Priority::parse)
             .unwrap_or(Priority::Medium);
 
         // Load state (managed by Wonop Code Desktop, not by the agent)
@@ -110,9 +110,9 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
-        store
-            .ensure_directories()
-            .map_err(|e| ToolError::execution_failed(format!("Failed to create directories: {e}")))?;
+        store.ensure_directories().map_err(|e| {
+            ToolError::execution_failed(format!("Failed to create directories: {e}"))
+        })?;
 
         let staging = args.staging.unwrap_or(true);
         let artifact = store
@@ -135,7 +135,10 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
         let location = if staging { "staging" } else { "specs" };
 
         Ok(ToolOutput::new(
-            format!("Created {} artifact: {}", args.artifact_type, artifact.metadata.id),
+            format!(
+                "Created {} artifact: {}",
+                args.artifact_type, artifact.metadata.id
+            ),
             format!(
                 "Created {} artifact:\n\n\
                  - **ID:** {}\n\
@@ -205,7 +208,9 @@ impl Tool for AceReadArtifactTool {
         let artifact = store
             .read_artifact(&args.id)
             .map_err(|e| ToolError::execution_failed(format!("Failed to read artifact: {e}")))?
-            .ok_or_else(|| ToolError::execution_failed(format!("Artifact not found: {}", args.id)))?;
+            .ok_or_else(|| {
+                ToolError::execution_failed(format!("Artifact not found: {}", args.id))
+            })?;
 
         let output = format!(
             "---\n\

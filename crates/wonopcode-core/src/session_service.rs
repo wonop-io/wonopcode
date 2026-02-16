@@ -131,10 +131,8 @@ impl SessionService {
             Ok(sessions) => {
                 // Filter sessions to only those matching this workstream's directory
                 // Sessions are already sorted by ID descending (newest first)
-                let matching_session = sessions
-                    .into_iter()
-                    .find(|s| s.directory == cwd);
-                
+                let matching_session = sessions.into_iter().find(|s| s.directory == cwd);
+
                 if let Some(session) = matching_session {
                     {
                         let mut current = service.current_session.write().await;

@@ -28,12 +28,14 @@ mod tests {
                 content: "First task".to_string(),
                 status: TodoStatus::Pending,
                 priority: TodoPriority::High,
+                parents: vec![],
             },
             TodoItem {
                 id: "2".to_string(),
                 content: "Second task".to_string(),
                 status: TodoStatus::InProgress,
                 priority: TodoPriority::Medium,
+                parents: vec![],
             },
         ];
 
@@ -61,6 +63,7 @@ mod tests {
                 content: "Task".to_string(),
                 status: TodoStatus::Pending,
                 priority: TodoPriority::Low,
+                parents: vec![],
             });
         }
 
@@ -86,6 +89,7 @@ mod tests {
                 content: "Task".to_string(),
                 status: TodoStatus::Completed,
                 priority: TodoPriority::Medium,
+                parents: vec![],
             });
         }
 
@@ -106,6 +110,7 @@ mod tests {
             content: "First".to_string(),
             status: TodoStatus::Pending,
             priority: TodoPriority::High,
+            parents: vec![],
         }];
 
         let todos2 = vec![
@@ -114,12 +119,14 @@ mod tests {
                 content: "Second".to_string(),
                 status: TodoStatus::Pending,
                 priority: TodoPriority::Low,
+                parents: vec![],
             },
             TodoItem {
                 id: "3".to_string(),
                 content: "Third".to_string(),
                 status: TodoStatus::Completed,
                 priority: TodoPriority::Medium,
+                parents: vec![],
             },
         ];
 
@@ -155,6 +162,7 @@ mod tests {
                         content: format!("Task A{}", i),
                         status: TodoStatus::Pending,
                         priority: TodoPriority::High,
+                        parents: vec![],
                     });
                 }
             }
@@ -170,6 +178,7 @@ mod tests {
                         content: format!("Task B{}", i),
                         status: TodoStatus::InProgress,
                         priority: TodoPriority::Medium,
+                        parents: vec![],
                     });
                 }
             }

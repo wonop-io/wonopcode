@@ -141,21 +141,14 @@ pub fn convert_assistant_message(
     for content in &provider_msg.content {
         match content {
             ContentPart::Text { text } => {
-                let mut part = MessagePart::Text(TextPart::new(
-                    &ctx.session_id,
-                    &message_id,
-                    text,
-                ));
+                let mut part = MessagePart::Text(TextPart::new(&ctx.session_id, &message_id, text));
                 part.set_order(order);
                 order += 1;
                 parts.push(part);
             }
             ContentPart::Thinking { text } => {
-                let mut part = MessagePart::Reasoning(ReasoningPart::new(
-                    &ctx.session_id,
-                    &message_id,
-                    text,
-                ));
+                let mut part =
+                    MessagePart::Reasoning(ReasoningPart::new(&ctx.session_id, &message_id, text));
                 part.set_order(order);
                 order += 1;
                 parts.push(part);

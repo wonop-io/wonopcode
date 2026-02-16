@@ -145,9 +145,7 @@ pub enum ClientPayload {
 
     /// Enable "allow all" mode - allow all tool executions without prompting.
     /// Also responds to the current pending permission request.
-    EnableAllowAll {
-        request_id: String,
-    },
+    EnableAllowAll { request_id: String },
 
     // === Workstream Actions (Pro Edition) ===
     /// List all available workstreams.
@@ -186,7 +184,7 @@ pub enum ClientPayload {
 
     /// Request to quit (for graceful shutdown).
     Quit,
-    
+
     /// Request list of available models.
     GetAvailableModels,
 }

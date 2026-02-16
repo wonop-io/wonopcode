@@ -88,9 +88,7 @@ pub enum Action {
     },
 
     /// Enable "allow all" mode - allow all tool executions without prompting.
-    EnableAllowAll {
-        request_id: String,
-    },
+    EnableAllowAll { request_id: String },
 
     /// Update test provider settings.
     UpdateTestProviderSettings {

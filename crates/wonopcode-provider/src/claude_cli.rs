@@ -69,7 +69,9 @@ static CLAUDE_CLI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 pub fn clear_claude_cli_cache() {
     // Note: OnceLock doesn't have a clear method, so we can't actually clear it.
     // The cache will persist until the process restarts.
-    warn!("Claude CLI path cache cannot be cleared at runtime - restart the process for new settings");
+    warn!(
+        "Claude CLI path cache cannot be cleared at runtime - restart the process for new settings"
+    );
 }
 
 /// Build an enhanced PATH that includes common Node.js installation locations.
@@ -77,33 +79,33 @@ pub fn clear_claude_cli_cache() {
 /// The Claude CLI uses #!/usr/bin/env node, so node must be in PATH.
 pub fn build_enhanced_path() -> String {
     let mut paths: Vec<String> = Vec::new();
-    
+
     // Add common Node.js/npm locations
     paths.push("/opt/homebrew/bin".to_string()); // Homebrew on Apple Silicon
-    paths.push("/usr/local/bin".to_string());    // Homebrew on Intel / system
-    
+    paths.push("/usr/local/bin".to_string()); // Homebrew on Intel / system
+
     // Add user's local bin
     if let Some(home) = dirs::home_dir() {
         paths.push(home.join(".local/bin").to_string_lossy().to_string());
         paths.push(home.join(".npm-global/bin").to_string_lossy().to_string());
-        
+
         // nvm - check for current version symlink first
         let nvm_current = home.join(".nvm/current/bin");
         if nvm_current.exists() {
             paths.push(nvm_current.to_string_lossy().to_string());
         }
     }
-    
+
     // Add existing PATH
     if let Ok(existing_path) = std::env::var("PATH") {
         paths.push(existing_path);
     }
-    
+
     #[cfg(unix)]
     let separator = ":";
     #[cfg(windows)]
     let separator = ";";
-    
+
     paths.join(separator)
 }
 
@@ -122,23 +124,23 @@ fn find_claude_cli() -> Option<PathBuf> {
     CLAUDE_CLI_PATH
         .get_or_init(|| {
             debug!("Searching for Claude CLI...");
-            
+
             // Build enhanced PATH to ensure Node.js is available
             // Claude CLI uses #!/usr/bin/env node, so node must be in PATH
             let enhanced_path = build_enhanced_path();
-            
+
             // 0. Check custom path from environment variable first
             // This is set by the desktop app from user settings at startup
             if let Ok(custom_path) = std::env::var("WONOPCODE_CLAUDE_CLI_PATH") {
                 if !custom_path.is_empty() {
                     let path = PathBuf::from(&custom_path);
                     debug!(path = %path.display(), "Checking custom Claude CLI path from WONOPCODE_CLAUDE_CLI_PATH");
-                    
+
                     if path.exists() {
                         let mut cmd = Command::new(&path);
                         cmd.arg("--version");
                         cmd.env("PATH", &enhanced_path);
-                        
+
                         match cmd.output() {
                             Ok(output) if output.status.success() => {
                                 debug!(path = %path.display(), "Using custom Claude CLI path");
@@ -161,12 +163,12 @@ fn find_claude_cli() -> Option<PathBuf> {
                     }
                 }
             }
-            
+
             // 1. Try standard PATH lookup first (with enhanced PATH)
             let mut cmd = Command::new("claude");
             cmd.arg("--version");
             cmd.env("PATH", &enhanced_path);
-            
+
             match cmd.output() {
                 Ok(output) if output.status.success() => {
                     debug!("Found claude in PATH");
@@ -198,11 +200,11 @@ fn find_claude_cli() -> Option<PathBuf> {
 
             let home = dirs::home_dir();
             debug!(home_dir = ?home, "Checking common installation locations");
-            
+
             for path_str in common_paths {
-                let path = if path_str.starts_with("~/") {
+                let path = if let Some(stripped) = path_str.strip_prefix("~/") {
                     if let Some(ref h) = home {
-                        h.join(&path_str[2..])
+                        h.join(stripped)
                     } else {
                         continue;
                     }
@@ -211,13 +213,13 @@ fn find_claude_cli() -> Option<PathBuf> {
                 };
 
                 debug!(path = %path.display(), exists = path.exists(), "Checking location");
-                
+
                 if path.exists() {
                     // Verify it actually works (with enhanced PATH for Node.js)
                     let mut cmd = Command::new(&path);
                     cmd.arg("--version");
                     cmd.env("PATH", &enhanced_path);
-                    
+
                     match cmd.output() {
                         Ok(output) if output.status.success() => {
                             debug!(path = %path.display(), "Found Claude CLI at non-PATH location");
@@ -524,7 +526,7 @@ impl ClaudeCliProvider {
             debug!("Claude CLI not found for auth check");
             return false;
         };
-        
+
         let output = cmd
             .args(["-p", "hi", "--output-format", "json"])
             .output()

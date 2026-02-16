@@ -40,7 +40,7 @@ impl ArtifactType {
     }
 
     /// Parse artifact type from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "use-case" | "usecase" | "uc" => Some(ArtifactType::UseCase),
             "requirement" | "req" => Some(ArtifactType::Requirement),
@@ -119,7 +119,7 @@ impl Progress {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "backlog" => Some(Progress::Backlog),
             "in_progress" => Some(Progress::InProgress),
@@ -178,7 +178,7 @@ impl Priority {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "high" => Some(Priority::High),
             "medium" => Some(Priority::Medium),
@@ -221,7 +221,7 @@ impl WorkflowPhase {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "requirements" => Some(WorkflowPhase::Requirements),
             "analysis" => Some(WorkflowPhase::Analysis),
@@ -333,12 +333,18 @@ mod tests {
 
     #[test]
     fn test_artifact_type_from_str() {
-        assert_eq!(ArtifactType::from_str("use-case"), Some(ArtifactType::UseCase));
-        assert_eq!(ArtifactType::from_str("requirement"), Some(ArtifactType::Requirement));
-        assert_eq!(ArtifactType::from_str("design"), Some(ArtifactType::Design));
-        assert_eq!(ArtifactType::from_str("test-case"), Some(ArtifactType::TestCase));
-        assert_eq!(ArtifactType::from_str("task"), Some(ArtifactType::Task));
-        assert_eq!(ArtifactType::from_str("invalid"), None);
+        assert_eq!(ArtifactType::parse("use-case"), Some(ArtifactType::UseCase));
+        assert_eq!(
+            ArtifactType::parse("requirement"),
+            Some(ArtifactType::Requirement)
+        );
+        assert_eq!(ArtifactType::parse("design"), Some(ArtifactType::Design));
+        assert_eq!(
+            ArtifactType::parse("test-case"),
+            Some(ArtifactType::TestCase)
+        );
+        assert_eq!(ArtifactType::parse("task"), Some(ArtifactType::Task));
+        assert_eq!(ArtifactType::parse("invalid"), None);
     }
 
     #[test]
@@ -353,12 +359,25 @@ mod tests {
     #[test]
     fn test_artifact_type_valid_parents() {
         assert!(ArtifactType::UseCase.valid_parent_types().is_empty());
-        assert_eq!(ArtifactType::Requirement.valid_parent_types(), &[ArtifactType::UseCase]);
-        assert_eq!(ArtifactType::Design.valid_parent_types(), &[ArtifactType::Requirement]);
-        assert_eq!(ArtifactType::TestCase.valid_parent_types(), &[ArtifactType::Requirement]);
+        assert_eq!(
+            ArtifactType::Requirement.valid_parent_types(),
+            &[ArtifactType::UseCase]
+        );
+        assert_eq!(
+            ArtifactType::Design.valid_parent_types(),
+            &[ArtifactType::Requirement]
+        );
+        assert_eq!(
+            ArtifactType::TestCase.valid_parent_types(),
+            &[ArtifactType::Requirement]
+        );
         assert_eq!(
             ArtifactType::Task.valid_parent_types(),
-            &[ArtifactType::Requirement, ArtifactType::Design, ArtifactType::TestCase]
+            &[
+                ArtifactType::Requirement,
+                ArtifactType::Design,
+                ArtifactType::TestCase
+            ]
         );
     }
 
@@ -373,11 +392,23 @@ mod tests {
 
     #[test]
     fn test_workflow_phase_next() {
-        assert_eq!(WorkflowPhase::Requirements.next(), Some(WorkflowPhase::Analysis));
+        assert_eq!(
+            WorkflowPhase::Requirements.next(),
+            Some(WorkflowPhase::Analysis)
+        );
         assert_eq!(WorkflowPhase::Analysis.next(), Some(WorkflowPhase::Design));
-        assert_eq!(WorkflowPhase::Design.next(), Some(WorkflowPhase::Implementation));
-        assert_eq!(WorkflowPhase::Implementation.next(), Some(WorkflowPhase::Verification));
-        assert_eq!(WorkflowPhase::Verification.next(), Some(WorkflowPhase::Deployment));
+        assert_eq!(
+            WorkflowPhase::Design.next(),
+            Some(WorkflowPhase::Implementation)
+        );
+        assert_eq!(
+            WorkflowPhase::Implementation.next(),
+            Some(WorkflowPhase::Verification)
+        );
+        assert_eq!(
+            WorkflowPhase::Verification.next(),
+            Some(WorkflowPhase::Deployment)
+        );
         assert_eq!(WorkflowPhase::Deployment.next(), None);
     }
 }

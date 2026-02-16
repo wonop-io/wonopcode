@@ -22,6 +22,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_default_permission_timeout_is_reasonable() {
         // Should be at least 1 day
         assert!(DEFAULT_PERMISSION_TIMEOUT_SECS >= 86400);

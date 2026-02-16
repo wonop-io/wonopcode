@@ -174,8 +174,10 @@ impl WorkstreamState {
     /// - `bugfix-PROJ-42--fix-thing` → `PROJ-42`
     fn extract_ticket_id(dir_name: &str) -> Option<String> {
         // Common prefixes to strip
-        let prefixes = ["feature-", "feature/", "bugfix-", "bugfix/", "fix-", "fix/", "hotfix-", "hotfix/"];
-        
+        let prefixes = [
+            "feature-", "feature/", "bugfix-", "bugfix/", "fix-", "fix/", "hotfix-", "hotfix/",
+        ];
+
         let mut name = dir_name;
         for prefix in &prefixes {
             if let Some(stripped) = name.strip_prefix(prefix) {
@@ -188,9 +190,7 @@ impl WorkstreamState {
         // The pattern is: letters/numbers, dash, numbers, optionally followed by -- or -
         use std::sync::OnceLock;
         static RE: OnceLock<regex::Regex> = OnceLock::new();
-        let re = RE.get_or_init(|| {
-            regex::Regex::new(r"^([A-Za-z0-9]+-\d+)").unwrap()
-        });
+        let re = RE.get_or_init(|| regex::Regex::new(r"^([A-Za-z0-9]+-\d+)").unwrap());
 
         re.captures(name)
             .and_then(|c| c.get(1))
@@ -315,12 +315,7 @@ mod tests {
         assert_eq!(state.sequences.use_case, 0);
 
         // Requirements should be in_progress
-        let req_status = state
-            .workflow
-            .phases
-            .get("requirements")
-            .unwrap()
-            .status;
+        let req_status = state.workflow.phases.get("requirements").unwrap().status;
         assert_eq!(req_status, PhaseStatus::InProgress);
 
         // Other phases should be pending
@@ -370,7 +365,7 @@ mod tests {
             WorkstreamState::extract_ticket_id("feature-WON-125--test-calculator"),
             Some("WON-125".to_string())
         );
-        
+
         // With slash prefix
         assert_eq!(
             WorkstreamState::extract_ticket_id("feature/won-42--description"),
@@ -396,10 +391,7 @@ mod tests {
         );
 
         // Just numbers (not a valid ticket)
-        assert_eq!(
-            WorkstreamState::extract_ticket_id("feature-123"),
-            None
-        );
+        assert_eq!(WorkstreamState::extract_ticket_id("feature-123"), None);
     }
 
     #[test]
@@ -415,16 +407,10 @@ mod tests {
         );
 
         // No description after --
-        assert_eq!(
-            WorkstreamState::extract_title("feature-WON-125--"),
-            None
-        );
+        assert_eq!(WorkstreamState::extract_title("feature-WON-125--"), None);
 
         // No -- separator
-        assert_eq!(
-            WorkstreamState::extract_title("feature-WON-125"),
-            None
-        );
+        assert_eq!(WorkstreamState::extract_title("feature-WON-125"), None);
     }
 
     #[test]

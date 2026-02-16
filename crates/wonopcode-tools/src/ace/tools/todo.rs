@@ -74,11 +74,20 @@ fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore) {
     if let Some(ref event_tx) = ctx.event_tx {
         tracing::info!("emit_todos_updated: event_tx is available, reading tasks...");
         if let Ok(tasks) = store.list_artifacts(ArtifactType::Task) {
-            tracing::info!("emit_todos_updated: found {} tasks, building phased todos", tasks.len());
+            tracing::info!(
+                "emit_todos_updated: found {} tasks, building phased todos",
+                tasks.len()
+            );
             let phased_todos = build_phased_todos_from_tasks(&tasks);
-            tracing::info!("emit_todos_updated: built {} phases", phased_todos.phases.len());
+            tracing::info!(
+                "emit_todos_updated: built {} phases",
+                phased_todos.phases.len()
+            );
             if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(phased_todos)) {
-                tracing::warn!("emit_todos_updated: Failed to send TodosUpdated event: {}", e);
+                tracing::warn!(
+                    "emit_todos_updated: Failed to send TodosUpdated event: {}",
+                    e
+                );
             } else {
                 tracing::info!("emit_todos_updated: Successfully sent TodosUpdated event");
             }
@@ -147,7 +156,9 @@ impl Tool for AceTodoReadTool {
             output.push_str(&format!("## Phase: {}\n\n", state.workflow.current_phase));
             output.push_str("No tasks found for this workstream.\n\n");
             output.push_str("Create tasks with:\n");
-            output.push_str("```\nace_todo_write(tasks=[{content: \"...\", parent: \"REQ-...\"}])\n```");
+            output.push_str(
+                "```\nace_todo_write(tasks=[{content: \"...\", parent: \"REQ-...\"}])\n```",
+            );
 
             return Ok(ToolOutput::new("No tasks", output));
         }
@@ -200,10 +211,8 @@ impl Tool for AceTodoReadTool {
                         priority_char, task.title, task.metadata.id,
                     ));
                     if !task.metadata.parents.is_empty() {
-                        output.push_str(&format!(
-                            "  Parent: {}\n",
-                            task.metadata.parents.join(", ")
-                        ));
+                        output
+                            .push_str(&format!("  Parent: {}\n", task.metadata.parents.join(", ")));
                     }
                 }
             }
@@ -287,7 +296,7 @@ Use 'parked' or 'done' on the current active task first."#
         let args: TodoUpdateArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
-        let progress = Progress::from_str(&args.status)
+        let progress = Progress::parse(&args.status)
             .ok_or_else(|| ToolError::validation(format!("Invalid status: {}", args.status)))?;
 
         let store = ArtifactStore::new(&ctx.root_dir)
@@ -296,10 +305,12 @@ Use 'parked' or 'done' on the current active task first."#
         // Load state (managed by Wonop Code Desktop, not by the agent)
         let mut state = WorkstreamState::load(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| ToolError::execution_failed(
-                "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                 Tell the user to open Wonop Code Desktop and initialize this worktree first."
-            ))?;
+            .ok_or_else(|| {
+                ToolError::execution_failed(
+                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
+                 Tell the user to open Wonop Code Desktop and initialize this worktree first.",
+                )
+            })?;
 
         // Get old status for event
         let old_artifact = store
@@ -356,7 +367,10 @@ Use 'parked' or 'done' on the current active task first."#
         } else if state.active_task.is_none() {
             "\n\n**No active task.** Use `ace_todo_update(node_id=\"...\", status=\"in_progress\")` to start one.".to_string()
         } else {
-            format!("\n\n**Active task:** `{}`", state.active_task.unwrap_or_default())
+            format!(
+                "\n\n**Active task:** `{}`",
+                state.active_task.unwrap_or_default()
+            )
         };
 
         Ok(ToolOutput::new(
@@ -463,16 +477,18 @@ Example:
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
-        store
-            .ensure_directories()
-            .map_err(|e| ToolError::execution_failed(format!("Failed to create directories: {e}")))?;
+        store.ensure_directories().map_err(|e| {
+            ToolError::execution_failed(format!("Failed to create directories: {e}"))
+        })?;
 
         let mut state = WorkstreamState::load(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| ToolError::execution_failed(
-                "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                 Tell the user to open Wonop Code Desktop and initialize this worktree first."
-            ))?;
+            .ok_or_else(|| {
+                ToolError::execution_failed(
+                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
+                 Tell the user to open Wonop Code Desktop and initialize this worktree first.",
+                )
+            })?;
 
         let mut created_ids = Vec::new();
 
@@ -487,7 +503,7 @@ Example:
             let priority = task_input
                 .priority
                 .as_deref()
-                .and_then(Priority::from_str)
+                .and_then(Priority::parse)
                 .unwrap_or(Priority::Medium);
 
             let artifact = store
@@ -538,13 +554,13 @@ Example:
                 .join("\n")
         );
 
-        Ok(ToolOutput::new(
-            format!("Created {} tasks", created_ids.len()),
-            output,
+        Ok(
+            ToolOutput::new(format!("Created {} tasks", created_ids.len()), output).with_metadata(
+                json!({
+                    "created": created_ids.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                }),
+            ),
         )
-        .with_metadata(json!({
-            "created": created_ids.iter().map(|(id, _)| id).collect::<Vec<_>>(),
-        })))
     }
 }
 

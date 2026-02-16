@@ -219,8 +219,8 @@ impl AgentLoop for StandardLoop {
             // Track observed tools in order (for external tool execution like CLI providers)
             // Using IndexMap to preserve insertion order
             let mut observed_tools: IndexMap<String, (String, String)> = IndexMap::new(); // id -> (name, input)
-            // Track observed tool results (success, output) - separate from observed_tools
-            // because results arrive later via ToolResultObserved events
+                                                                                          // Track observed tool results (success, output) - separate from observed_tools
+                                                                                          // because results arrive later via ToolResultObserved events
             let mut observed_tool_results: HashMap<String, (bool, String)> = HashMap::new();
             // Track content parts in order for correct interleaving
             // This is needed because text and tools can be interleaved:
@@ -282,19 +282,19 @@ impl AgentLoop for StandardLoop {
                     StreamChunk::ToolObserved { id, name, input } => {
                         // Tool was observed being executed externally (e.g., by Claude CLI)
                         debug!(id = %id, name = %name, "Tool observed (external execution)");
-                        
+
                         // Flush any accumulated text BEFORE the tool to preserve order
                         // This ensures text1 -> tool1 -> text2 ordering is maintained
                         if !current_text.is_empty() {
                             ordered_content.push(ContentPart::text(&current_text));
                             current_text.clear();
                         }
-                        
+
                         // Add the tool to ordered content
                         let input_val: serde_json::Value =
                             serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
                         ordered_content.push(ContentPart::tool_use(&id, &name, input_val));
-                        
+
                         // Track the tool for result matching
                         observed_tools.insert(id.clone(), (name.clone(), input.clone()));
                         ctx.send_update(LoopUpdate::ToolStarted { id, name, input });
@@ -311,11 +311,11 @@ impl AgentLoop for StandardLoop {
                             .map(|(n, _)| n.clone())
                             .unwrap_or_else(|| "unknown".to_string());
                         debug!(id = %id, name = %name, success = %success, "Tool result observed");
-                        
+
                         // Store the result for later persistence
                         // This allows us to update the tool state from Pending to Completed
                         observed_tool_results.insert(id.clone(), (success, output.clone()));
-                        
+
                         ctx.send_update(LoopUpdate::ToolCompleted {
                             id,
                             name,
@@ -405,7 +405,11 @@ impl AgentLoop for StandardLoop {
                     text_len = current_text.len(),
                     tool_calls = tool_calls.len(),
                     observed_tools = observed_tools.len(),
-                    ordered_content_len = if has_observed_tools { ordered_content.len() } else { 0 },
+                    ordered_content_len = if has_observed_tools {
+                        ordered_content.len()
+                    } else {
+                        0
+                    },
                     "Adding assistant message to history"
                 );
 
@@ -413,7 +417,7 @@ impl AgentLoop for StandardLoop {
                     role: wonopcode_provider::Role::Assistant,
                     content,
                 });
-                
+
                 // Add tool result messages for observed tools (like internal execution does)
                 // This ensures the tool results are available for persistence
                 for (id, (success, output)) in &observed_tool_results {

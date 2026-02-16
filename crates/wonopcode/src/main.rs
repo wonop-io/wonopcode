@@ -1327,8 +1327,12 @@ async fn run_headless(
                     emulate_tool_observed,
                     emulate_streaming,
                 },
-                Action::SetAllowAll { enabled } => wonopcode_tui::AppAction::SetAllowAll { enabled },
-                Action::EnableAllowAll { request_id } => wonopcode_tui::AppAction::EnableAllowAll { request_id },
+                Action::SetAllowAll { enabled } => {
+                    wonopcode_tui::AppAction::SetAllowAll { enabled }
+                }
+                Action::EnableAllowAll { request_id } => {
+                    wonopcode_tui::AppAction::EnableAllowAll { request_id }
+                }
             };
 
             if app_action_tx.send(app_action).is_err() {

@@ -5,7 +5,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::ace::config::WonopCodeConfig;
-use crate::ace::{Artifact, ArtifactStore, ArtifactType, Priority, Progress, WorkflowPhase, WorkstreamState};
+use crate::ace::{
+    Artifact, ArtifactStore, ArtifactType, Priority, Progress, WorkflowPhase, WorkstreamState,
+};
 use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult};
 
 /// ace_what_now tool - provides guidance on what to do next.
@@ -142,10 +144,7 @@ impl Tool for AceWhatNowTool {
             format!(
                 "Phase: {} | {}",
                 phase,
-                state
-                    .active_task
-                    .as_deref()
-                    .unwrap_or("no active task")
+                state.active_task.as_deref().unwrap_or("no active task")
             ),
             output,
         ))
@@ -165,7 +164,9 @@ fn recommend_requirements_phase(
         .unwrap_or_default();
 
     output.push_str("### Requirements Phase\n\n");
-    output.push_str("⚠️ **MANDATORY WORKFLOW**: You MUST complete requirements before implementation.\n");
+    output.push_str(
+        "⚠️ **MANDATORY WORKFLOW**: You MUST complete requirements before implementation.\n",
+    );
     output.push_str("DO NOT write code until the user has approved requirements and designs.\n\n");
 
     if use_cases.is_empty() {
@@ -174,7 +175,8 @@ fn recommend_requirements_phase(
         output.push_str("```\nace_create_artifact(\n");
         output.push_str("  type=\"use-case\",\n");
         output.push_str("  title=\"User performs action\",\n");
-        output.push_str("  content=\"## Primary Actor\\n...\\n## Main Success Scenario\\n1. ...\"\n");
+        output
+            .push_str("  content=\"## Primary Actor\\n...\\n## Main Success Scenario\\n1. ...\"\n");
         output.push_str(")\n```\n\n");
     } else if requirements.is_empty() {
         output.push_str("**Step 2: Create Requirements** (REQUIRED)\n\n");
@@ -273,13 +275,18 @@ fn recommend_design_phase(
         output.push_str("  title=\"Technical design for...\",\n");
         output.push_str("  content=\"## Overview\\n...\\n## Implementation Approach\\n...\"\n");
         output.push_str(")\n```\n\n");
-        
+
         // Remind about test cases
         if untested.len() == requirements.len() {
-            output.push_str("📝 **Note:** After creating designs, you MUST also create test cases.\n\n");
+            output.push_str(
+                "📝 **Note:** After creating designs, you MUST also create test cases.\n\n",
+            );
         }
     } else if !untested.is_empty() {
-        output.push_str(&format!("**Step 2: Create Test Cases** (REQUIRED - {} remaining)\n\n", untested.len()));
+        output.push_str(&format!(
+            "**Step 2: Create Test Cases** (REQUIRED - {} remaining)\n\n",
+            untested.len()
+        ));
         output.push_str("🧪 **CRITICAL**: Every requirement needs at least one test case.\n");
         output.push_str("Test cases define how we verify the implementation works correctly.\n\n");
         output.push_str("Requirements missing test cases:\n\n");
@@ -298,7 +305,8 @@ fn recommend_design_phase(
         output.push_str(")\n```\n\n");
     } else if config.ace.workflow.checkpoints.design.required {
         output.push_str("**Step 3: Request User Review** (REQUIRED)\n\n");
-        output.push_str("⛔ **STOP AND WAIT FOR APPROVAL** before creating implementation plan.\n\n");
+        output
+            .push_str("⛔ **STOP AND WAIT FOR APPROVAL** before creating implementation plan.\n\n");
         output.push_str(&format!(
             "✅ All {} requirement(s) have:\n- {} design document(s)\n- {} test case(s)\n\n",
             requirements.len(),
@@ -316,7 +324,8 @@ fn recommend_design_phase(
         output.push_str("2. Submit the implementation plan for approval\n");
         output.push_str("3. Only then begin coding\n");
     } else {
-        output.push_str("Design phase complete. Workflow can advance to Implementation Planning.\n");
+        output
+            .push_str("Design phase complete. Workflow can advance to Implementation Planning.\n");
     }
 
     Ok(())
@@ -327,9 +336,7 @@ fn recommend_implementation_phase(
     state: &WorkstreamState,
     output: &mut String,
 ) -> Result<(), ToolError> {
-    let tasks = store
-        .list_artifacts(ArtifactType::Task)
-        .unwrap_or_default();
+    let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
     let designs = store
         .list_artifacts(ArtifactType::Design)
         .unwrap_or_default();
@@ -342,7 +349,9 @@ fn recommend_implementation_phase(
 
     let pending_tasks: Vec<_> = tasks
         .iter()
-        .filter(|t| !t.metadata.progress.is_terminal() && t.metadata.progress != Progress::InProgress)
+        .filter(|t| {
+            !t.metadata.progress.is_terminal() && t.metadata.progress != Progress::InProgress
+        })
         .collect();
 
     let done_tasks = tasks
@@ -360,7 +369,10 @@ fn recommend_implementation_phase(
         output.push_str("Go back and create test cases:\n");
         output.push_str("```\nace_create_artifact(\n");
         output.push_str("  type=\"test-case\",\n");
-        output.push_str(&format!("  parents=[\"{}\"],\n", requirements[0].metadata.id));
+        output.push_str(&format!(
+            "  parents=[\"{}\"],\n",
+            requirements[0].metadata.id
+        ));
         output.push_str("  title=\"Test: verify [behavior]\",\n");
         output.push_str("  content=\"## Steps\\n1. ...\\n## Expected\\n- ...\"\n");
         output.push_str(")\n```\n\n");
@@ -368,8 +380,12 @@ fn recommend_implementation_phase(
     }
 
     // Check if implementation plan has been approved (tasks exist and we have an active task or all done)
-    let plan_approved = !tasks.is_empty() && (state.active_task.is_some() || done_tasks > 0 || 
-        tasks.iter().any(|t| t.metadata.progress == Progress::InProgress));
+    let plan_approved = !tasks.is_empty()
+        && (state.active_task.is_some()
+            || done_tasks > 0
+            || tasks
+                .iter()
+                .any(|t| t.metadata.progress == Progress::InProgress));
 
     // Tasks must be created BEFORE implementation begins
     if tasks.is_empty() {
@@ -407,7 +423,10 @@ fn recommend_implementation_phase(
         // Tasks exist but plan not yet approved
         output.push_str("**Step 2: Submit Implementation Plan for Approval** (REQUIRED)\n\n");
         output.push_str("⛔ **STOP AND WAIT FOR APPROVAL** before writing any code.\n\n");
-        output.push_str(&format!("You have created {} task(s). Submit them for review:\n\n", tasks.len()));
+        output.push_str(&format!(
+            "You have created {} task(s). Submit them for review:\n\n",
+            tasks.len()
+        ));
         output.push_str("```\nace_submit_checkpoint(\n");
         output.push_str("  checkpoint=\"implementation_plan\",\n");
         output.push_str("  action=\"request_review\"\n");
@@ -431,13 +450,14 @@ fn recommend_implementation_phase(
         for task in pending_tasks.iter().take(5) {
             output.push_str(&format!(
                 "- `{}`: {} [{}]\n",
-                task.metadata.id,
-                task.title,
-                task.metadata.priority
+                task.metadata.id, task.title, task.metadata.priority
             ));
         }
         output.push_str("\n```\nace_todo_update(\n");
-        output.push_str(&format!("  node_id=\"{}\",\n", pending_tasks[0].metadata.id));
+        output.push_str(&format!(
+            "  node_id=\"{}\",\n",
+            pending_tasks[0].metadata.id
+        ));
         output.push_str("  status=\"in_progress\"\n");
         output.push_str(")\n```\n");
     } else {
@@ -452,21 +472,39 @@ fn recommend_implementation_phase(
     Ok(())
 }
 
-fn recommend_verification_phase(store: &ArtifactStore, output: &mut String) -> Result<(), ToolError> {
+fn recommend_verification_phase(
+    store: &ArtifactStore,
+    output: &mut String,
+) -> Result<(), ToolError> {
     let test_cases = store
         .list_artifacts(ArtifactType::TestCase)
         .unwrap_or_default();
-    let tasks = store
-        .list_artifacts(ArtifactType::Task)
-        .unwrap_or_default();
+    let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
 
-    let done_tasks = tasks.iter().filter(|t| t.metadata.progress.is_terminal()).count();
-    let passed_tests = test_cases.iter().filter(|tc| tc.metadata.progress == Progress::Done).count();
+    let done_tasks = tasks
+        .iter()
+        .filter(|t| t.metadata.progress.is_terminal())
+        .count();
+    let passed_tests = test_cases
+        .iter()
+        .filter(|tc| tc.metadata.progress == Progress::Done)
+        .count();
 
     output.push_str("### Verification Phase\n\n");
-    output.push_str(&format!("{} test case(s) defined from design phase.\n\n", test_cases.len()));
-    output.push_str(&format!("**Implementation Progress:** {}/{} tasks complete\n", done_tasks, tasks.len()));
-    output.push_str(&format!("**Test Progress:** {}/{} tests passed\n\n", passed_tests, test_cases.len()));
+    output.push_str(&format!(
+        "{} test case(s) defined from design phase.\n\n",
+        test_cases.len()
+    ));
+    output.push_str(&format!(
+        "**Implementation Progress:** {}/{} tasks complete\n",
+        done_tasks,
+        tasks.len()
+    ));
+    output.push_str(&format!(
+        "**Test Progress:** {}/{} tests passed\n\n",
+        passed_tests,
+        test_cases.len()
+    ));
 
     if passed_tests < test_cases.len() {
         output.push_str("**Run and verify tests:**\n");
@@ -551,10 +589,12 @@ plan approved BEFORE writing any code."#
 
         let mut state = WorkstreamState::load(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| ToolError::execution_failed(
-                "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                 Tell the user to open Wonop Code Desktop and initialize this worktree first."
-            ))?;
+            .ok_or_else(|| {
+                ToolError::execution_failed(
+                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
+                 Tell the user to open Wonop Code Desktop and initialize this worktree first.",
+                )
+            })?;
 
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
@@ -562,10 +602,8 @@ plan approved BEFORE writing any code."#
         match args.action.as_str() {
             "request_review" => {
                 // Generate review summary
-                let mut summary = format!(
-                    "## {} Review Request\n\n",
-                    args.checkpoint.to_uppercase()
-                );
+                let mut summary =
+                    format!("## {} Review Request\n\n", args.checkpoint.to_uppercase());
                 summary.push_str(&format!("**Ticket:** {}\n\n", state.ticket_id));
 
                 match args.checkpoint.as_str() {
@@ -582,10 +620,8 @@ plan approved BEFORE writing any code."#
                             summary.push_str("*(none)*\n\n");
                         } else {
                             for uc in &use_cases {
-                                summary.push_str(&format!(
-                                    "- **{}**: {}\n",
-                                    uc.metadata.id, uc.title
-                                ));
+                                summary
+                                    .push_str(&format!("- **{}**: {}\n", uc.metadata.id, uc.title));
                             }
                             summary.push('\n');
                         }
@@ -635,7 +671,7 @@ plan approved BEFORE writing any code."#
                             .iter()
                             .filter(|r| !tested_req_ids.contains(&r.metadata.id))
                             .collect();
-                        
+
                         if !untested.is_empty() {
                             let untested_list: String = untested
                                 .iter()
@@ -683,9 +719,7 @@ plan approved BEFORE writing any code."#
                         summary.push('\n');
                     }
                     "implementation_plan" => {
-                        let tasks = store
-                            .list_artifacts(ArtifactType::Task)
-                            .unwrap_or_default();
+                        let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
                         let designs = store
                             .list_artifacts(ArtifactType::Design)
                             .unwrap_or_default();
@@ -710,7 +744,8 @@ plan approved BEFORE writing any code."#
                         }
 
                         // Build set of valid parent IDs (designs, requirements, use cases, test cases)
-                        let valid_parents: std::collections::HashSet<String> = designs.iter()
+                        let valid_parents: std::collections::HashSet<String> = designs
+                            .iter()
                             .map(|a| a.metadata.id.clone())
                             .chain(requirements.iter().map(|a| a.metadata.id.clone()))
                             .chain(use_cases.iter().map(|a| a.metadata.id.clone()))
@@ -718,10 +753,11 @@ plan approved BEFORE writing any code."#
                             .collect();
 
                         // Validate: each task must have at least one valid parent
-                        let orphan_tasks: Vec<_> = tasks.iter()
+                        let orphan_tasks: Vec<_> = tasks
+                            .iter()
                             .filter(|t| {
-                                t.metadata.parents.is_empty() || 
-                                !t.metadata.parents.iter().any(|p| valid_parents.contains(p))
+                                t.metadata.parents.is_empty()
+                                    || !t.metadata.parents.iter().any(|p| valid_parents.contains(p))
                             })
                             .collect();
 
@@ -729,15 +765,18 @@ plan approved BEFORE writing any code."#
                             let orphan_list: String = orphan_tasks
                                 .iter()
                                 .take(5)
-                                .map(|t| format!("  - `{}`: {} (parents: {})", 
-                                    t.metadata.id, 
-                                    t.title,
-                                    if t.metadata.parents.is_empty() { 
-                                        "none".to_string() 
-                                    } else { 
-                                        t.metadata.parents.join(", ") 
-                                    }
-                                ))
+                                .map(|t| {
+                                    format!(
+                                        "  - `{}`: {} (parents: {})",
+                                        t.metadata.id,
+                                        t.title,
+                                        if t.metadata.parents.is_empty() {
+                                            "none".to_string()
+                                        } else {
+                                            t.metadata.parents.join(", ")
+                                        }
+                                    )
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             let more_msg = if orphan_tasks.len() > 5 {
@@ -745,11 +784,17 @@ plan approved BEFORE writing any code."#
                             } else {
                                 String::new()
                             };
-                            
-                            let available_parents: String = designs.iter()
+
+                            let available_parents: String = designs
+                                .iter()
                                 .take(3)
                                 .map(|d| format!("  - `{}` (design)", d.metadata.id))
-                                .chain(requirements.iter().take(3).map(|r| format!("  - `{}` (requirement)", r.metadata.id)))
+                                .chain(
+                                    requirements
+                                        .iter()
+                                        .take(3)
+                                        .map(|r| format!("  - `{}` (requirement)", r.metadata.id)),
+                                )
                                 .collect::<Vec<_>>()
                                 .join("\n");
 
@@ -764,12 +809,18 @@ plan approved BEFORE writing any code."#
                         }
 
                         summary.push_str("### Implementation Plan\n\n");
-                        summary.push_str("The following tasks break down the implementation work:\n\n");
+                        summary.push_str(
+                            "The following tasks break down the implementation work:\n\n",
+                        );
 
                         // Group tasks by parent design/requirement
-                        let mut by_parent: std::collections::HashMap<String, Vec<&Artifact>> = std::collections::HashMap::new();
+                        let mut by_parent: std::collections::HashMap<String, Vec<&Artifact>> =
+                            std::collections::HashMap::new();
                         for task in &tasks {
-                            let parent = task.metadata.parents.first()
+                            let parent = task
+                                .metadata
+                                .parents
+                                .first()
                                 .cloned()
                                 .unwrap_or_else(|| "unassigned".to_string());
                             by_parent.entry(parent).or_default().push(task);
@@ -777,11 +828,12 @@ plan approved BEFORE writing any code."#
 
                         for (parent_id, parent_tasks) in &by_parent {
                             // Find parent title
-                            let parent_title = designs.iter()
+                            let parent_title = designs
+                                .iter()
                                 .find(|d| &d.metadata.id == parent_id)
                                 .map(|d| d.title.as_str())
                                 .unwrap_or("Unknown");
-                            
+
                             summary.push_str(&format!("**{}** ({})\n", parent_id, parent_title));
                             for task in parent_tasks {
                                 let priority_icon = match task.metadata.priority {
@@ -791,9 +843,7 @@ plan approved BEFORE writing any code."#
                                 };
                                 summary.push_str(&format!(
                                     "  - {} `{}`: {}\n",
-                                    priority_icon,
-                                    task.metadata.id,
-                                    task.title
+                                    priority_icon, task.metadata.id, task.title
                                 ));
                             }
                             summary.push('\n');
@@ -801,7 +851,8 @@ plan approved BEFORE writing any code."#
 
                         summary.push_str(&format!("**Total:** {} task(s)\n\n", tasks.len()));
                         summary.push_str("⚠️ **After approval, implementation will begin.**\n");
-                        summary.push_str("The agent will work through these tasks one at a time.\n");
+                        summary
+                            .push_str("The agent will work through these tasks one at a time.\n");
                     }
                     "verification" => {
                         let test_cases = store
@@ -815,9 +866,7 @@ plan approved BEFORE writing any code."#
                             for tc in &test_cases {
                                 summary.push_str(&format!(
                                     "- **{}**: {} [{}]\n",
-                                    tc.metadata.id,
-                                    tc.title,
-                                    tc.metadata.progress
+                                    tc.metadata.id, tc.title, tc.metadata.progress
                                 ));
                             }
                             summary.push('\n');
@@ -828,13 +877,15 @@ plan approved BEFORE writing any code."#
 
                 summary.push_str("---\n\n");
                 summary.push_str("**Please review the above artifacts.**\n\n");
-                summary.push_str("Reply with **\"approved\"** to proceed, or provide feedback for revisions.");
+                summary.push_str(
+                    "Reply with **\"approved\"** to proceed, or provide feedback for revisions.",
+                );
 
                 // Update phase status
                 state.set_awaiting_approval(&args.checkpoint);
-                state
-                    .save(&ctx.root_dir)
-                    .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
+                state.save(&ctx.root_dir).map_err(|e| {
+                    ToolError::execution_failed(format!("Failed to save state: {e}"))
+                })?;
 
                 Ok(ToolOutput::new(
                     format!("{} review requested", args.checkpoint),
@@ -847,7 +898,7 @@ plan approved BEFORE writing any code."#
                     "requirements" => vec![ArtifactType::UseCase, ArtifactType::Requirement],
                     "design" => vec![ArtifactType::Design, ArtifactType::TestCase],
                     "implementation_plan" => vec![ArtifactType::Task],
-                    "verification" => vec![],  // Tasks already promoted at implementation_plan
+                    "verification" => vec![], // Tasks already promoted at implementation_plan
                     _ => vec![],
                 };
 
@@ -864,19 +915,23 @@ plan approved BEFORE writing any code."#
                 let old_phase = state.workflow.current_phase;
                 let new_phase = state.advance_phase();
 
-                state
-                    .save(&ctx.root_dir)
-                    .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
+                state.save(&ctx.root_dir).map_err(|e| {
+                    ToolError::execution_failed(format!("Failed to save state: {e}"))
+                })?;
 
                 let promoted_msg = if promoted_count > 0 {
-                    format!("\n\n**Promoted {} artifact(s)** from staging to approved specs.", promoted_count)
+                    format!(
+                        "\n\n**Promoted {} artifact(s)** from staging to approved specs.",
+                        promoted_count
+                    )
                 } else {
                     String::new()
                 };
 
                 // Load config for phase recommendations
-                let config = WonopCodeConfig::load(&ctx.root_dir)
-                    .map_err(|e| ToolError::execution_failed(format!("Failed to load config: {e}")))?;
+                let config = WonopCodeConfig::load(&ctx.root_dir).map_err(|e| {
+                    ToolError::execution_failed(format!("Failed to load config: {e}"))
+                })?;
 
                 // Generate next steps based on the new phase
                 let mut next_steps = String::new();
@@ -891,7 +946,9 @@ plan approved BEFORE writing any code."#
                             next_steps.push_str(
                                 "Review and analyze the requirements for completeness and feasibility.\n\n",
                             );
-                            next_steps.push_str("When ready, the workflow will advance to the Design phase.\n");
+                            next_steps.push_str(
+                                "When ready, the workflow will advance to the Design phase.\n",
+                            );
                         }
                         WorkflowPhase::Design => {
                             recommend_design_phase(&store, &config, &mut next_steps)?;
@@ -932,7 +989,9 @@ plan approved BEFORE writing any code."#
                         "{} approved | Current phase: {} | Next phase: {}",
                         args.checkpoint,
                         old_phase,
-                        new_phase.map(|p| p.to_string()).unwrap_or("complete".to_string())
+                        new_phase
+                            .map(|p| p.to_string())
+                            .unwrap_or("complete".to_string())
                     ),
                     message,
                 ))
@@ -1079,7 +1138,7 @@ mod tests {
     #[tokio::test]
     async fn test_implementation_plan_requires_valid_parents() {
         let dir = tempdir().unwrap();
-        let ctx = test_context(dir.path().to_path_buf());
+        let _ctx = test_context(dir.path().to_path_buf());
 
         let mut state = WorkstreamState::new("WON-123");
         state.save(dir.path()).unwrap();
@@ -1089,16 +1148,15 @@ mod tests {
 
         // Try to create a task WITHOUT a valid parent (empty parents)
         // The store should reject this at creation time
-        let result = store
-            .create_artifact(
-                &mut state,
-                ArtifactType::Task,
-                "Orphan task",
-                "",
-                vec![], // No parent!
-                Priority::Medium,
-                false,
-            );
+        let result = store.create_artifact(
+            &mut state,
+            ArtifactType::Task,
+            "Orphan task",
+            "",
+            vec![], // No parent!
+            Priority::Medium,
+            false,
+        );
 
         // The store validates parent types at creation time
         assert!(result.is_err());
@@ -1191,7 +1249,7 @@ mod tests {
     #[tokio::test]
     async fn test_implementation_plan_rejects_invalid_parent_id() {
         let dir = tempdir().unwrap();
-        let ctx = test_context(dir.path().to_path_buf());
+        let _ctx = test_context(dir.path().to_path_buf());
 
         let mut state = WorkstreamState::new("WON-123");
         state.save(dir.path()).unwrap();
@@ -1201,16 +1259,15 @@ mod tests {
 
         // Try to create a task with a parent ID that doesn't exist
         // The store should reject this at creation time
-        let result = store
-            .create_artifact(
-                &mut state,
-                ArtifactType::Task,
-                "Task with fake parent",
-                "",
-                vec!["DES-FAKE-001".to_string()], // Non-existent parent
-                Priority::Medium,
-                false,
-            );
+        let result = store.create_artifact(
+            &mut state,
+            ArtifactType::Task,
+            "Task with fake parent",
+            "",
+            vec!["DES-FAKE-001".to_string()], // Non-existent parent
+            Priority::Medium,
+            false,
+        );
 
         // The store validates that parent artifacts exist
         assert!(result.is_err());
