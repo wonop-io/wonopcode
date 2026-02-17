@@ -6104,6 +6104,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
  "walkdir",
  "wonopcode-provider",
  "wonopcode-snapshot",

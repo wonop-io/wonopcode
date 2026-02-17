@@ -17,6 +17,7 @@ pub mod config;
 pub mod error;
 pub mod format;
 pub mod hook;
+pub mod input_request;
 pub mod instance;
 pub mod message;
 pub mod message_convert;
@@ -44,6 +45,10 @@ pub use config::{
 pub use error::{CoreError, CoreResult, WorkstreamError};
 pub use format::{Formatter, FormatterRegistry};
 pub use hook::{Hook, HookContext, HookEvent, HookRegistry};
+pub use input_request::{
+    InputRequestId, InputRequestQueue, InputRequestType, InputResponseType, SelectionOption,
+    SharedInputRequestQueue, UserInputRequest, UserInputResponse, DEFAULT_INPUT_REQUEST_TTL_SECS,
+};
 pub use instance::Instance;
 pub use message::{Message, MessagePart};
 pub use message_convert::{ConversionContext, ConvertedMessage};
