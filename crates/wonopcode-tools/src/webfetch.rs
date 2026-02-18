@@ -530,6 +530,7 @@ mod tests {
             file_time: None,
             sandbox: None,
             event_tx: None,
+            ticket_service: None,
         }
     }
 

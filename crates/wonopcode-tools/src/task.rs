@@ -202,6 +202,7 @@ Usage notes:
             file_time: ctx.file_time.clone(),
             sandbox: ctx.sandbox.clone(),
             event_tx: ctx.event_tx.clone(),
+            ticket_service: ctx.ticket_service.clone(),
         };
 
         // Execute the subagent
@@ -313,6 +314,7 @@ mod tests {
             file_time: None,
             sandbox: None,
             event_tx: None,
+            ticket_service: None,
         }
     }
 
