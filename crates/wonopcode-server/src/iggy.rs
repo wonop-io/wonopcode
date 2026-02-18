@@ -342,7 +342,160 @@ impl AgentServer {
     }
 
     /// Handle a runner update - convert to ServerPayload and send via Iggy.
+    ///
+    /// Also updates internal state for certain updates so that new clients
+    /// receive current values when they connect.
     async fn handle_runner_update(&self, update: wonopcode_tui::AppUpdate) {
+        // Update internal state for persistent values
+        match &update {
+            wonopcode_tui::AppUpdate::TokenUsage {
+                input,
+                output,
+                cost,
+                context_limit,
+            } => {
+                self.update_state(|state| {
+                    state.token_usage.input = *input;
+                    state.token_usage.output = *output;
+                    state.token_usage.cost = *cost;
+                    state.context_limit = *context_limit;
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::ContextStatus {
+                estimated_tokens,
+                context_limit,
+                ..
+            } => {
+                // ContextStatus provides estimated tokens from history
+                // Use these to populate token_usage.input for initial state
+                self.update_state(|state| {
+                    // Only update if we don't have actual usage yet
+                    // (estimated tokens are less accurate than actual usage)
+                    if state.token_usage.input == 0 {
+                        state.token_usage.input = *estimated_tokens;
+                    }
+                    state.context_limit = *context_limit;
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::ModelInfo { context_limit } => {
+                self.update_state(|state| {
+                    state.context_limit = *context_limit;
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::AgentChanged(agent) => {
+                self.update_state(|state| {
+                    state.agent = agent.clone();
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::TodosUpdated { phases, todos } => {
+                self.update_state(|state| {
+                    state.phases = phases
+                        .iter()
+                        .map(|p| wonopcode_message::PhaseInfo {
+                            id: p.id.clone(),
+                            name: p.name.clone(),
+                            status: p.status.clone(),
+                            todos: p
+                                .todos
+                                .iter()
+                                .map(|t| wonopcode_message::TodoInfo {
+                                    id: t.id.clone(),
+                                    content: t.content.clone(),
+                                    status: t.status.clone(),
+                                    priority: t.priority.clone(),
+                                    phase_id: t.phase_id.clone(),
+                                    parents: t.parents.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect();
+                    state.todos = todos
+                        .iter()
+                        .map(|t| wonopcode_message::TodoInfo {
+                            id: t.id.clone(),
+                            content: t.content.clone(),
+                            status: t.status.clone(),
+                            priority: t.priority.clone(),
+                            phase_id: t.phase_id.clone(),
+                            parents: t.parents.clone(),
+                        })
+                        .collect();
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::LspUpdated(servers) => {
+                self.update_state(|state| {
+                    state.lsp_servers = servers
+                        .iter()
+                        .map(|s| wonopcode_message::LspInfo {
+                            id: s.id.clone(),
+                            name: s.name.clone(),
+                            root: s.root.clone(),
+                            connected: s.connected,
+                        })
+                        .collect();
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::McpUpdated(servers) => {
+                self.update_state(|state| {
+                    state.mcp_servers = servers
+                        .iter()
+                        .map(|s| wonopcode_message::McpInfo {
+                            name: s.name.clone(),
+                            connected: s.connected,
+                            error: s.error.clone(),
+                        })
+                        .collect();
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::ModifiedFilesUpdated(files) => {
+                self.update_state(|state| {
+                    state.modified_files = files
+                        .iter()
+                        .map(|f| wonopcode_message::ModifiedFileInfo {
+                            path: f.path.clone(),
+                            added: f.added,
+                            removed: f.removed,
+                        })
+                        .collect();
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::SandboxUpdated(status) => {
+                self.update_state(|state| {
+                    state.sandbox = wonopcode_message::SandboxState {
+                        state: status.state.clone(),
+                        runtime_type: status.runtime_type.clone(),
+                        error: status.error.clone(),
+                    };
+                })
+                .await;
+            }
+            wonopcode_tui::AppUpdate::Sessions(sessions) => {
+                self.update_state(|state| {
+                    state.sessions = sessions
+                        .iter()
+                        .map(|(id, title, timestamp)| wonopcode_message::SessionInfo {
+                            id: id.clone(),
+                            title: title.clone(),
+                            timestamp: timestamp.clone(),
+                        })
+                        .collect();
+                })
+                .await;
+            }
+            _ => {
+                // Other updates don't need to be persisted in state
+            }
+        }
+
+        // Convert and send to clients
         let payload = app_update_to_server_payload(&update);
         if let Err(e) = self.send_update(payload).await {
             warn!("Failed to send update via Iggy: {}", e);
@@ -645,6 +798,26 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
         // Convert to status for external clients.
         wonopcode_tui::AppUpdate::TurnPersisted => ServerPayload::Status {
             message: "Turn persisted".to_string(),
+        },
+        // ContextStatus - token usage and compaction status.
+        // Convert to status message for now; could be expanded to a proper ServerPayload variant.
+        wonopcode_tui::AppUpdate::ContextStatus {
+            estimated_tokens,
+            context_limit,
+            usage_percent,
+            needs_compaction,
+        } => ServerPayload::Status {
+            message: if *needs_compaction {
+                format!(
+                    "Context: {}% ({}/{} tokens) - compaction may occur",
+                    usage_percent, estimated_tokens, context_limit
+                )
+            } else {
+                format!(
+                    "Context: {}% ({}/{} tokens)",
+                    usage_percent, estimated_tokens, context_limit
+                )
+            },
         },
     }
 }

@@ -349,6 +349,17 @@ pub enum AppUpdate {
     },
     /// Model info update (context limit).
     ModelInfo { context_limit: u32 },
+    /// Context status update for displaying usage level.
+    ContextStatus {
+        /// Estimated tokens currently in context.
+        estimated_tokens: u32,
+        /// Context limit from model.
+        context_limit: u32,
+        /// Usage percentage (0-100).
+        usage_percent: u8,
+        /// Whether compaction is needed.
+        needs_compaction: bool,
+    },
     /// Session list update.
     Sessions(Vec<(String, String, String)>),
     /// Todos updated (from todowrite tool) - includes phases.
@@ -3264,6 +3275,21 @@ async function fetchUserData(userId) {
             }
             AppUpdate::ModelInfo { context_limit } => {
                 self.sidebar.set_max_tokens(context_limit);
+            }
+            AppUpdate::ContextStatus {
+                estimated_tokens,
+                context_limit,
+                usage_percent,
+                needs_compaction,
+            } => {
+                // Update sidebar with context usage information
+                self.sidebar.set_context_usage(estimated_tokens, context_limit, usage_percent);
+                if needs_compaction {
+                    // Show warning in footer when compaction is needed
+                    self.footer.set_status(crate::widgets::footer::FooterStatus::Running(
+                        format!("Context usage: {}% - compaction may occur", usage_percent)
+                    ));
+                }
             }
             AppUpdate::Sessions(sessions) => {
                 self.sessions = sessions;

@@ -1717,6 +1717,10 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::TurnPersisted => {
                     continue;
                 }
+                // ContextStatus is for sidebar display, not protocol events
+                wonopcode_tui::AppUpdate::ContextStatus { .. } => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);
@@ -2075,6 +2079,34 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
             }
         };
 
+        // Helper to estimate tokens from a session (rough approximation: ~4 chars per token)
+        let estimate_session_tokens = |session: &wonopcode_protocol::SessionState| -> u32 {
+            let mut total_chars: usize = 0;
+            for msg in &session.messages {
+                for segment in &msg.content {
+                    match segment {
+                        wonopcode_protocol::MessageSegment::Text { text } => {
+                            total_chars += text.len();
+                        }
+                        wonopcode_protocol::MessageSegment::Code { code, .. } => {
+                            total_chars += code.len();
+                        }
+                        wonopcode_protocol::MessageSegment::Thinking { text } => {
+                            total_chars += text.len();
+                        }
+                        wonopcode_protocol::MessageSegment::Tool { tool } => {
+                            total_chars += tool.input.len();
+                            if let Some(ref output) = tool.output {
+                                total_chars += output.len();
+                            }
+                        }
+                    }
+                }
+            }
+            // Rough approximation: ~4 characters per token
+            (total_chars / 4) as u32
+        };
+
         // Helper to convert a protocol message to display message
         let convert_message = |msg: &wonopcode_protocol::Message| -> wonopcode_tui::DisplayMessage {
             match msg.role.as_str() {
@@ -2155,6 +2187,24 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
             messages,
         }) {
             warn!("Failed to send session loaded update: {}", e);
+        }
+
+        // Estimate tokens from loaded messages and send context status
+        // This provides an initial context usage estimate when session is loaded
+        let estimated_tokens = estimate_session_tokens(&session);
+        let context_limit = 200_000_u32; // Default context limit, will be updated when model info arrives
+        let usage_percent = if context_limit > 0 {
+            ((estimated_tokens as u64 * 100) / context_limit as u64).min(100) as u8
+        } else {
+            0
+        };
+        if let Err(e) = update_tx.send(wonopcode_tui::AppUpdate::ContextStatus {
+            estimated_tokens,
+            context_limit,
+            usage_percent,
+            needs_compaction: usage_percent >= 80,
+        }) {
+            warn!("Failed to send context status update: {}", e);
         }
 
         // If there's an in-progress streaming message, restore the streaming state

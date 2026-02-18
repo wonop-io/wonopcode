@@ -10,8 +10,8 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wonopcode_agent_loop::{
-    BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopUpdate,
-    PermissionCheckRequest, PermissionChecker,
+    BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
+    LoopUpdate, PermissionCheckRequest, PermissionChecker,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
@@ -318,6 +318,125 @@ fn parse_markdown_todo_line(line: &str) -> Option<todo::TodoItem> {
 /// This allows sharing sandbox runtime through permission manager without circular deps.
 pub struct SandboxRuntimeWrapper(pub Arc<dyn SandboxRuntime>);
 
+/// Context usage level for UI display and compaction decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextLevel {
+    /// < 50% - plenty of room
+    Comfortable,
+    /// 50-80% - normal usage
+    Normal,
+    /// 80-95% - approaching limit, compaction may occur
+    High,
+    /// > 95% - critical, compaction imminent
+    Critical,
+}
+
+impl ContextLevel {
+    /// Determine context level from usage percentage.
+    pub fn from_percent(percent: u8) -> Self {
+        match percent {
+            0..=49 => Self::Comfortable,
+            50..=79 => Self::Normal,
+            80..=94 => Self::High,
+            _ => Self::Critical,
+        }
+    }
+
+    /// Get a human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Comfortable => "Comfortable",
+            Self::Normal => "Normal",
+            Self::High => "High - compaction may occur",
+            Self::Critical => "Critical - compaction imminent",
+        }
+    }
+}
+
+/// Token tracking state for context management.
+///
+/// This struct tracks token usage to enable token-based compaction decisions
+/// rather than just message count. It maintains both estimated tokens (from
+/// message content) and actual tokens (from provider responses).
+#[derive(Debug, Clone, Default)]
+pub struct ContextState {
+    /// Estimated tokens from current message history (calculated from content).
+    pub estimated_tokens: u32,
+    /// Last actual input tokens reported by the provider.
+    pub last_input_tokens: u32,
+    /// Last actual output tokens reported by the provider.
+    pub last_output_tokens: u32,
+    /// Context limit from the model.
+    pub context_limit: u32,
+    /// Output token reserve (tokens reserved for model response).
+    pub output_reserve: u32,
+}
+
+impl ContextState {
+    /// Create a new context state with a given context limit.
+    pub fn new(context_limit: u32) -> Self {
+        Self {
+            context_limit,
+            output_reserve: compaction::OUTPUT_TOKEN_MAX,
+            ..Default::default()
+        }
+    }
+
+    /// Calculate usable context (limit minus output reserve).
+    pub fn usable_context(&self) -> u32 {
+        self.context_limit.saturating_sub(self.output_reserve)
+    }
+
+    /// Calculate available context (usable minus estimated used).
+    pub fn available(&self) -> u32 {
+        self.usable_context().saturating_sub(self.estimated_tokens)
+    }
+
+    /// Calculate usage percentage (0-100).
+    pub fn usage_percent(&self) -> u8 {
+        let usable = self.usable_context();
+        if usable == 0 {
+            return 0;
+        }
+        ((self.estimated_tokens as u64 * 100) / usable as u64).min(100) as u8
+    }
+
+    /// Get the current context level.
+    pub fn level(&self) -> ContextLevel {
+        ContextLevel::from_percent(self.usage_percent())
+    }
+
+    /// Check if compaction is needed (>80% threshold).
+    pub fn needs_compaction(&self) -> bool {
+        self.usage_percent() >= 80
+    }
+
+    /// Check if context is critical (>95% threshold).
+    pub fn is_critical(&self) -> bool {
+        self.usage_percent() >= 95
+    }
+
+    /// Update estimated tokens from message history.
+    pub fn update_estimated(&mut self, messages: &[ProviderMessage]) {
+        self.estimated_tokens = compaction::estimate_messages_tokens(messages);
+    }
+
+    /// Update with actual tokens from provider response.
+    pub fn update_actual(&mut self, input_tokens: u32, output_tokens: u32) {
+        self.last_input_tokens = input_tokens;
+        self.last_output_tokens = output_tokens;
+        // Update estimated to match actual input (more accurate)
+        // The actual input is what's in context, plus we need to account
+        // for the output which will become input on next turn
+        self.estimated_tokens = input_tokens + output_tokens;
+    }
+
+    /// Update context limit (e.g., when model changes).
+    pub fn set_context_limit(&mut self, limit: u32) {
+        self.context_limit = limit;
+    }
+}
+
 /// Configuration for the runner.
 #[derive(Debug, Clone)]
 pub struct RunnerConfig {
@@ -420,6 +539,9 @@ pub struct Runner {
     /// Session service for history persistence.
     /// Optional for backward compatibility - if None, uses in-memory only.
     session_service: Option<Arc<SessionService>>,
+    /// Context state for token tracking and compaction decisions.
+    /// This enables token-based compaction rather than just message count.
+    context_state: RwLock<ContextState>,
 }
 
 impl Runner {
@@ -520,6 +642,9 @@ impl Runner {
             "Runner created with agent loop"
         );
 
+        // Get context limit from provider for initial context state
+        let context_limit = provider.model_info().limit.context;
+
         Ok(Self {
             agent_loop: tokio::sync::Mutex::new(agent_loop),
             config: Arc::new(RwLock::new(config)),
@@ -541,6 +666,7 @@ impl Runner {
             lsp_client,
             mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
             session_service: None,  // Will be set by new_with_session
+            context_state: RwLock::new(ContextState::new(context_limit)),
         })
     }
 
@@ -812,6 +938,17 @@ impl Runner {
                             message_count = history.len(),
                             "Loaded conversation history from session"
                         );
+                        // Estimate tokens in loaded history and update context state
+                        let estimated_tokens = compaction::estimate_messages_tokens(&history);
+                        {
+                            let mut state = runner.context_state.write().await;
+                            state.estimated_tokens = estimated_tokens;
+                        }
+                        debug!(
+                            estimated_tokens = estimated_tokens,
+                            "Estimated tokens from loaded history"
+                        );
+
                         let mut runner_history = runner.history.write().await;
                         *runner_history = history;
                     }
@@ -976,6 +1113,36 @@ impl Runner {
         *guard = CancellationToken::new();
     }
 
+    /// Get a snapshot of the current context state.
+    pub async fn get_context_state(&self) -> ContextState {
+        self.context_state.read().await.clone()
+    }
+
+    /// Update context state with estimated tokens from current history.
+    async fn update_context_estimate(&self, messages: &[ProviderMessage]) {
+        let mut state = self.context_state.write().await;
+        state.update_estimated(messages);
+    }
+
+    /// Update context state with actual tokens from provider response.
+    async fn update_context_actual(&self, input_tokens: u32, output_tokens: u32) {
+        let mut state = self.context_state.write().await;
+        state.update_actual(input_tokens, output_tokens);
+    }
+
+    /// Check if compaction is needed based on current context state.
+    async fn needs_compaction(&self, messages: &[ProviderMessage]) -> bool {
+        let mut state = self.context_state.write().await;
+        state.update_estimated(messages);
+        state.needs_compaction()
+    }
+
+    /// Update context limit (called when model changes).
+    async fn set_context_limit(&self, limit: u32) {
+        let mut state = self.context_state.write().await;
+        state.set_context_limit(limit);
+    }
+
     /// Get the session service, if configured.
     ///
     /// Used by Workstream to access conversation history for client queries.
@@ -1026,28 +1193,59 @@ impl Runner {
         };
 
         // === PRE-PROMPT COMPACTION ===
-        // Check if compaction is needed before starting (message count or context limit)
+        // Check if compaction is needed based on TOKEN count (primary) or message count (fallback)
         let context_limit = {
             let provider = self.provider.read().await;
             provider.model_info().limit.context
         };
 
-        const AUTO_COMPACT_MESSAGE_THRESHOLD: usize = 100;
+        // Update context state with current limit
+        self.set_context_limit(context_limit).await;
 
-        if messages.len() > AUTO_COMPACT_MESSAGE_THRESHOLD {
+        // Estimate tokens in current history
+        let estimated_tokens = compaction::estimate_token_usage(&messages);
+        let usable_context = context_limit.saturating_sub(compaction::OUTPUT_TOKEN_MAX);
+        let usage_percent = if usable_context > 0 {
+            ((estimated_tokens.total() as u64 * 100) / usable_context as u64).min(100) as u8
+        } else {
+            0
+        };
+
+        // Compaction thresholds
+        const TOKEN_COMPACTION_THRESHOLD_PERCENT: u8 = 80; // Compact at 80% context usage
+        const MESSAGE_COMPACTION_THRESHOLD: usize = 100;   // Fallback: also compact at 100+ messages
+
+        let needs_token_compaction = usage_percent >= TOKEN_COMPACTION_THRESHOLD_PERCENT;
+        let needs_message_compaction = messages.len() > MESSAGE_COMPACTION_THRESHOLD;
+        let needs_compaction = needs_token_compaction || needs_message_compaction;
+
+        if needs_compaction {
+            let reason = if needs_token_compaction {
+                format!(
+                    "Context usage at {}% ({} tokens / {} usable)",
+                    usage_percent,
+                    estimated_tokens.total(),
+                    usable_context
+                )
+            } else {
+                format!("Message count {} exceeds threshold", messages.len())
+            };
+
             info!(
+                estimated_tokens = estimated_tokens.total(),
+                usage_percent = usage_percent,
                 messages = messages.len(),
-                threshold = AUTO_COMPACT_MESSAGE_THRESHOLD,
-                "Message count exceeds threshold, triggering automatic compaction"
+                reason = %reason,
+                "Triggering automatic compaction"
             );
             send_update(
                 update_tx,
-                AppUpdate::Status(format!("Auto-compacting {} messages...", messages.len())),
+                AppUpdate::Status(format!("Auto-compacting: {}...", reason)),
             );
 
             let compact_start = Instant::now();
             let messages_before = messages.len();
-            let estimated_tokens = compaction::estimate_token_usage(&messages);
+            let tokens_before = estimated_tokens.total();
 
             let provider = self.provider.read().await;
             match compaction::compact(
@@ -1066,9 +1264,12 @@ impl Runner {
                     messages_summarized,
                 } => {
                     let duration = compact_start.elapsed();
+                    let tokens_after = compaction::estimate_messages_tokens(&new_messages);
                     info!(
                         messages_before = messages_before,
                         messages_after = new_messages.len(),
+                        tokens_before = tokens_before,
+                        tokens_after = tokens_after,
                         messages_summarized = messages_summarized,
                         duration_ms = duration.as_millis(),
                         "Auto-compaction successful"
@@ -1081,12 +1282,46 @@ impl Runner {
                         *history = messages.clone();
                     }
 
+                    // Update context state with new token estimate
+                    self.update_context_estimate(&messages).await;
+
+                    // CRITICAL: Reset CLI session after compaction
+                    // When using Claude CLI provider, the CLI maintains its own session history.
+                    // After compaction, we need to start a fresh CLI session with the compacted
+                    // history, otherwise the CLI's session still has the old (large) context.
+                    {
+                        let provider = self.provider.read().await;
+                        if provider.provider_id() == "anthropic-cli" {
+                            provider.set_cli_session_id(None).await;
+                            debug!("Cleared CLI session after compaction - next call will start fresh");
+                        }
+                    }
+
                     let status = if messages_summarized > 0 {
-                        format!("Summarized {messages_summarized} messages to save context")
+                        format!(
+                            "Compacted: {} → {} messages, {} → {} tokens",
+                            messages_before, messages.len(), tokens_before, tokens_after
+                        )
                     } else {
-                        "Pruned old tool outputs to save context".to_string()
+                        format!("Pruned old tool outputs: {} → {} tokens", tokens_before, tokens_after)
                     };
                     send_update(update_tx, AppUpdate::Status(status));
+
+                    // Send context status update
+                    let new_usage_percent = if usable_context > 0 {
+                        ((tokens_after as u64 * 100) / usable_context as u64).min(100) as u8
+                    } else {
+                        0
+                    };
+                    send_update(
+                        update_tx,
+                        AppUpdate::ContextStatus {
+                            estimated_tokens: tokens_after,
+                            context_limit,
+                            usage_percent: new_usage_percent,
+                            needs_compaction: false,
+                        },
+                    );
                 }
                 CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
                     debug!("Compaction not needed or insufficient messages");
@@ -1096,8 +1331,24 @@ impl Runner {
                         "Auto-compaction failed: {}, continuing without compaction",
                         err
                     );
+                    // Send warning to user
+                    send_update(
+                        update_tx,
+                        AppUpdate::Status(format!("Warning: Compaction failed - {}", err)),
+                    );
                 }
             }
+        } else {
+            // Send context status update even when not compacting
+            send_update(
+                update_tx,
+                AppUpdate::ContextStatus {
+                    estimated_tokens: estimated_tokens.total(),
+                    context_limit,
+                    usage_percent,
+                    needs_compaction: false,
+                },
+            );
         }
 
         // === SESSION PERSISTENCE: Save user message ===
@@ -1229,6 +1480,17 @@ impl Runner {
                         cost,
                         context_limit,
                     },
+                    LoopUpdate::ContextUpdate {
+                        estimated_tokens,
+                        context_limit,
+                        usage_percent,
+                        needs_compaction,
+                    } => AppUpdate::ContextStatus {
+                        estimated_tokens,
+                        context_limit,
+                        usage_percent,
+                        needs_compaction,
+                    },
                     LoopUpdate::Status(status) => AppUpdate::Status(status),
                     LoopUpdate::Error(error) => AppUpdate::Error(error),
                 };
@@ -1306,11 +1568,111 @@ impl Runner {
             permission_checker: Some(permission_checker),
         };
 
-        // Run the agent loop
-        let result = {
-            let agent_loop = self.agent_loop.lock().await;
-            agent_loop.run_prompt(&mut ctx, user_input).await
-        };
+        // Run the agent loop with emergency compaction on context overflow
+        // If the provider returns "prompt too long" or similar, we compact and retry once.
+        const MAX_OVERFLOW_RETRIES: usize = 1;
+        let mut overflow_retries = 0;
+        let result: Result<String, LoopError>;
+
+        loop {
+            let loop_result = {
+                let agent_loop = self.agent_loop.lock().await;
+                agent_loop.run_prompt(&mut ctx, user_input).await
+            };
+
+            match &loop_result {
+                Err(LoopError::ContextOverflow) if overflow_retries < MAX_OVERFLOW_RETRIES => {
+                    overflow_retries += 1;
+                    warn!(
+                        retry = overflow_retries,
+                        "Context overflow detected, performing emergency compaction"
+                    );
+                    send_update(
+                        update_tx,
+                        AppUpdate::Status("Context overflow - performing emergency compaction...".to_string()),
+                    );
+
+                    // Perform emergency compaction
+                    let provider = self.provider.read().await;
+                    let estimated_tokens = compaction::estimate_token_usage(ctx.messages);
+
+                    match compaction::compact(
+                        ctx.messages,
+                        &provider,
+                        &self.compaction_config,
+                        &estimated_tokens,
+                        context_limit,
+                        true, // force compaction
+                    )
+                    .await
+                    {
+                        CompactionResult::Compacted {
+                            messages: new_messages,
+                            summary: _,
+                            messages_summarized,
+                        } => {
+                            let tokens_after = compaction::estimate_messages_tokens(&new_messages);
+                            info!(
+                                messages_before = ctx.messages.len(),
+                                messages_after = new_messages.len(),
+                                tokens_after = tokens_after,
+                                messages_summarized = messages_summarized,
+                                "Emergency compaction successful"
+                            );
+
+                            // Update context with compacted messages
+                            *ctx.messages = new_messages;
+
+                            // Update history with compacted messages
+                            {
+                                let mut history = self.history.write().await;
+                                *history = ctx.messages.clone();
+                            }
+
+                            // Update context state
+                            self.update_context_estimate(ctx.messages).await;
+
+                            // CRITICAL: Reset CLI session after emergency compaction
+                            if provider.provider_id() == "anthropic-cli" {
+                                provider.set_cli_session_id(None).await;
+                                debug!("Cleared CLI session after emergency compaction - next call will start fresh");
+                            }
+
+                            send_update(
+                                update_tx,
+                                AppUpdate::Status(format!(
+                                    "Emergency compaction complete: {} tokens, retrying...",
+                                    tokens_after
+                                )),
+                            );
+
+                            // Retry the prompt (loop continues)
+                            continue;
+                        }
+                        CompactionResult::Failed(err) => {
+                            error!(error = %err, "Emergency compaction failed");
+                            send_update(
+                                update_tx,
+                                AppUpdate::Status(format!("Emergency compaction failed: {}", err)),
+                            );
+                            result = loop_result;
+                            break;
+                        }
+                        _ => {
+                            // NotNeeded or InsufficientMessages - shouldn't happen after overflow
+                            warn!("Emergency compaction returned unexpected result");
+                            result = loop_result;
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    // Either success, non-overflow error, or we've exhausted retries
+                    result = loop_result;
+                    break;
+                }
+            }
+        }
 
         // Drop the update channel to signal the forward task to stop
         drop(loop_update_tx);
@@ -1653,6 +2015,39 @@ impl Runner {
                     context_limit: model_info.limit.context,
                 },
             );
+        }
+
+        // Send initial token usage based on loaded history
+        // This ensures the UI shows token counts even before the first prompt
+        {
+            let context_state = self.get_context_state().await;
+            let history = self.history.read().await;
+            
+            // If we have history, send token usage estimate
+            if !history.is_empty() {
+                let estimated_tokens = context_state.estimated_tokens;
+                let context_limit = context_state.context_limit;
+                let usage_percent = context_state.usage_percent();
+                
+                // Send ContextStatus for accurate context usage display
+                send_update(
+                    &update_tx,
+                    AppUpdate::ContextStatus {
+                        estimated_tokens,
+                        context_limit,
+                        usage_percent,
+                        needs_compaction: context_state.needs_compaction(),
+                    },
+                );
+                
+                debug!(
+                    estimated_tokens = estimated_tokens,
+                    context_limit = context_limit,
+                    usage_percent = usage_percent,
+                    messages = history.len(),
+                    "Sent initial context status based on loaded history"
+                );
+            }
         }
 
         // Send initial MCP status (including unsupported servers)

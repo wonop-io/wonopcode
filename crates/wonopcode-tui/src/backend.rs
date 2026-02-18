@@ -1017,8 +1017,8 @@ impl IggyBackend {
                 }
             }
 
-            // Convert ServerPayload to AppUpdate
-            if let Some(update) = server_payload_to_app_update(server_msg.payload) {
+            // Convert ServerPayload to AppUpdate(s)
+            for update in server_payload_to_app_updates(server_msg.payload) {
                 if update_tx.send(update).is_err() {
                     tracing::info!("Update channel closed, stopping message processor");
                     return;
@@ -1150,47 +1150,50 @@ fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayloa
     })
 }
 
-/// Convert ServerPayload to AppUpdate for the TUI.
-fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
-    Some(match payload {
-        ServerPayload::Started => AppUpdate::Started,
-        ServerPayload::TextDelta { delta } => AppUpdate::TextDelta(delta),
+/// Convert ServerPayload to AppUpdate(s) for the TUI.
+///
+/// Most payloads map to a single AppUpdate, but State payloads can generate
+/// multiple updates to properly sync all UI state (tokens, sessions, etc.).
+fn server_payload_to_app_updates(payload: ServerPayload) -> Vec<AppUpdate> {
+    match payload {
+        ServerPayload::Started => vec![AppUpdate::Started],
+        ServerPayload::TextDelta { delta } => vec![AppUpdate::TextDelta(delta)],
         ServerPayload::ToolStarted { id, name, input } => {
-            AppUpdate::ToolStarted { name, id, input }
+            vec![AppUpdate::ToolStarted { name, id, input }]
         }
         ServerPayload::ToolCompleted {
             id,
             success,
             output,
             metadata,
-        } => AppUpdate::ToolCompleted {
+        } => vec![AppUpdate::ToolCompleted {
             id,
             success,
             output,
             metadata,
-        },
-        ServerPayload::Completed { text } => AppUpdate::Completed { text },
-        ServerPayload::Error { error } => AppUpdate::Error(error),
-        ServerPayload::Status { message } => AppUpdate::Status(message),
+        }],
+        ServerPayload::Completed { text } => vec![AppUpdate::Completed { text }],
+        ServerPayload::Error { error } => vec![AppUpdate::Error(error)],
+        ServerPayload::Status { message } => vec![AppUpdate::Status(message)],
         ServerPayload::TokenUsage {
             input,
             output,
             cost,
             context_limit,
-        } => AppUpdate::TokenUsage {
+        } => vec![AppUpdate::TokenUsage {
             input,
             output,
             cost,
             context_limit,
-        },
-        ServerPayload::ModelInfo { context_limit } => AppUpdate::ModelInfo { context_limit },
-        ServerPayload::Sessions { sessions } => AppUpdate::Sessions(
+        }],
+        ServerPayload::ModelInfo { context_limit } => vec![AppUpdate::ModelInfo { context_limit }],
+        ServerPayload::Sessions { sessions } => vec![AppUpdate::Sessions(
             sessions
                 .into_iter()
                 .map(|s| (s.id, s.title, s.timestamp))
                 .collect(),
-        ),
-        ServerPayload::TodosUpdated { phases, todos } => AppUpdate::TodosUpdated {
+        )],
+        ServerPayload::TodosUpdated { phases, todos } => vec![AppUpdate::TodosUpdated {
             phases: phases
                 .into_iter()
                 .map(|p| crate::PhaseUpdate {
@@ -1222,8 +1225,8 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                     parents: t.parents,
                 })
                 .collect(),
-        },
-        ServerPayload::LspUpdated { servers } => AppUpdate::LspUpdated(
+        }],
+        ServerPayload::LspUpdated { servers } => vec![AppUpdate::LspUpdated(
             servers
                 .into_iter()
                 .map(|s| crate::LspStatusUpdate {
@@ -1233,8 +1236,8 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                     connected: s.connected,
                 })
                 .collect(),
-        ),
-        ServerPayload::McpUpdated { servers } => AppUpdate::McpUpdated(
+        )],
+        ServerPayload::McpUpdated { servers } => vec![AppUpdate::McpUpdated(
             servers
                 .into_iter()
                 .map(|s| crate::McpStatusUpdate {
@@ -1243,8 +1246,8 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                     error: s.error,
                 })
                 .collect(),
-        ),
-        ServerPayload::ModifiedFilesUpdated { files } => AppUpdate::ModifiedFilesUpdated(
+        )],
+        ServerPayload::ModifiedFilesUpdated { files } => vec![AppUpdate::ModifiedFilesUpdated(
             files
                 .into_iter()
                 .map(|f| crate::ModifiedFileUpdate {
@@ -1253,48 +1256,170 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
                     removed: f.removed,
                 })
                 .collect(),
-        ),
-        ServerPayload::PermissionsPending { count } => AppUpdate::PermissionsPending(count),
+        )],
+        ServerPayload::PermissionsPending { count } => vec![AppUpdate::PermissionsPending(count)],
         ServerPayload::SandboxUpdated {
             state,
             runtime_type,
             error,
             container_id,
-        } => AppUpdate::SandboxUpdated(crate::SandboxStatusUpdate {
+        } => vec![AppUpdate::SandboxUpdated(crate::SandboxStatusUpdate {
             state,
             runtime_type,
             error,
             container_id,
-        }),
-        ServerPayload::SystemMessage { message } => AppUpdate::SystemMessage(message),
-        ServerPayload::AgentChanged { agent } => AppUpdate::AgentChanged(agent),
+        })],
+        ServerPayload::SystemMessage { message } => vec![AppUpdate::SystemMessage(message)],
+        ServerPayload::AgentChanged { agent } => vec![AppUpdate::AgentChanged(agent)],
         ServerPayload::PermissionRequest {
             id,
             tool,
             action,
             description,
             path,
-        } => AppUpdate::PermissionRequest(crate::PermissionRequestUpdate {
+        } => vec![AppUpdate::PermissionRequest(crate::PermissionRequestUpdate {
             id,
             tool,
             action,
             description,
             path,
-        }),
+        })],
         ServerPayload::PermissionResolved {
             request_id,
             allowed,
-        } => AppUpdate::PermissionResolved {
+        } => vec![AppUpdate::PermissionResolved {
             request_id,
             allowed,
-        },
-        // State payload contains full state - convert to session loaded
+        }],
+        // State payload contains full state - extract relevant updates
         ServerPayload::State(state) => {
-            // For now, just send status - full state handling TBD
-            AppUpdate::Status(format!(
-                "State synchronized: {} sessions",
-                state.sessions.len()
-            ))
+            let mut updates = Vec::new();
+
+            // Send token usage if we have any
+            if state.token_usage.input > 0 || state.token_usage.output > 0 {
+                updates.push(AppUpdate::TokenUsage {
+                    input: state.token_usage.input,
+                    output: state.token_usage.output,
+                    cost: state.token_usage.cost,
+                    context_limit: state.context_limit,
+                });
+            }
+
+            // Send model info for context limit
+            updates.push(AppUpdate::ModelInfo {
+                context_limit: state.context_limit,
+            });
+
+            // Send sessions list
+            if !state.sessions.is_empty() {
+                updates.push(AppUpdate::Sessions(
+                    state
+                        .sessions
+                        .into_iter()
+                        .map(|s| (s.id, s.title, s.timestamp))
+                        .collect(),
+                ));
+            }
+
+            // Send todos if any
+            if !state.phases.is_empty() || !state.todos.is_empty() {
+                updates.push(AppUpdate::TodosUpdated {
+                    phases: state
+                        .phases
+                        .into_iter()
+                        .map(|p| crate::PhaseUpdate {
+                            id: p.id,
+                            name: p.name,
+                            status: p.status,
+                            todos: p
+                                .todos
+                                .into_iter()
+                                .map(|t| crate::TodoUpdate {
+                                    id: t.id,
+                                    content: t.content,
+                                    status: t.status,
+                                    priority: t.priority,
+                                    phase_id: t.phase_id,
+                                    parents: t.parents,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                    todos: state
+                        .todos
+                        .into_iter()
+                        .map(|t| crate::TodoUpdate {
+                            id: t.id,
+                            content: t.content,
+                            status: t.status,
+                            priority: t.priority,
+                            phase_id: t.phase_id,
+                            parents: t.parents,
+                        })
+                        .collect(),
+                });
+            }
+
+            // Send LSP status if any
+            if !state.lsp_servers.is_empty() {
+                updates.push(AppUpdate::LspUpdated(
+                    state
+                        .lsp_servers
+                        .into_iter()
+                        .map(|s| crate::LspStatusUpdate {
+                            id: s.id,
+                            name: s.name,
+                            root: s.root,
+                            connected: s.connected,
+                        })
+                        .collect(),
+                ));
+            }
+
+            // Send MCP status if any
+            if !state.mcp_servers.is_empty() {
+                updates.push(AppUpdate::McpUpdated(
+                    state
+                        .mcp_servers
+                        .into_iter()
+                        .map(|s| crate::McpStatusUpdate {
+                            name: s.name,
+                            connected: s.connected,
+                            error: s.error,
+                        })
+                        .collect(),
+                ));
+            }
+
+            // Send sandbox status
+            updates.push(AppUpdate::SandboxUpdated(crate::SandboxStatusUpdate {
+                state: state.sandbox.state,
+                runtime_type: state.sandbox.runtime_type,
+                error: state.sandbox.error,
+                container_id: None,
+            }));
+
+            // Send modified files if any
+            if !state.modified_files.is_empty() {
+                updates.push(AppUpdate::ModifiedFilesUpdated(
+                    state
+                        .modified_files
+                        .into_iter()
+                        .map(|f| crate::ModifiedFileUpdate {
+                            path: f.path,
+                            added: f.added,
+                            removed: f.removed,
+                        })
+                        .collect(),
+                ));
+            }
+
+            // Send agent mode
+            if !state.agent.is_empty() {
+                updates.push(AppUpdate::AgentChanged(state.agent));
+            }
+
+            updates
         }
         // Workstream payloads - Pro edition only, ignore for now
         ServerPayload::WorkstreamList { .. }
@@ -1308,10 +1433,10 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::WorktreeDeleted
         | ServerPayload::WorkstreamsRefreshed { .. }
         | ServerPayload::WorkstreamEvent { .. }
-        | ServerPayload::ConversationHistory { .. } => return None,
+        | ServerPayload::ConversationHistory { .. } => vec![],
         // Control payloads
-        ServerPayload::Pong => return None, // Internal ping/pong, don't expose to UI
-        ServerPayload::ServerStatus { .. } => return None, // Internal status
+        ServerPayload::Pong => vec![], // Internal ping/pong, don't expose to UI
+        ServerPayload::ServerStatus { .. } => vec![], // Internal status
         // Agent control payloads - handled by Pro edition UI, not TUI
         ServerPayload::ModelChanged { .. }
         | ServerPayload::SandboxStarted { .. }
@@ -1321,6 +1446,6 @@ fn server_payload_to_app_update(payload: ServerPayload) -> Option<AppUpdate> {
         | ServerPayload::AgentStopped
         | ServerPayload::SessionStats { .. }
         | ServerPayload::AvailableModels { .. }
-        | ServerPayload::AllowAllChanged { .. } => return None,
-    })
+        | ServerPayload::AllowAllChanged { .. } => vec![],
+    }
 }

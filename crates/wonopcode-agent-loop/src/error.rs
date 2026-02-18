@@ -30,6 +30,12 @@ pub enum LoopError {
     #[error("Context limit exceeded")]
     ContextLimitExceeded,
 
+    /// Context overflow detected - compaction is needed.
+    /// This is a recoverable error that signals the runner should compact
+    /// and retry the operation.
+    #[error("Context overflow: compaction needed")]
+    ContextOverflow,
+
     /// Maximum iterations reached.
     #[error("Maximum iterations reached: {0}")]
     MaxIterations(u32),
@@ -45,7 +51,10 @@ impl LoopError {
     /// Some errors (like cancellation) are expected and don't indicate
     /// a problem with the loop implementation.
     pub fn is_recoverable(&self) -> bool {
-        matches!(self, Self::Cancelled | Self::ContextLimitExceeded)
+        matches!(
+            self,
+            Self::Cancelled | Self::ContextLimitExceeded | Self::ContextOverflow
+        )
     }
 
     /// Check if this error indicates the loop should stop.
@@ -56,6 +65,11 @@ impl LoopError {
         )
     }
 
+    /// Check if this error indicates compaction is needed and retry is possible.
+    pub fn needs_compaction(&self) -> bool {
+        matches!(self, Self::ContextOverflow)
+    }
+
     /// Create a tool execution error.
     pub fn tool_error(msg: impl Into<String>) -> Self {
         Self::ToolExecution(msg.into())
@@ -64,6 +78,15 @@ impl LoopError {
     /// Create an internal error.
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
+    }
+
+    /// Create from a provider error, detecting context overflow.
+    pub fn from_provider_error(err: ProviderError) -> Self {
+        if err.is_context_overflow() {
+            Self::ContextOverflow
+        } else {
+            Self::Provider(err)
+        }
     }
 }
 
@@ -78,8 +101,16 @@ mod tests {
     fn test_error_is_recoverable() {
         assert!(LoopError::Cancelled.is_recoverable());
         assert!(LoopError::ContextLimitExceeded.is_recoverable());
+        assert!(LoopError::ContextOverflow.is_recoverable());
         assert!(!LoopError::DoomLoop("test".into()).is_recoverable());
         assert!(!LoopError::ToolExecution("test".into()).is_recoverable());
+    }
+
+    #[test]
+    fn test_error_needs_compaction() {
+        assert!(LoopError::ContextOverflow.needs_compaction());
+        assert!(!LoopError::Cancelled.needs_compaction());
+        assert!(!LoopError::ContextLimitExceeded.needs_compaction());
     }
 
     #[test]

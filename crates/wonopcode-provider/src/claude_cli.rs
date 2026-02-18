@@ -58,7 +58,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Cache for the Claude CLI binary path.
 /// This is cached because finding the binary can be slow if it's not in PATH.
@@ -1057,6 +1057,14 @@ impl LanguageModel for ClaudeCliProvider {
 
                 tracing::trace!(line_len = line.len(), line_preview = %line.chars().take(100).collect::<String>(), "Received line from CLI");
 
+                // Check for result message specifically to log raw JSON
+                if line.contains("\"type\":\"result\"") {
+                    info!(
+                        line_preview = %line.chars().take(500).collect::<String>(),
+                        "Received result message (raw)"
+                    );
+                }
+
                 // Try to parse as our message type
                 match serde_json::from_str::<CliMessage>(&line) {
                     Ok(CliMessage::Assistant { message, session_id }) => {
@@ -1152,6 +1160,14 @@ impl LanguageModel for ClaudeCliProvider {
                         }
                     }
                     Ok(CliMessage::Result { result, is_error, usage, session_id }) => {
+                        // Log the received usage data for debugging
+                        info!(
+                            has_usage = usage.is_some(),
+                            usage_input = ?usage.as_ref().and_then(|u| u.input_tokens),
+                            usage_output = ?usage.as_ref().and_then(|u| u.output_tokens),
+                            "Claude CLI Result message received"
+                        );
+
                         // Capture session ID if we haven't already
                         if captured_session_id.is_none() {
                             if let Some(sid) = session_id {
@@ -1179,12 +1195,23 @@ impl LanguageModel for ClaudeCliProvider {
 
                         // Update final token counts
                         if let Some(u) = usage {
+                            info!(
+                                input = ?u.input_tokens,
+                                output = ?u.output_tokens,
+                                "Updating token counts from Result usage"
+                            );
                             if let Some(i) = u.input_tokens {
                                 input_tokens = i as u32;
                             }
                             if let Some(o) = u.output_tokens {
                                 output_tokens = o as u32;
                             }
+                        } else {
+                            warn!(
+                                current_input = input_tokens,
+                                current_output = output_tokens,
+                                "No usage in Result message - token counts unchanged"
+                            );
                         }
 
                         if text_started {

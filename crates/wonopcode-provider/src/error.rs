@@ -119,4 +119,40 @@ impl ProviderError {
                 | ProviderError::StreamInterrupted
         )
     }
+
+    /// Check if this error indicates context/token limit overflow.
+    ///
+    /// This detects both structured errors (ContextLengthExceeded) and
+    /// errors from providers that return error messages in different formats.
+    pub fn is_context_overflow(&self) -> bool {
+        match self {
+            ProviderError::ContextLengthExceeded { .. } => true,
+            ProviderError::Internal { message } | ProviderError::InvalidResponse(message) => {
+                let msg_lower = message.to_lowercase();
+                // Claude CLI / Anthropic API
+                msg_lower.contains("prompt too long")
+                    || msg_lower.contains("context_length_exceeded")
+                    || msg_lower.contains("maximum context length")
+                    // OpenAI
+                    || msg_lower.contains("maximum tokens")
+                    || msg_lower.contains("max_tokens")
+                    || msg_lower.contains("token limit")
+                    // Generic patterns
+                    || msg_lower.contains("context window")
+                    || msg_lower.contains("exceeds the model's maximum")
+            }
+            ProviderError::ApiError { message, .. } => {
+                let msg_lower = message.to_lowercase();
+                msg_lower.contains("context_length_exceeded")
+                    || msg_lower.contains("prompt too long")
+                    || msg_lower.contains("maximum context length")
+            }
+            _ => false,
+        }
+    }
+
+    /// Create a context length exceeded error.
+    pub fn context_length_exceeded(used: u32, limit: u32) -> Self {
+        Self::ContextLengthExceeded { used, limit }
+    }
 }

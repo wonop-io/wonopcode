@@ -206,7 +206,7 @@ impl AgentLoop for StandardLoop {
                 .provider
                 .generate(ctx.messages.clone(), options)
                 .await
-                .map_err(LoopError::Provider)?;
+                .map_err(LoopError::from_provider_error)?;
 
             tokio::pin!(stream);
 
@@ -328,6 +328,11 @@ impl AgentLoop for StandardLoop {
                         usage,
                         finish_reason: reason,
                     } => {
+                        info!(
+                            step_input = usage.input_tokens,
+                            step_output = usage.output_tokens,
+                            "Received FinishStep with usage"
+                        );
                         step_usage.merge(&usage);
                         finish_reason = reason;
 
@@ -336,6 +341,13 @@ impl AgentLoop for StandardLoop {
                         let cost = model_info.cost.calculate(
                             total_input + step_usage.input_tokens,
                             total_output + step_usage.output_tokens,
+                        );
+
+                        info!(
+                            total_input = total_input + step_usage.input_tokens,
+                            total_output = total_output + step_usage.output_tokens,
+                            cost = cost,
+                            "Sending TokenUsage update"
                         );
 
                         // Send token usage update

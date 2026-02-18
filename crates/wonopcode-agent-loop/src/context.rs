@@ -170,6 +170,21 @@ pub enum LoopUpdate {
         context_limit: u32,
     },
 
+    /// Context status update for token-based compaction awareness.
+    ///
+    /// This update is sent after each generation step to inform the runner
+    /// about the current context usage and whether compaction may be needed.
+    ContextUpdate {
+        /// Estimated total tokens currently in context.
+        estimated_tokens: u32,
+        /// Context limit from the model.
+        context_limit: u32,
+        /// Usage percentage (0-100).
+        usage_percent: u8,
+        /// Whether compaction is recommended (>80% usage).
+        needs_compaction: bool,
+    },
+
     /// Status message.
     Status(String),
 

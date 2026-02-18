@@ -132,6 +132,9 @@ pub trait SidebarTrait: Default + Send {
     /// Clear all modified files.
     fn clear_modified_files(&mut self);
 
+    /// Set context usage information for display.
+    fn set_context_usage(&mut self, estimated_tokens: u32, context_limit: u32, usage_percent: u8);
+
     /// Reset all workstream-specific state.
     /// This is called when switching workstreams to ensure clean state.
     fn reset_workstream_state(&mut self) {
@@ -163,6 +166,10 @@ pub struct ContextInfo {
     pub output_tokens: u32,
     pub max_tokens: u32,
     pub cost: f64,
+    /// Estimated tokens currently in context (from history).
+    pub estimated_tokens: u32,
+    /// Context usage percentage (0-100).
+    pub usage_percent: u8,
 }
 
 /// A phase containing grouped todos.
@@ -330,6 +337,13 @@ impl SidebarWidget {
 
     pub fn set_max_tokens(&mut self, max: u32) {
         self.context.max_tokens = max;
+    }
+
+    /// Set context usage information for display.
+    pub fn set_context_usage(&mut self, estimated_tokens: u32, context_limit: u32, usage_percent: u8) {
+        self.context.estimated_tokens = estimated_tokens;
+        self.context.max_tokens = context_limit;
+        self.context.usage_percent = usage_percent;
     }
 
     /// Get current token counts.
@@ -825,28 +839,45 @@ impl SidebarWidget {
 
         lines.push(Line::from(Span::styled("Context", title_style)));
 
-        let total_tokens = self.context.input_tokens + self.context.output_tokens;
-        let usage_pct = if self.context.max_tokens > 0 {
-            (total_tokens as f64 / self.context.max_tokens as f64 * 100.0) as u32
+        // Use estimated tokens if available (more accurate), otherwise fall back to I/O sum
+        let display_tokens = if self.context.estimated_tokens > 0 {
+            self.context.estimated_tokens
+        } else {
+            self.context.input_tokens + self.context.output_tokens
+        };
+
+        // Use pre-calculated usage_percent if available (from runner's token estimation)
+        let usage_pct = if self.context.usage_percent > 0 {
+            self.context.usage_percent as u32
+        } else if self.context.max_tokens > 0 {
+            (display_tokens as f64 / self.context.max_tokens as f64 * 100.0) as u32
         } else {
             0
         };
 
-        let usage_style = if usage_pct > 80 {
-            theme.warning_style()
+        // Style based on usage level:
+        // - < 50%: normal (comfortable)
+        // - 50-80%: normal (approaching high)
+        // - 80-95%: warning (compaction may occur)
+        // - > 95%: error (critical, compaction imminent)
+        let (usage_style, level_indicator) = if usage_pct >= 95 {
+            (theme.error_style(), " ⚠")
+        } else if usage_pct >= 80 {
+            (theme.warning_style(), " ↓")
         } else {
-            theme.text_style()
+            (theme.text_style(), "")
         };
 
         // Format: "67,360 tokens"
         lines.push(Line::from(vec![
-            Span::styled(format_number(total_tokens), theme.text_style()),
+            Span::styled(format_number(display_tokens), theme.text_style()),
             Span::styled(" tokens", theme.muted_style()),
         ]));
-        // Format: "34% used"
+        // Format: "34% used" (with optional indicator for high usage)
         lines.push(Line::from(vec![
             Span::styled(format!("{usage_pct}%"), usage_style),
             Span::styled(" used", theme.muted_style()),
+            Span::styled(level_indicator.to_string(), usage_style),
         ]));
         // Format: "$0.0000 spent"
         lines.push(Line::from(vec![
@@ -1295,6 +1326,10 @@ impl SidebarTrait for SidebarWidget {
 
     fn set_context(&mut self, context: ContextInfo) {
         self.set_context(context)
+    }
+
+    fn set_context_usage(&mut self, estimated_tokens: u32, context_limit: u32, usage_percent: u8) {
+        self.set_context_usage(estimated_tokens, context_limit, usage_percent)
     }
 
     fn is_focused(&self) -> bool {
