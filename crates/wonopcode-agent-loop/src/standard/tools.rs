@@ -189,6 +189,7 @@ impl<'a> ToolExecutor<'a> {
             file_time: Some(self.file_time.clone()),
             sandbox: self.sandbox.clone(),
             event_tx: self.event_tx.clone(),
+            ticket_service: None,
         };
 
         // Execute

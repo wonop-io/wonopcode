@@ -425,6 +425,7 @@ impl PromptLoop {
             file_time: self.file_time.clone(),
             sandbox: None, // Sandbox not used in prompt executor (yet)
             event_tx: None,
+            ticket_service: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool_name);

@@ -29,6 +29,7 @@ pub mod session;
 pub mod session_service;
 pub mod share;
 pub mod system_prompt;
+pub mod tracker_config;
 pub mod version;
 pub mod workstream;
 
@@ -58,6 +59,10 @@ pub use revert::{RevertInput, SessionRevert};
 pub use session::Session;
 pub use session_service::SessionService;
 pub use share::{ShareClient, ShareError, ShareInfo};
+pub use tracker_config::{
+    GithubTrackerConfig, LinearTrackerConfig, TrackerConfig, TrackerCredential,
+    TrackerCredentialsManager, TrackerType,
+};
 pub use wonopcode_util::DEFAULT_PERMISSION_TIMEOUT_SECS;
 pub use wonopcode_util::{BashPermission, BashPermissionConfig};
 pub use workstream::{

@@ -280,6 +280,7 @@ impl Clone for ToolContext {
             file_time: self.file_time.clone(),
             sandbox: self.sandbox.clone(),
             event_tx: self.event_tx.clone(),
+            ticket_service: self.ticket_service.clone(),
         }
     }
 }
@@ -362,15 +363,16 @@ mod tests {
     fn test_context() -> ToolContext {
         ToolContext {
             session_id: "test".to_string(),
-            message_id: "test".to_string(),
+            message_id: "msg".to_string(),
             agent: "test".to_string(),
             abort: CancellationToken::new(),
-            root_dir: PathBuf::from("/tmp"),
-            cwd: PathBuf::from("/tmp"),
+            root_dir: PathBuf::from("/"),
+            cwd: PathBuf::from("/"),
             snapshot: None,
             file_time: None,
             sandbox: None,
             event_tx: None,
+            ticket_service: None,
         }
     }
 

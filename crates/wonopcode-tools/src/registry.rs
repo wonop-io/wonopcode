@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Registry of available tools.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, BoxedTool>,
 }
@@ -41,6 +42,12 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::ace::AceTodoUpdateTool));
         registry.register(Arc::new(crate::ace::AceWhatNowTool));
         registry.register(Arc::new(crate::ace::AceSubmitCheckpointTool));
+
+        // Register ticket tools
+        registry.register(Arc::new(crate::ticket::TicketListTool));
+        registry.register(Arc::new(crate::ticket::TicketSearchTool));
+        registry.register(Arc::new(crate::ticket::TicketReadTool));
+        registry.register(Arc::new(crate::ticket::TicketCreateTool));
 
         registry
     }
@@ -209,11 +216,125 @@ mod tests {
         assert!(tools.contains(&"ace_todo_update"));
         assert!(tools.contains(&"ace_what_now"));
         assert!(tools.contains(&"ace_submit_checkpoint"));
+
+        // Should have ticket tools
+        assert!(tools.contains(&"ticket_list"));
+        assert!(tools.contains(&"ticket_search"));
+        assert!(tools.contains(&"ticket_read"));
+        assert!(tools.contains(&"ticket_create"));
     }
 
     #[test]
     fn tool_registry_with_builtins_arc_returns_arc() {
         let registry = ToolRegistry::with_builtins_arc();
         assert!(registry.get("read").is_some());
+    }
+
+    // Ticket tools integration tests
+
+    #[test]
+    fn tool_registry_ticket_list_has_valid_schema() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("ticket_list").expect("ticket_list should be registered");
+
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["status"].is_object());
+        assert!(schema["properties"]["assignee"].is_object());
+        assert!(schema["properties"]["labels"].is_object());
+        assert!(schema["properties"]["limit"].is_object());
+    }
+
+    #[test]
+    fn tool_registry_ticket_search_has_valid_schema() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("ticket_search").expect("ticket_search should be registered");
+
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+
+        let required = schema["required"].as_array().expect("should have required array");
+        assert!(required.contains(&json!("query")));
+
+        assert!(schema["properties"]["query"].is_object());
+        assert!(schema["properties"]["limit"].is_object());
+    }
+
+    #[test]
+    fn tool_registry_ticket_read_has_valid_schema() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("ticket_read").expect("ticket_read should be registered");
+
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+
+        let required = schema["required"].as_array().expect("should have required array");
+        assert!(required.contains(&json!("ticket_id")));
+
+        assert!(schema["properties"]["ticket_id"].is_object());
+        assert!(schema["properties"]["include_comments"].is_object());
+        assert!(schema["properties"]["include_attachments"].is_object());
+    }
+
+    #[test]
+    fn tool_registry_ticket_create_has_valid_schema() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry.get("ticket_create").expect("ticket_create should be registered");
+
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+
+        let required = schema["required"].as_array().expect("should have required array");
+        assert!(required.contains(&json!("title")));
+
+        assert!(schema["properties"]["title"].is_object());
+        assert!(schema["properties"]["description"].is_object());
+        assert!(schema["properties"]["tracker_id"].is_object());
+        assert!(schema["properties"]["assignee"].is_object());
+        assert!(schema["properties"]["labels"].is_object());
+        assert!(schema["properties"]["status"].is_object());
+    }
+
+    #[test]
+    fn tool_registry_ticket_tools_have_descriptions() {
+        let registry = ToolRegistry::with_builtins();
+
+        let ticket_tools = ["ticket_list", "ticket_search", "ticket_read", "ticket_create"];
+        for tool_id in &ticket_tools {
+            let tool = registry.get(tool_id).expect(&format!("{} should be registered", tool_id));
+            let desc = tool.description();
+            assert!(!desc.is_empty(), "{} should have a non-empty description", tool_id);
+            assert!(desc.len() > 20, "{} description should be meaningful", tool_id);
+        }
+    }
+
+    #[test]
+    fn tool_registry_filter_ticket_tools() {
+        let registry = ToolRegistry::with_builtins();
+
+        let ticket_tools = registry.filter(|id| id.starts_with("ticket_"));
+        assert_eq!(ticket_tools.len(), 4);
+
+        let tool_ids: Vec<&str> = ticket_tools.iter().map(|t| t.id()).collect();
+        assert!(tool_ids.contains(&"ticket_list"));
+        assert!(tool_ids.contains(&"ticket_search"));
+        assert!(tool_ids.contains(&"ticket_read"));
+        assert!(tool_ids.contains(&"ticket_create"));
+    }
+
+    #[test]
+    fn tool_registry_ticket_tools_unique_ids() {
+        let registry = ToolRegistry::with_builtins();
+
+        let tools = registry.list();
+        let ticket_ids: Vec<&str> = tools.into_iter()
+            .filter(|id| id.starts_with("ticket_"))
+            .collect();
+
+        // Ensure no duplicates
+        let mut unique = ticket_ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ticket_ids.len(), unique.len(), "ticket tool IDs should be unique");
     }
 }
