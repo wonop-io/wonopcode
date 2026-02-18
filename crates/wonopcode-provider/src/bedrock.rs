@@ -611,6 +611,7 @@ impl LanguageModel for BedrockProvider {
                             if let Some(finish_reason) = pending_finish_reason.take() {
                                 yield StreamChunk::FinishStep {
                                     usage: final_usage.clone(),
+                                    accumulated_usage: None,
                                     finish_reason,
                                 };
                             }
@@ -624,6 +625,7 @@ impl LanguageModel for BedrockProvider {
             if let Some(finish_reason) = pending_finish_reason.take() {
                 yield StreamChunk::FinishStep {
                     usage: final_usage,
+                    accumulated_usage: None,
                     finish_reason,
                 };
             }

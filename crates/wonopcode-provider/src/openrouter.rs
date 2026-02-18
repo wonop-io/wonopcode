@@ -422,6 +422,7 @@ impl LanguageModel for OpenRouterProvider {
 
                         yield StreamChunk::FinishStep {
                             usage,
+                            accumulated_usage: None,
                             finish_reason,
                         };
                     }

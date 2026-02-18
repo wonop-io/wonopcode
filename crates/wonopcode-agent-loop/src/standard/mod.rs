@@ -150,10 +150,6 @@ impl AgentLoop for StandardLoop {
             detector.reset();
         }
 
-        // Track total token usage across steps
-        let mut total_input: u32 = 0;
-        let mut total_output: u32 = 0;
-
         // Add user message
         let user_msg = ProviderMessage::user(user_input);
         ctx.messages.push(user_msg);
@@ -326,36 +322,66 @@ impl AgentLoop for StandardLoop {
                     }
                     StreamChunk::FinishStep {
                         usage,
+                        accumulated_usage,
                         finish_reason: reason,
                     } => {
                         info!(
                             step_input = usage.input_tokens,
                             step_output = usage.output_tokens,
+                            has_accumulated = accumulated_usage.is_some(),
                             "Received FinishStep with usage"
                         );
                         step_usage.merge(&usage);
                         finish_reason = reason;
 
-                        // Calculate cost
+                        // Calculate cost for THIS STEP only (delta, not cumulative)
+                        // The receiver will accumulate these deltas
                         let model_info = ctx.model_info();
-                        let cost = model_info.cost.calculate(
-                            total_input + step_usage.input_tokens,
-                            total_output + step_usage.output_tokens,
+                        let step_cost = model_info.cost.calculate(
+                            step_usage.input_tokens,
+                            step_usage.output_tokens,
                         );
 
+                        // Extract accumulated values from provider (if available)
+                        let (accumulated_input, accumulated_output, accumulated_cost, last_request_input, last_request_output, last_request_cache_read) = 
+                            if let Some(acc) = &accumulated_usage {
+                                (
+                                    Some(acc.total_input_tokens), 
+                                    Some(acc.total_output_tokens), 
+                                    Some(acc.total_cost),
+                                    Some(acc.last_request_input),
+                                    Some(acc.last_request_output),
+                                    Some(acc.last_request_cache_read),
+                                )
+                            } else {
+                                (None, None, None, None, None, None)
+                            };
+
                         info!(
-                            total_input = total_input + step_usage.input_tokens,
-                            total_output = total_output + step_usage.output_tokens,
-                            cost = cost,
+                            step_input = step_usage.input_tokens,
+                            step_output = step_usage.output_tokens,
+                            step_cost = step_cost,
+                            accumulated_input = ?accumulated_input,
+                            accumulated_output = ?accumulated_output,
+                            accumulated_cost = ?accumulated_cost,
+                            last_request_input = ?last_request_input,
+                            last_request_output = ?last_request_output,
+                            last_request_cache_read = ?last_request_cache_read,
                             "Sending TokenUsage update"
                         );
 
-                        // Send token usage update
+                        // Send token usage update with DELTA values and optional ACCUMULATED totals
                         ctx.send_update(LoopUpdate::TokenUsage {
-                            input: total_input + step_usage.input_tokens,
-                            output: total_output + step_usage.output_tokens,
-                            cost,
+                            input: step_usage.input_tokens,
+                            output: step_usage.output_tokens,
+                            cost: step_cost,
                             context_limit: model_info.limit.context,
+                            accumulated_input,
+                            accumulated_output,
+                            accumulated_cost,
+                            last_request_input,
+                            last_request_output,
+                            last_request_cache_read,
                         });
                     }
                     StreamChunk::Error(e) => {
@@ -370,10 +396,6 @@ impl AgentLoop for StandardLoop {
                     tool_calls.push((id, name, args));
                 }
             }
-
-            // Accumulate usage for this step
-            total_input += step_usage.input_tokens;
-            total_output += step_usage.output_tokens;
 
             info!(
                 iteration,

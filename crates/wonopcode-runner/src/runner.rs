@@ -362,10 +362,16 @@ impl ContextLevel {
 pub struct ContextState {
     /// Estimated tokens from current message history (calculated from content).
     pub estimated_tokens: u32,
-    /// Last actual input tokens reported by the provider.
+    /// Last actual input tokens reported by the provider (per-turn).
     pub last_input_tokens: u32,
-    /// Last actual output tokens reported by the provider.
+    /// Last actual output tokens reported by the provider (per-turn).
     pub last_output_tokens: u32,
+    /// Cumulative input tokens for the entire session.
+    pub session_input_tokens: u32,
+    /// Cumulative output tokens for the entire session.
+    pub session_output_tokens: u32,
+    /// Cumulative cost for the entire session.
+    pub session_cost: f64,
     /// Context limit from the model.
     pub context_limit: u32,
     /// Output token reserve (tokens reserved for model response).
@@ -1474,11 +1480,23 @@ impl Runner {
                         output,
                         cost,
                         context_limit,
+                        accumulated_input,
+                        accumulated_output,
+                        accumulated_cost,
+                        last_request_input,
+                        last_request_output,
+                        last_request_cache_read,
                     } => AppUpdate::TokenUsage {
                         input,
                         output,
                         cost,
                         context_limit,
+                        accumulated_input,
+                        accumulated_output,
+                        accumulated_cost,
+                        last_request_input,
+                        last_request_output,
+                        last_request_cache_read,
                     },
                     LoopUpdate::ContextUpdate {
                         estimated_tokens,

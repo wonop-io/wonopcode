@@ -351,6 +351,69 @@ pub struct ExternalMcpServer {
     pub env: HashMap<String, String>,
 }
 
+/// Accumulated token usage across the session.
+///
+/// This tracks the total tokens used across all turns in the session.
+/// The Claude CLI reports the current context size (not deltas), so we need
+/// to track the previous values to compute deltas for each turn.
+#[derive(Debug, Clone, Default)]
+pub struct AccumulatedUsage {
+    /// Total input tokens accumulated across all turns.
+    pub total_input_tokens: u64,
+    /// Total output tokens accumulated across all turns.
+    pub total_output_tokens: u64,
+    /// Total cost accumulated (if tracked).
+    pub total_cost: f64,
+    /// Number of completed turns.
+    pub num_turns: u32,
+    /// Last reported context size (input tokens from CLI, used to compute deltas).
+    /// This is the full context size reported by Claude CLI, not a delta.
+    last_context_input: u64,
+    /// Last reported output tokens (used to compute deltas).
+    last_output: u64,
+}
+
+impl AccumulatedUsage {
+    /// Reset the accumulated usage (e.g., when starting a new session).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Update with new turn data from Claude CLI.
+    ///
+    /// Takes the **delta** tokens (new tokens this turn, excluding cache reads)
+    /// and accumulates them.
+    ///
+    /// # Arguments
+    /// - `input_delta`: New input tokens this turn (input_tokens + cache_creation, NOT cache_read)
+    /// - `output_tokens`: Output tokens this turn (each response is fresh)
+    /// - `context_input_tokens`: Full context size for last_request tracking
+    /// - `cost`: Cumulative cost from Claude CLI (it reports total, not delta)
+    ///
+    /// Returns (input_delta, output_delta) for this turn.
+    pub fn update_from_cli_turn(
+        &mut self,
+        input_delta: u64,
+        output_tokens: u64,
+        context_input_tokens: u64,
+        cost: Option<f64>,
+    ) -> (u64, u64) {
+        // Update accumulated totals
+        self.total_input_tokens += input_delta;
+        self.total_output_tokens += output_tokens;
+        if let Some(c) = cost {
+            self.total_cost = c; // CLI reports cumulative cost, so use it directly
+        }
+        self.num_turns += 1;
+
+        // Store current context size for context tracking (not for delta calculation)
+        self.last_context_input = context_input_tokens;
+        self.last_output = output_tokens;
+
+        (input_delta, output_tokens)
+    }
+}
+
 /// Provider that uses Claude Code CLI for subscription-based access.
 ///
 /// This provider spawns the Claude Code CLI as a subprocess and communicates
@@ -362,6 +425,9 @@ pub struct ExternalMcpServer {
 ///
 /// Session resumption: The provider captures the session_id from Claude CLI
 /// output and can reuse it for subsequent calls via `--resume`.
+///
+/// Token tracking: The provider maintains accumulated token usage across the
+/// session, computing deltas from the Claude CLI's context size reports.
 pub struct ClaudeCliProvider {
     model: ModelInfo,
     /// MCP configuration, if using custom tools.
@@ -372,6 +438,9 @@ pub struct ClaudeCliProvider {
     /// Working directory for the CLI process.
     /// If not set, inherits from the parent process.
     working_directory: Option<PathBuf>,
+    /// Accumulated token usage for the session.
+    /// Protected by RwLock for interior mutability.
+    accumulated_usage: std::sync::Arc<tokio::sync::RwLock<AccumulatedUsage>>,
 }
 
 impl ClaudeCliProvider {
@@ -391,6 +460,7 @@ impl ClaudeCliProvider {
             mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: None,
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
         })
     }
 
@@ -409,6 +479,7 @@ impl ClaudeCliProvider {
             mcp_config: Some(mcp_config),
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: None,
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
         })
     }
 
@@ -439,6 +510,7 @@ impl ClaudeCliProvider {
             mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: Some(working_directory),
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
         })
     }
 
@@ -456,8 +528,20 @@ impl ClaudeCliProvider {
     }
 
     /// Clear the session ID, forcing a new session on the next call.
+    /// Also resets the accumulated token usage.
     pub async fn clear_session(&self) {
         *self.session_id.write().await = None;
+        self.accumulated_usage.write().await.reset();
+    }
+
+    /// Get the accumulated token usage for the session.
+    pub async fn get_accumulated_usage(&self) -> AccumulatedUsage {
+        self.accumulated_usage.read().await.clone()
+    }
+
+    /// Reset the accumulated token usage without clearing the session.
+    pub async fn reset_accumulated_usage(&self) {
+        self.accumulated_usage.write().await.reset();
     }
 
     /// Check if Claude CLI is installed and accessible.
@@ -748,6 +832,12 @@ enum CliMessage {
         is_error: bool,
         usage: Option<CliUsage>,
         session_id: Option<String>,
+        /// Total cost for the entire session in USD (cumulative)
+        #[serde(default)]
+        total_cost_usd: Option<f64>,
+        /// Number of turns in the session (cumulative)
+        #[serde(default)]
+        num_turns: Option<u32>,
     },
 }
 
@@ -853,12 +943,72 @@ enum ContentBlock {
 struct MessageUsage {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    /// Tokens used to create new cache entries
+    cache_creation_input_tokens: Option<u64>,
+    /// Tokens read from existing cache entries  
+    cache_read_input_tokens: Option<u64>,
+}
+
+impl MessageUsage {
+    /// Get total input tokens including cached tokens.
+    /// This represents the full context size being processed.
+    fn total_input_tokens(&self) -> u64 {
+        let base = self.input_tokens.unwrap_or(0);
+        let cache_creation = self.cache_creation_input_tokens.unwrap_or(0);
+        let cache_read = self.cache_read_input_tokens.unwrap_or(0);
+        base + cache_creation + cache_read
+    }
+    
+    /// Get input tokens that are NEW this turn (not cache reads).
+    /// This is the actual delta that should be accumulated across turns.
+    /// = input_tokens + cache_creation_input_tokens (excludes cache_read)
+    fn delta_input_tokens(&self) -> u64 {
+        let base = self.input_tokens.unwrap_or(0);
+        let cache_creation = self.cache_creation_input_tokens.unwrap_or(0);
+        // Deliberately exclude cache_read_input_tokens as those were counted in previous turns
+        base + cache_creation
+    }
+    
+    /// Get cache read tokens for this turn.
+    fn cache_read_tokens(&self) -> u64 {
+        self.cache_read_input_tokens.unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct CliUsage {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    /// Tokens used to create new cache entries
+    cache_creation_input_tokens: Option<u64>,
+    /// Tokens read from existing cache entries  
+    cache_read_input_tokens: Option<u64>,
+}
+
+impl CliUsage {
+    /// Get total input tokens including cached tokens.
+    /// This represents the full context size being processed.
+    fn total_input_tokens(&self) -> u64 {
+        let base = self.input_tokens.unwrap_or(0);
+        let cache_creation = self.cache_creation_input_tokens.unwrap_or(0);
+        let cache_read = self.cache_read_input_tokens.unwrap_or(0);
+        base + cache_creation + cache_read
+    }
+    
+    /// Get input tokens that are NEW this turn (not cache reads).
+    /// This is the actual delta that should be accumulated across turns.
+    /// = input_tokens + cache_creation_input_tokens (excludes cache_read)
+    fn delta_input_tokens(&self) -> u64 {
+        let base = self.input_tokens.unwrap_or(0);
+        let cache_creation = self.cache_creation_input_tokens.unwrap_or(0);
+        // Deliberately exclude cache_read_input_tokens as those were counted in previous turns
+        base + cache_creation
+    }
+    
+    /// Get cache read tokens for this turn.
+    fn cache_read_tokens(&self) -> u64 {
+        self.cache_read_input_tokens.unwrap_or(0)
+    }
 }
 
 #[async_trait]
@@ -1027,14 +1177,23 @@ impl LanguageModel for ClaudeCliProvider {
         // Clone session ID handle for updating in the stream
         let session_id_handle = self.session_id.clone();
 
+        // Clone accumulated usage handle for token tracking in the stream
+        let accumulated_usage_handle = self.accumulated_usage.clone();
+
         // Clone abort token for cancellation
         let abort = options.abort.clone();
 
         // Create the output stream that parses CLI JSON output
         let output_stream = try_stream! {
             let mut total_text = String::new();
-            let mut input_tokens: u32 = 0;
-            let mut output_tokens: u32 = 0;
+            // These store the CLI-reported context sizes (full context, NOT deltas)
+            let mut cli_context_input_tokens: u64 = 0;
+            // This stores the DELTA input tokens (new tokens this turn, excluding cache reads)
+            let mut cli_delta_input_tokens: u64 = 0;
+            // This stores the cache read tokens for this turn
+            let mut cli_cache_read_tokens: u64 = 0;
+            let mut cli_output_tokens: u64 = 0;
+            let mut cli_cost: Option<f64> = None;
             let mut text_started = false;
             let mut captured_session_id: Option<String> = None;
 
@@ -1123,13 +1282,16 @@ impl LanguageModel for ClaudeCliProvider {
                                 }
                             }
                         }
-                        // Update token counts if available
-                        if let Some(usage) = message.usage {
-                            if let Some(i) = usage.input_tokens {
-                                input_tokens = i as u32;
-                            }
+                        // Update CLI-reported context sizes
+                        if let Some(ref usage) = message.usage {
+                            // Full context size (includes cache reads)
+                            cli_context_input_tokens = usage.total_input_tokens();
+                            // Delta input tokens (NEW tokens, excludes cache reads)
+                            cli_delta_input_tokens = usage.delta_input_tokens();
+                            // Cache read tokens for this turn
+                            cli_cache_read_tokens = usage.cache_read_tokens();
                             if let Some(o) = usage.output_tokens {
-                                output_tokens = o as u32;
+                                cli_output_tokens = o;
                             }
                         }
                     }
@@ -1159,12 +1321,14 @@ impl LanguageModel for ClaudeCliProvider {
                             };
                         }
                     }
-                    Ok(CliMessage::Result { result, is_error, usage, session_id }) => {
+                    Ok(CliMessage::Result { result, is_error, usage, session_id, total_cost_usd, num_turns }) => {
                         // Log the received usage data for debugging
                         info!(
                             has_usage = usage.is_some(),
                             usage_input = ?usage.as_ref().and_then(|u| u.input_tokens),
                             usage_output = ?usage.as_ref().and_then(|u| u.output_tokens),
+                            total_cost_usd = ?total_cost_usd,
+                            num_turns = ?num_turns,
                             "Claude CLI Result message received"
                         );
 
@@ -1193,46 +1357,108 @@ impl LanguageModel for ClaudeCliProvider {
                             yield StreamChunk::TextDelta(result);
                         }
 
-                        // Update final token counts
-                        if let Some(u) = usage {
+                        // Update CLI-reported context sizes from Result message
+                        if let Some(ref u) = usage {
+                            // Full context size (includes cache reads)
+                            cli_context_input_tokens = u.total_input_tokens();
+                            // Delta input tokens (NEW tokens, excludes cache reads)
+                            cli_delta_input_tokens = u.delta_input_tokens();
+                            // Cache read tokens for this turn
+                            cli_cache_read_tokens = u.cache_read_tokens();
+                            if let Some(o) = u.output_tokens {
+                                cli_output_tokens = o;
+                            }
                             info!(
                                 input = ?u.input_tokens,
-                                output = ?u.output_tokens,
-                                "Updating token counts from Result usage"
+                                cache_creation = ?u.cache_creation_input_tokens,
+                                cache_read = ?u.cache_read_input_tokens,
+                                total_context = cli_context_input_tokens,
+                                delta_input = cli_delta_input_tokens,
+                                output = cli_output_tokens,
+                                "Received CLI context sizes from Result"
                             );
-                            if let Some(i) = u.input_tokens {
-                                input_tokens = i as u32;
-                            }
-                            if let Some(o) = u.output_tokens {
-                                output_tokens = o as u32;
-                            }
                         } else {
                             warn!(
-                                current_input = input_tokens,
-                                current_output = output_tokens,
-                                "No usage in Result message - token counts unchanged"
+                                cli_context_input_tokens = cli_context_input_tokens,
+                                cli_delta_input_tokens = cli_delta_input_tokens,
+                                cli_cache_read_tokens = cli_cache_read_tokens,
+                                cli_output_tokens = cli_output_tokens,
+                                "No usage in Result message - using values from Assistant message"
                             );
                         }
+
+                        // Store cost if available
+                        cli_cost = total_cost_usd;
 
                         if text_started {
                             yield StreamChunk::TextEnd;
                         }
+
+                        // Update accumulated usage with the DELTA tokens (excluding cache reads)
+                        // The delta is: input_tokens + cache_creation_input_tokens (NOT cache_read)
+                        let (input_delta, output_delta) = {
+                            let mut acc = accumulated_usage_handle.write().await;
+                            let deltas = acc.update_from_cli_turn(
+                                cli_delta_input_tokens,  // Delta (excludes cache reads)
+                                cli_output_tokens,
+                                cli_context_input_tokens, // Full context for tracking
+                                cli_cost,
+                            );
+                            info!(
+                                cli_context_input = cli_context_input_tokens,
+                                cli_delta_input = cli_delta_input_tokens,
+                                cli_output = cli_output_tokens,
+                                input_delta = deltas.0,
+                                output_delta = deltas.1,
+                                accumulated_input = acc.total_input_tokens,
+                                accumulated_output = acc.total_output_tokens,
+                                num_turns = acc.num_turns,
+                                "Token usage computed (delta excludes cache reads)"
+                            );
+                            deltas
+                        };
 
                         // Always use EndTurn since Claude CLI executes tools internally
                         // (whether via built-in tools or MCP, we don't want the runner
                         // to try to execute them again)
                         let finish_reason = crate::stream::FinishReason::EndTurn;
 
+                        // Get the accumulated usage to send with FinishStep
+                        let accumulated = {
+                            let acc = accumulated_usage_handle.read().await;
+                            crate::stream::AccumulatedUsage {
+                                total_input_tokens: acc.total_input_tokens,
+                                total_output_tokens: acc.total_output_tokens,
+                                total_cache_read_tokens: cli_cache_read_tokens, // Cache read for this turn
+                                total_cache_write_tokens: 0,
+                                total_reasoning_tokens: 0,
+                                total_cost: acc.total_cost,
+                                // Include the actual context size for the last/current request
+                                last_request_input: cli_context_input_tokens,
+                                last_request_output: cli_output_tokens,
+                                last_request_cache_read: cli_cache_read_tokens,
+                            }
+                        };
+
+                        // Yield the DELTA values for this step plus ACCUMULATED totals
                         yield StreamChunk::FinishStep {
                             usage: crate::stream::Usage {
-                                input_tokens,
-                                output_tokens,
+                                input_tokens: input_delta as u32,
+                                output_tokens: output_delta as u32,
                                 ..Default::default()
                             },
+                            accumulated_usage: Some(accumulated.clone()),
                             finish_reason,
                         };
 
-                        debug!(input_tokens, output_tokens, "Stream completed");
+                        info!(
+                            input_delta = input_delta,
+                            output_delta = output_delta,
+                            accumulated_input = accumulated.total_input_tokens,
+                            accumulated_output = accumulated.total_output_tokens,
+                            accumulated_cost = accumulated.total_cost,
+                            "Stream completed with token usage"
+                        );
                         break;
                     }
                     Ok(CliMessage::System { session_id }) => {

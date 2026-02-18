@@ -113,6 +113,7 @@ impl StreamProcessor {
             },
             StreamChunk::FinishStep {
                 usage,
+                accumulated_usage: _,  // Handled by caller
                 finish_reason,
             } => {
                 self.usage.merge(&usage);

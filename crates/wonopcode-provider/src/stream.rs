@@ -66,8 +66,11 @@ pub enum StreamChunk {
 
     /// A step in the response is finishing.
     FinishStep {
-        /// Token usage for this step.
+        /// Token usage for this step (delta).
         usage: Usage,
+        /// Accumulated token usage across all steps (provider lifetime).
+        /// This is the total that should be displayed to the user.
+        accumulated_usage: Option<AccumulatedUsage>,
         /// Reason for finishing.
         finish_reason: FinishReason,
     },
@@ -139,10 +142,10 @@ impl StreamChunk {
     }
 }
 
-/// Token usage information.
+/// Token usage information for a single request/step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
-    /// Input tokens used.
+    /// Input tokens used (excluding cache).
     pub input_tokens: u32,
     /// Output tokens generated.
     pub output_tokens: u32,
@@ -155,6 +158,59 @@ pub struct Usage {
     /// Reasoning tokens (for models with thinking).
     #[serde(default)]
     pub reasoning_tokens: u32,
+}
+
+/// Accumulated token usage across multiple requests/steps.
+/// This tracks the total usage for a provider's lifetime or session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AccumulatedUsage {
+    /// Total input tokens across all requests (excluding cache).
+    pub total_input_tokens: u64,
+    /// Total output tokens across all requests.
+    pub total_output_tokens: u64,
+    /// Total cache read tokens across all requests.
+    pub total_cache_read_tokens: u64,
+    /// Total cache write tokens across all requests.
+    pub total_cache_write_tokens: u64,
+    /// Total reasoning tokens across all requests.
+    pub total_reasoning_tokens: u64,
+    /// Total cost in USD across all requests.
+    pub total_cost: f64,
+    /// Input tokens for the last/current request (full context size sent to model).
+    /// This represents the actual context window usage for the most recent request.
+    pub last_request_input: u64,
+    /// Output tokens for the last/current request.
+    pub last_request_output: u64,
+    /// Cache read tokens for the last/current request.
+    /// This represents tokens read from cache (not charged at full rate).
+    pub last_request_cache_read: u64,
+}
+
+impl AccumulatedUsage {
+    /// Create a new accumulated usage with zeroes.
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// Add a usage to the accumulated totals.
+    pub fn add(&mut self, usage: &Usage) {
+        self.total_input_tokens += usage.input_tokens as u64;
+        self.total_output_tokens += usage.output_tokens as u64;
+        self.total_cache_read_tokens += usage.cache_read_tokens as u64;
+        self.total_cache_write_tokens += usage.cache_write_tokens as u64;
+        self.total_reasoning_tokens += usage.reasoning_tokens as u64;
+    }
+    
+    /// Total input tokens including cache operations.
+    /// This represents the full context processed.
+    pub fn total_context_tokens(&self) -> u64 {
+        self.total_input_tokens + self.total_cache_read_tokens + self.total_cache_write_tokens
+    }
+    
+    /// Reset the accumulated usage to zero.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 impl Usage {

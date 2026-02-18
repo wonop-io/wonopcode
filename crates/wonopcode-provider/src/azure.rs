@@ -527,6 +527,7 @@ impl LanguageModel for AzureProvider {
 
                         yield StreamChunk::FinishStep {
                             usage,
+                            accumulated_usage: None,
                             finish_reason,
                         };
                     }

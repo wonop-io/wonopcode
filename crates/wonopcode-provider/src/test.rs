@@ -267,6 +267,7 @@ Try any of the keywords above to see different response types!
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(50, 500),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -289,6 +290,7 @@ Try any of the keywords above to see different response types!
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(50, 80),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -341,6 +343,7 @@ This concludes our lorem ipsum demonstration. The text above is commonly used fo
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 800),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -403,6 +406,7 @@ And in server rooms around the world, other programs began to listen a little mo
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(150, 1200),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -541,6 +545,7 @@ This architecture provides a flexible, performant foundation for real-time AI in
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(200, 1500),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -641,6 +646,7 @@ This architecture provides a flexible, performant foundation for real-time AI in
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(180, 1100),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -806,6 +812,7 @@ This architecture provides a flexible, performant foundation for real-time AI in
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(120, 1300),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -966,6 +973,7 @@ Use backslashes to escape: \*not italic\* and \`not code\`
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 1000),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1017,6 +1025,7 @@ Use backslashes to escape: \*not italic\* and \`not code\`
                             reasoning_tokens: 150,
                             ..Default::default()
                         },
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1065,6 +1074,7 @@ fn main() {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 250),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1108,6 +1118,7 @@ fn main() {
 
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(80, 120),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::ToolUse,
                     };
                 }
@@ -1167,6 +1178,7 @@ fn main() {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(150, 180),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1250,6 +1262,7 @@ fn main() {
 
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(150, 200),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::ToolUse,
                     };
                 }
@@ -1325,6 +1338,7 @@ fn main() {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(300, 350),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1351,6 +1365,7 @@ fn main() {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(500, 180),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -1400,6 +1415,7 @@ fn main() {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(200, 800),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }

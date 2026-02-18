@@ -222,6 +222,7 @@ impl LanguageModel for RecordingProvider {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -239,6 +240,7 @@ impl LanguageModel for RecordingProvider {
                             reasoning_tokens: 30,
                             ..Default::default()
                         },
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -247,6 +249,7 @@ impl LanguageModel for RecordingProvider {
                     yield StreamChunk::ToolCall { id, name, arguments };
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::ToolUse,
                     };
                 }
@@ -257,6 +260,7 @@ impl LanguageModel for RecordingProvider {
                     }
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::ToolUse,
                     };
                 }
@@ -355,6 +359,7 @@ impl LanguageModel for ReplayProvider {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }
@@ -364,6 +369,7 @@ impl LanguageModel for ReplayProvider {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: FinishReason::EndTurn,
                     };
                 }

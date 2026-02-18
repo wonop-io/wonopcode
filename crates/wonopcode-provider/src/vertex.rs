@@ -319,7 +319,7 @@ impl LanguageModel for VertexProvider {
                                     Usage::default()
                                 };
 
-                                yield StreamChunk::FinishStep { usage, finish_reason };
+                                yield StreamChunk::FinishStep { usage, accumulated_usage: None, finish_reason };
                             }
                         }
                     }

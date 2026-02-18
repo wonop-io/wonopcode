@@ -455,6 +455,7 @@ impl LanguageModel for OpenAICompatibleProvider {
 
                         yield StreamChunk::FinishStep {
                             usage,
+                            accumulated_usage: None,
                             finish_reason,
                         };
                     }

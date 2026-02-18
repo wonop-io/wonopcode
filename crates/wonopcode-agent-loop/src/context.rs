@@ -160,14 +160,26 @@ pub enum LoopUpdate {
 
     /// Token usage update.
     TokenUsage {
-        /// Input tokens used.
+        /// Input tokens used (delta for this step).
         input: u32,
-        /// Output tokens used.
+        /// Output tokens used (delta for this step).
         output: u32,
-        /// Estimated cost.
+        /// Estimated cost (delta for this step).
         cost: f64,
         /// Context limit.
         context_limit: u32,
+        /// Accumulated usage across all steps (from provider).
+        /// This is the total that should be displayed to the user.
+        /// If None, the receiver should accumulate input/output manually.
+        accumulated_input: Option<u64>,
+        accumulated_output: Option<u64>,
+        accumulated_cost: Option<f64>,
+        /// Input tokens for the last/current request (full context size sent to model).
+        last_request_input: Option<u64>,
+        /// Output tokens for the last/current request.
+        last_request_output: Option<u64>,
+        /// Cache read tokens for the last/current request.
+        last_request_cache_read: Option<u64>,
     },
 
     /// Context status update for token-based compaction awareness.

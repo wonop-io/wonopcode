@@ -493,6 +493,7 @@ impl LanguageModel for OpenAIProvider {
 
                         yield StreamChunk::FinishStep {
                             usage,
+                            accumulated_usage: None,
                             finish_reason,
                         };
                     }
@@ -504,6 +505,7 @@ impl LanguageModel for OpenAIProvider {
                         let usage = Usage::new(u.prompt_tokens, u.completion_tokens);
                         yield StreamChunk::FinishStep {
                             usage,
+                            accumulated_usage: None,
                             finish_reason: FinishReason::EndTurn,
                         };
                     }

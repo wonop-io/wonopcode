@@ -114,6 +114,7 @@ impl LanguageModel for MockProvider {
                     yield StreamChunk::TextEnd;
                     yield StreamChunk::FinishStep {
                         usage: crate::stream::Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: crate::stream::FinishReason::EndTurn,
                     };
                 }
@@ -122,6 +123,7 @@ impl LanguageModel for MockProvider {
                     yield StreamChunk::ToolCall { id, name, arguments };
                     yield StreamChunk::FinishStep {
                         usage: crate::stream::Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: crate::stream::FinishReason::ToolUse,
                     };
                 }
@@ -142,6 +144,7 @@ impl LanguageModel for MockProvider {
                     }
                     yield StreamChunk::FinishStep {
                         usage: crate::stream::Usage::new(100, 50),
+                        accumulated_usage: None,
                         finish_reason: crate::stream::FinishReason::EndTurn,
                     };
                 }

@@ -113,6 +113,24 @@ pub enum ServerPayload {
         output: u32,
         cost: f64,
         context_limit: u32,
+        /// Accumulated input tokens (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_input: Option<u64>,
+        /// Accumulated output tokens (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_output: Option<u64>,
+        /// Accumulated cost (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_cost: Option<f64>,
+        /// Input tokens for the last/current request (full context size sent to model).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_input: Option<u64>,
+        /// Output tokens for the last/current request.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_output: Option<u64>,
+        /// Cache read tokens for the last/current request.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_cache_read: Option<u64>,
     },
 
     /// Model info update.

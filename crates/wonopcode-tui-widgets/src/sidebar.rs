@@ -53,6 +53,12 @@ pub trait SidebarTrait: Default + Send {
     /// Set the maximum tokens (context limit).
     fn set_max_tokens(&mut self, max: u32);
 
+    /// Set the last request token counts (input, output).
+    /// This is the actual context size sent to the model for the most recent request.
+    fn set_last_request_tokens(&mut self, _input: u32, _output: u32) {
+        // Default implementation does nothing - optional for sidebars that don't display this
+    }
+
     /// Get current token counts (input, output).
     fn get_tokens(&self) -> (u32, u32);
 

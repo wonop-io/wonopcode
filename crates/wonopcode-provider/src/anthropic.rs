@@ -327,6 +327,7 @@ impl AnthropicProvider {
                 );
                 Ok(Some(StreamChunk::FinishStep {
                     usage,
+                    accumulated_usage: None, // API providers don't track accumulated usage
                     finish_reason,
                 }))
             }

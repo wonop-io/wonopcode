@@ -39,10 +39,32 @@ pub enum Update {
 
     /// Token usage update.
     TokenUsage {
+        /// Input tokens (delta for this step).
         input: u32,
+        /// Output tokens (delta for this step).
         output: u32,
+        /// Cost (delta for this step).
         cost: f64,
+        /// Context limit from model.
         context_limit: u32,
+        /// Accumulated input tokens (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_input: Option<u64>,
+        /// Accumulated output tokens (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_output: Option<u64>,
+        /// Accumulated cost (from provider, if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accumulated_cost: Option<f64>,
+        /// Input tokens for the last/current request (full context size sent to model).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_input: Option<u64>,
+        /// Output tokens for the last/current request.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_output: Option<u64>,
+        /// Cache read tokens for the last/current request.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_request_cache_read: Option<u64>,
     },
 
     /// Model info update.
@@ -262,6 +284,12 @@ mod tests {
             output: 500,
             cost: 0.02,
             context_limit: 128000,
+            accumulated_input: Some(5000),
+            accumulated_output: Some(2000),
+            accumulated_cost: Some(0.10),
+            last_request_input: Some(3500),
+            last_request_output: Some(400),
+            last_request_cache_read: Some(2500),
         };
         let json = serde_json::to_string(&update).unwrap();
         assert!(json.contains("token_usage"));
@@ -376,6 +404,12 @@ mod tests {
                 output: 0,
                 cost: 0.0,
                 context_limit: 0,
+                accumulated_input: None,
+                accumulated_output: None,
+                accumulated_cost: None,
+                last_request_input: None,
+                last_request_output: None,
+                last_request_cache_read: None,
             },
             Update::ModelInfo { context_limit: 0 },
             Update::Sessions { sessions: vec![] },

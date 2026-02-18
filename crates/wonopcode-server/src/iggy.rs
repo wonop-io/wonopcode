@@ -353,11 +353,22 @@ impl AgentServer {
                 output,
                 cost,
                 context_limit,
+                accumulated_input,
+                accumulated_output,
+                accumulated_cost,
+                last_request_input: _,
+                last_request_output: _,
+                last_request_cache_read: _,
             } => {
+                // If provider gives us accumulated values, use those; otherwise use deltas
+                let final_input = accumulated_input.map(|v| v as u32).unwrap_or(*input);
+                let final_output = accumulated_output.map(|v| v as u32).unwrap_or(*output);
+                let final_cost = accumulated_cost.unwrap_or(*cost);
+
                 self.update_state(|state| {
-                    state.token_usage.input = *input;
-                    state.token_usage.output = *output;
-                    state.token_usage.cost = *cost;
+                    state.token_usage.input = final_input;
+                    state.token_usage.output = final_output;
+                    state.token_usage.cost = final_cost;
                     state.context_limit = *context_limit;
                 })
                 .await;
@@ -640,11 +651,23 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             output,
             cost,
             context_limit,
+            accumulated_input,
+            accumulated_output,
+            accumulated_cost,
+            last_request_input,
+            last_request_output,
+            last_request_cache_read,
         } => ServerPayload::TokenUsage {
             input: *input,
             output: *output,
             cost: *cost,
             context_limit: *context_limit,
+            accumulated_input: *accumulated_input,
+            accumulated_output: *accumulated_output,
+            accumulated_cost: *accumulated_cost,
+            last_request_input: *last_request_input,
+            last_request_output: *last_request_output,
+            last_request_cache_read: *last_request_cache_read,
         },
         wonopcode_tui::AppUpdate::ModelInfo { context_limit } => ServerPayload::ModelInfo {
             context_limit: *context_limit,
@@ -961,11 +984,23 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             output,
             cost,
             context_limit,
+            accumulated_input,
+            accumulated_output,
+            accumulated_cost,
+            last_request_input,
+            last_request_output,
+            last_request_cache_read,
         } => ServerPayload::TokenUsage {
             input: *input,
             output: *output,
             cost: *cost,
             context_limit: *context_limit,
+            accumulated_input: *accumulated_input,
+            accumulated_output: *accumulated_output,
+            accumulated_cost: *accumulated_cost,
+            last_request_input: *last_request_input,
+            last_request_output: *last_request_output,
+            last_request_cache_read: *last_request_cache_read,
         },
         wonopcode_protocol::Update::ModelInfo { context_limit } => ServerPayload::ModelInfo {
             context_limit: *context_limit,

@@ -291,6 +291,7 @@ impl LanguageModel for GoogleProvider {
 
                                 yield StreamChunk::FinishStep {
                                     usage,
+                                    accumulated_usage: None,
                                     finish_reason: reason,
                                 };
                             }

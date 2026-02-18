@@ -342,10 +342,27 @@ pub enum AppUpdate {
     Status(String),
     /// Token usage update.
     TokenUsage {
+        /// Input tokens used (delta for this step).
         input: u32,
+        /// Output tokens used (delta for this step).
         output: u32,
+        /// Estimated cost (delta for this step).
         cost: f64,
+        /// Context limit from model.
         context_limit: u32,
+        /// Accumulated input tokens across all steps (from provider).
+        /// If Some, this is the total to display; if None, receiver should accumulate.
+        accumulated_input: Option<u64>,
+        /// Accumulated output tokens across all steps (from provider).
+        accumulated_output: Option<u64>,
+        /// Accumulated cost across all steps (from provider).
+        accumulated_cost: Option<f64>,
+        /// Input tokens for the last/current request (full context size sent to model).
+        last_request_input: Option<u64>,
+        /// Output tokens for the last/current request.
+        last_request_output: Option<u64>,
+        /// Cache read tokens for the last/current request.
+        last_request_cache_read: Option<u64>,
     },
     /// Model info update (context limit).
     ModelInfo { context_limit: u32 },
@@ -3265,13 +3282,31 @@ async function fetchUserData(userId) {
                 output,
                 cost,
                 context_limit,
+                accumulated_input,
+                accumulated_output,
+                accumulated_cost,
+                last_request_input,
+                last_request_output,
+                last_request_cache_read,
             } => {
-                self.footer.set_tokens(input, output);
-                self.sidebar.update_tokens(input, output);
-                self.sidebar.set_cost(cost);
+                // If provider gives us accumulated values, use those;
+                // otherwise fall back to the delta values
+                let display_input = accumulated_input.map(|v| v as u32).unwrap_or(input);
+                let display_output = accumulated_output.map(|v| v as u32).unwrap_or(output);
+                let display_cost = accumulated_cost.unwrap_or(cost);
+
+                self.footer.set_tokens(display_input, display_output);
+                self.sidebar.update_tokens(display_input, display_output);
+                self.sidebar.set_cost(display_cost);
                 if context_limit > 0 {
                     self.sidebar.set_max_tokens(context_limit);
                 }
+                // Store last request values if provided
+                if let (Some(last_in), Some(last_out)) = (last_request_input, last_request_output) {
+                    self.sidebar.set_last_request_tokens(last_in as u32, last_out as u32);
+                }
+                // Note: last_request_cache_read not yet used in TUI sidebar
+                let _ = last_request_cache_read;
             }
             AppUpdate::ModelInfo { context_limit } => {
                 self.sidebar.set_max_tokens(context_limit);

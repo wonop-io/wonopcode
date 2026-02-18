@@ -1457,11 +1457,22 @@ async fn run_headless(
                     output,
                     cost,
                     context_limit,
+                    accumulated_input,
+                    accumulated_output,
+                    accumulated_cost,
+                    last_request_input: _,
+                    last_request_output: _,
+                    last_request_cache_read: _,
                 } => {
+                    // Use accumulated values if available, otherwise use deltas
+                    let final_input = accumulated_input.map(|v| v as u32).unwrap_or(*input);
+                    let final_output = accumulated_output.map(|v| v as u32).unwrap_or(*output);
+                    let final_cost = accumulated_cost.unwrap_or(*cost);
+                    
                     let mut state = state_for_updates.write().await;
-                    state.token_usage.input = *input;
-                    state.token_usage.output = *output;
-                    state.token_usage.cost = *cost;
+                    state.token_usage.input = final_input;
+                    state.token_usage.output = final_output;
+                    state.token_usage.cost = final_cost;
                     state.context_limit = *context_limit;
                 }
                 wonopcode_tui::AppUpdate::ModelInfo { context_limit } => {
@@ -1582,11 +1593,23 @@ async fn run_headless(
                     output,
                     cost,
                     context_limit,
+                    accumulated_input,
+                    accumulated_output,
+                    accumulated_cost,
+                    last_request_input,
+                    last_request_output,
+                    last_request_cache_read,
                 } => Update::TokenUsage {
                     input,
                     output,
                     cost,
                     context_limit,
+                    accumulated_input,
+                    accumulated_output,
+                    accumulated_cost,
+                    last_request_input,
+                    last_request_output,
+                    last_request_cache_read,
                 },
                 wonopcode_tui::AppUpdate::ModelInfo { context_limit } => {
                     Update::ModelInfo { context_limit }
@@ -2038,6 +2061,13 @@ async fn run_connect(address: &str, cli: &Cli) -> anyhow::Result<()> {
         output: state.token_usage.output,
         cost: state.token_usage.cost,
         context_limit: state.context_limit,
+        // State doesn't have accumulated values - these are the final values
+        accumulated_input: None,
+        accumulated_output: None,
+        accumulated_cost: None,
+        last_request_input: None,
+        last_request_output: None,
+        last_request_cache_read: None,
     }) {
         warn!("Failed to send token usage update: {}", e);
     }
