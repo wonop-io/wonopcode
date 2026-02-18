@@ -24,6 +24,7 @@ pub mod read;
 pub mod search;
 pub mod skill;
 pub mod task;
+pub mod ticket;
 pub mod todo;
 pub mod webfetch;
 pub mod write;
@@ -35,6 +36,11 @@ pub use registry::ToolRegistry;
 pub use ace::{
     AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
     AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+};
+
+// Re-export ticket tools for convenience
+pub use ticket::{
+    TicketCreateTool, TicketListTool, TicketReadTool, TicketSearchTool, TicketService,
 };
 
 use async_trait::async_trait;
@@ -92,6 +98,8 @@ pub struct ToolContext {
     pub sandbox: Option<Arc<dyn SandboxRuntime>>,
     /// Optional event sender for immediate notifications.
     pub event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+    /// Optional ticket service for ticket management tools.
+    pub ticket_service: Option<Arc<dyn TicketService>>,
 }
 
 impl ToolContext {
@@ -184,6 +192,16 @@ pub trait Tool: Send + Sync {
 
     /// Execute the tool.
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput>;
+
+    /// Whether this tool requires user permission to execute.
+    ///
+    /// Read-only tools (like listing files, searching, reading tickets) can return false
+    /// to allow execution without explicit permission. Write operations should return true.
+    ///
+    /// Default is true for safety.
+    fn requires_permission(&self) -> bool {
+        true
+    }
 }
 
 /// A boxed tool for dynamic dispatch.
@@ -206,6 +224,7 @@ mod tests {
             file_time: None,
             sandbox: None,
             event_tx: None,
+            ticket_service: None,
         }
     }
 

@@ -672,6 +672,7 @@ async fn run_basic_mode(
         Some(shared_permission_manager),
         Some(session_service),
         None, // Use default StandardLoop
+        None, // No ticket service in CLI mode
     )
     .await
     {
@@ -849,6 +850,7 @@ async fn run_tui_mode(
         Some(shared_permission_manager),
         Some(session_service_web),
         None, // Use default StandardLoop
+        None, // No ticket service in web mode
     )
     .await
     {
@@ -1213,6 +1215,7 @@ async fn run_headless(
         Some(shared_permission_manager.clone()),
         Some(session_service_headless),
         None, // Use default StandardLoop
+        None, // No ticket service in headless mode
     )
     .await
     {

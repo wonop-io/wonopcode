@@ -190,6 +190,7 @@ pub async fn run_command(
         Some(shared_permission_manager),
         None, // No session service in run command
         None, // Use default StandardLoop
+        None, // No ticket service in run command
     )
     .await
     {

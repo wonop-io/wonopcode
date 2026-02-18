@@ -276,6 +276,12 @@ pub struct LoopContext<'a> {
     /// When set, tool execution will check permissions before running.
     /// If permission is denied, the tool will not execute.
     pub permission_checker: Option<Arc<dyn PermissionChecker>>,
+
+    /// Optional ticket service for ticket management tools.
+    ///
+    /// When set, ticket tools (list, search, read, create) can access
+    /// configured issue trackers.
+    pub ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
 }
 
 impl<'a> LoopContext<'a> {

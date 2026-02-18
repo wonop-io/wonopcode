@@ -364,6 +364,7 @@ impl Processor {
             file_time: None,
             sandbox: None, // ACP tools run without sandbox for now
             event_tx: None,
+            ticket_service: None, // ACP tools run without ticket service for now
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool.id());

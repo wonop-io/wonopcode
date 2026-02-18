@@ -548,6 +548,9 @@ pub struct Runner {
     /// Context state for token tracking and compaction decisions.
     /// This enables token-based compaction rather than just message count.
     context_state: RwLock<ContextState>,
+    /// Optional ticket service for ticket management tools.
+    /// When set, ticket tools can access configured issue trackers.
+    ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
 }
 
 impl Runner {
@@ -673,6 +676,7 @@ impl Runner {
             mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
             session_service: None,  // Will be set by new_with_session
             context_state: RwLock::new(ContextState::new(context_limit)),
+            ticket_service: None,   // Will be set by new_with_shared
         })
     }
 
@@ -692,7 +696,7 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None).await
     }
 
     /// Create a new runner with optional shared Bus, PermissionManager, SessionService, and AgentLoop.
@@ -717,6 +721,7 @@ impl Runner {
         shared_permission_manager: Option<Arc<PermissionManager>>,
         session_service: Option<Arc<SessionService>>,
         agent_loop: Option<BoxedAgentLoop>,
+        ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -965,6 +970,9 @@ impl Runner {
             }
             runner.session_service = session_service;
         }
+
+        // Store ticket service if provided
+        runner.ticket_service = ticket_service;
 
         Ok(runner)
     }
@@ -1584,6 +1592,7 @@ impl Runner {
             session_id: "default".to_string(),
             tool_event_tx: Some(tool_event_tx),
             permission_checker: Some(permission_checker),
+            ticket_service: self.ticket_service.clone(),
         };
 
         // Run the agent loop with emergency compaction on context overflow
