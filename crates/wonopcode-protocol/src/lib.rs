@@ -10,6 +10,9 @@ mod action;
 mod state;
 mod update;
 
-pub use action::{Action, SaveScope};
+pub use action::{
+    Action, ImageData, SaveScope, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_SIZE_BYTES,
+    SUPPORTED_IMAGE_TYPES,
+};
 pub use state::*;
 pub use update::*;

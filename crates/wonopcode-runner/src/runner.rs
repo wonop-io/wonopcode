@@ -1195,6 +1195,20 @@ impl Runner {
         cwd: &std::path::Path,
         update_tx: &mpsc::UnboundedSender<AppUpdate>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.run_prompt_via_agent_loop_with_images(user_input, cwd, update_tx, Vec::new())
+            .await
+    }
+
+    /// Run a prompt through the agent loop with optional image attachments.
+    ///
+    /// This is the full implementation that supports both text-only and multi-modal prompts.
+    async fn run_prompt_via_agent_loop_with_images(
+        &self,
+        user_input: &str,
+        cwd: &std::path::Path,
+        update_tx: &mpsc::UnboundedSender<AppUpdate>,
+        images: Vec<wonopcode_agent_loop::PromptImage>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         use std::time::Instant;
 
         // Get the cancellation token for this prompt
@@ -1593,6 +1607,7 @@ impl Runner {
             tool_event_tx: Some(tool_event_tx),
             permission_checker: Some(permission_checker),
             ticket_service: self.ticket_service.clone(),
+            prompt_images: images,
         };
 
         // Run the agent loop with emergency compaction on context overflow
@@ -2274,6 +2289,137 @@ impl Runner {
                             } else if err_str.contains("timed out") {
                                 error!("Prompt operation timed out - this prevents UI from getting stuck");
                                 send_update(&update_tx, AppUpdate::Error("Operation timed out. Please try a shorter prompt or check your connection.".to_string()));
+                            } else {
+                                error!("Prompt error: {}", e);
+                                send_update(&update_tx, AppUpdate::Error(err_str));
+                            }
+                        }
+                    }
+                }
+                AppAction::SendPromptWithImages { prompt, images } => {
+                    debug!(
+                        prompt_text = %prompt,
+                        image_count = images.len(),
+                        "Received SendPromptWithImages action"
+                    );
+
+                    // Handle slash commands (images are ignored for slash commands)
+                    if let Some(response) = self.handle_slash_command(&prompt).await {
+                        send_update(&update_tx, AppUpdate::SystemMessage(response));
+                        continue;
+                    }
+
+                    // Convert protocol ImageData to agent-loop PromptImage
+                    let prompt_images: Vec<wonopcode_agent_loop::PromptImage> = images
+                        .into_iter()
+                        .map(|img| wonopcode_agent_loop::PromptImage {
+                            id: img.id,
+                            data: img.data,
+                            media_type: img.media_type,
+                        })
+                        .collect();
+
+                    // Reset cancellation token for new prompt
+                    self.reset_cancel_token().await;
+
+                    // Send started update
+                    send_update(&update_tx, AppUpdate::Started);
+
+                    // Run the prompt with images
+                    debug!(
+                        prompt_len = prompt.len(),
+                        image_count = prompt_images.len(),
+                        "Running prompt with images"
+                    );
+
+                    // Get a clone of the cancel token for checking
+                    let cancel_token = self.get_cancel_token().await;
+
+                    let prompt_timeout = tokio::time::Duration::from_secs(86400);
+                    let prompt_future = tokio::time::timeout(
+                        prompt_timeout,
+                        self.run_prompt_via_agent_loop_with_images(
+                            &prompt,
+                            &cwd,
+                            &update_tx,
+                            prompt_images,
+                        ),
+                    );
+                    tokio::pin!(prompt_future);
+
+                    let result = loop {
+                        tokio::select! {
+                            biased;
+
+                            Some(inner_action) = action_rx.recv() => {
+                                match inner_action {
+                                    AppAction::Cancel => {
+                                        debug!("Cancelling current operation");
+                                        cancel_token.cancel();
+                                    }
+                                    AppAction::Quit => {
+                                        debug!("Quit requested during prompt");
+                                        cancel_token.cancel();
+                                    }
+                                    AppAction::PermissionResponse {
+                                        request_id,
+                                        allow,
+                                        remember,
+                                    } => {
+                                        debug!(
+                                            request_id = %request_id,
+                                            allow = allow,
+                                            remember = remember,
+                                            "Received permission response during prompt execution"
+                                        );
+                                        self.permission_manager
+                                            .respond(&request_id, allow, remember)
+                                            .await;
+                                    }
+                                    AppAction::SetAllowAll { enabled } => {
+                                        info!(
+                                            enabled = enabled,
+                                            "Setting allow-all mode during prompt execution"
+                                        );
+                                        self.permission_manager.set_allow_all(enabled);
+                                        send_update(
+                                            &update_tx,
+                                            AppUpdate::AllowAllChanged { enabled },
+                                        );
+                                    }
+                                    _ => {
+                                        debug!("Ignoring action during prompt execution: {:?}", inner_action);
+                                    }
+                                }
+                            }
+
+                            res = &mut prompt_future => {
+                                let inner_result = match res {
+                                    Ok(inner_result) => inner_result,
+                                    Err(_timeout_error) => {
+                                        warn!("Prompt operation timed out");
+                                        Err("Operation timed out".into())
+                                    }
+                                };
+                                break inner_result;
+                            }
+                        }
+                    };
+
+                    match result {
+                        Ok(result_text) => {
+                            debug!(
+                                result_len = result_text.len(),
+                                "Prompt with images completed successfully"
+                            );
+                            send_update(&update_tx, AppUpdate::Completed { text: result_text });
+                            self.sync_todos_to_tui(&cwd, &update_tx);
+                        }
+                        Err(e) => {
+                            let err_str = e.to_string();
+                            if err_str.contains("Cancelled") {
+                                debug!("Prompt was cancelled");
+                                send_update(&update_tx, AppUpdate::Error("Cancelled".to_string()));
                             } else {
                                 error!("Prompt error: {}", e);
                                 send_update(&update_tx, AppUpdate::Error(err_str));

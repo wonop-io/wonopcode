@@ -51,7 +51,7 @@ pub mod traits;
 pub use capabilities::LoopCapabilities;
 pub use context::{
     CompactionConfig, LoopConfig, LoopContext, LoopUpdate, PermissionCheckRequest,
-    PermissionChecker,
+    PermissionChecker, PromptImage,
 };
 pub use error::{LoopError, LoopResult};
 pub use standard::StandardLoop;

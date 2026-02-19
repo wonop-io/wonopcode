@@ -188,8 +188,13 @@ pub enum AppState {
 /// Actions that can be sent from the UI.
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    /// Send a prompt to the AI.
+    /// Send a prompt to the AI (text only, no images).
     SendPrompt(String),
+    /// Send a prompt with image attachments.
+    SendPromptWithImages {
+        prompt: String,
+        images: Vec<wonopcode_protocol::ImageData>,
+    },
     /// Cancel the current operation.
     Cancel,
     /// Quit the application.

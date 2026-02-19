@@ -370,10 +370,10 @@ async fn action_prompt(
     Json(req): Json<PromptRequest>,
 ) -> impl IntoResponse {
     debug!(prompt = %req.prompt, "Received prompt action");
-    match state
-        .action_tx
-        .send(Action::SendPrompt { prompt: req.prompt })
-    {
+    match state.action_tx.send(Action::SendPrompt {
+        prompt: req.prompt,
+        images: vec![],
+    }) {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }

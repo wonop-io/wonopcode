@@ -150,8 +150,26 @@ impl AgentLoop for StandardLoop {
             detector.reset();
         }
 
-        // Add user message
-        let user_msg = ProviderMessage::user(user_input);
+        // Add user message with optional images
+        let user_msg = if ctx.prompt_images.is_empty() {
+            ProviderMessage::user(user_input)
+        } else {
+            // Build multi-part message with images first, then text
+            let mut content = Vec::with_capacity(ctx.prompt_images.len() + 1);
+
+            // Add images
+            for image in &ctx.prompt_images {
+                content.push(ContentPart::image_base64(&image.media_type, &image.data));
+            }
+
+            // Add text
+            content.push(ContentPart::text(user_input));
+
+            ProviderMessage {
+                role: wonopcode_provider::Role::User,
+                content,
+            }
+        };
         ctx.messages.push(user_msg);
 
         let mut final_text = String::new();

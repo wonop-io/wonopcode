@@ -2,14 +2,94 @@
 
 use serde::{Deserialize, Serialize};
 
+// =============================================================================
+// Image Attachment Types
+// =============================================================================
+
+/// Maximum image size in bytes (20MB - Anthropic limit)
+pub const MAX_IMAGE_SIZE_BYTES: usize = 20 * 1024 * 1024;
+
+/// Maximum number of images per message
+pub const MAX_IMAGES_PER_MESSAGE: usize = 5;
+
+/// Supported image MIME types
+pub const SUPPORTED_IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// Image data for sending with prompts
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageData {
+    /// Unique identifier for this image
+    pub id: String,
+    /// Base64-encoded image data (without data: prefix)
+    pub data: String,
+    /// MIME type (e.g., "image/png", "image/jpeg")
+    pub media_type: String,
+    /// Optional filename
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+impl ImageData {
+    /// Create a new ImageData from base64 string
+    pub fn new(id: String, data: String, media_type: String) -> Self {
+        Self {
+            id,
+            data,
+            media_type,
+            filename: None,
+        }
+    }
+
+    /// Validate the image data
+    pub fn validate(&self) -> Result<(), String> {
+        // Check MIME type
+        if !SUPPORTED_IMAGE_TYPES.contains(&self.media_type.as_str()) {
+            return Err(format!(
+                "Unsupported image type '{}'. Supported: {:?}",
+                self.media_type, SUPPORTED_IMAGE_TYPES
+            ));
+        }
+
+        // Check base64 size (rough estimate of decoded size)
+        let estimated_size = (self.data.len() * 3) / 4;
+        if estimated_size > MAX_IMAGE_SIZE_BYTES {
+            return Err(format!(
+                "Image too large ({} bytes). Maximum: {} bytes",
+                estimated_size, MAX_IMAGE_SIZE_BYTES
+            ));
+        }
+
+        // Basic base64 validation
+        if self.data.is_empty() {
+            return Err("Image data is empty".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Get approximate size in bytes
+    pub fn estimated_size(&self) -> usize {
+        (self.data.len() * 3) / 4
+    }
+}
+
+// =============================================================================
+// Actions
+// =============================================================================
+
 /// Actions that can be sent from the client to the server.
 ///
 /// These map to HTTP POST endpoints on the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    /// Send a prompt to the AI.
-    SendPrompt { prompt: String },
+    /// Send a prompt to the AI (with optional images).
+    SendPrompt {
+        prompt: String,
+        /// Optional image attachments (screenshots, etc.)
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageData>,
+    },
 
     /// Cancel the current operation.
     Cancel,
@@ -161,6 +241,7 @@ mod tests {
         // UX: User sends a message to the AI
         let action = Action::SendPrompt {
             prompt: "Hello, world!".to_string(),
+            images: vec![],
         };
         let json = serde_json::to_string(&action).unwrap();
         assert!(json.contains("send_prompt"));
@@ -168,11 +249,70 @@ mod tests {
 
         // Roundtrip
         let parsed: Action = serde_json::from_str(&json).unwrap();
-        if let Action::SendPrompt { prompt } = parsed {
+        if let Action::SendPrompt { prompt, images } = parsed {
             assert_eq!(prompt, "Hello, world!");
+            assert!(images.is_empty());
         } else {
             panic!("Wrong action type");
         }
+    }
+
+    #[test]
+    fn action_send_prompt_with_images_serializes_correctly() {
+        // UX: User sends a message with image attachments
+        let action = Action::SendPrompt {
+            prompt: "What's in this image?".to_string(),
+            images: vec![ImageData {
+                id: "img_123".to_string(),
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==".to_string(),
+                media_type: "image/png".to_string(),
+                filename: Some("screenshot.png".to_string()),
+            }],
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("send_prompt"));
+        assert!(json.contains("img_123"));
+        assert!(json.contains("image/png"));
+
+        // Roundtrip
+        let parsed: Action = serde_json::from_str(&json).unwrap();
+        if let Action::SendPrompt { prompt, images } = parsed {
+            assert_eq!(prompt, "What's in this image?");
+            assert_eq!(images.len(), 1);
+            assert_eq!(images[0].id, "img_123");
+        } else {
+            panic!("Wrong action type");
+        }
+    }
+
+    #[test]
+    fn image_data_validation() {
+        // Valid image
+        let valid = ImageData {
+            id: "img_1".to_string(),
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==".to_string(),
+            media_type: "image/png".to_string(),
+            filename: None,
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid MIME type
+        let invalid_mime = ImageData {
+            id: "img_2".to_string(),
+            data: "test".to_string(),
+            media_type: "image/svg+xml".to_string(),
+            filename: None,
+        };
+        assert!(invalid_mime.validate().is_err());
+
+        // Empty data
+        let empty = ImageData {
+            id: "img_3".to_string(),
+            data: "".to_string(),
+            media_type: "image/png".to_string(),
+            filename: None,
+        };
+        assert!(empty.validate().is_err());
     }
 
     #[test]
@@ -260,6 +400,7 @@ mod tests {
         let actions = vec![
             Action::SendPrompt {
                 prompt: "".to_string(),
+                images: vec![],
             },
             Action::Cancel,
             Action::ChangeModel {

@@ -661,7 +661,11 @@ fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol
     use wonopcode_protocol::Action;
 
     Ok(match action {
-        AppAction::SendPrompt(prompt) => Action::SendPrompt { prompt },
+        AppAction::SendPrompt(prompt) => Action::SendPrompt {
+            prompt,
+            images: vec![],
+        },
+        AppAction::SendPromptWithImages { prompt, images } => Action::SendPrompt { prompt, images },
         AppAction::Cancel => Action::Cancel,
         AppAction::Quit => Action::Quit,
         AppAction::SwitchSession(session_id) => Action::SwitchSession { session_id },
@@ -1090,6 +1094,11 @@ impl Backend for IggyBackend {
 fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayload> {
     Ok(match action {
         AppAction::SendPrompt(prompt) => ClientPayload::SendPrompt { prompt },
+        AppAction::SendPromptWithImages { prompt, images: _ } => {
+            // TODO: Add image support to Iggy transport
+            // For now, just send the text prompt
+            ClientPayload::SendPrompt { prompt }
+        }
         AppAction::Cancel => ClientPayload::Cancel,
         AppAction::Quit => ClientPayload::Quit,
         AppAction::SwitchSession(session_id) => ClientPayload::SwitchSession { session_id },

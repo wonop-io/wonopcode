@@ -44,12 +44,14 @@
 
 use crate::{
     error::ProviderError,
+    message::{ContentPart, ImageSource},
     model::{ModelCost, ModelInfo},
     stream::StreamChunk,
     GenerateOptions, LanguageModel, Message, ProviderResult,
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
+use base64::Engine;
 use futures::stream::BoxStream;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -651,7 +653,99 @@ impl ClaudeCliProvider {
         *AVAILABLE.get_or_init(|| Self::check_cli_available().is_ok())
     }
 
+    /// Save an image to a file and return the path.
+    ///
+    /// Claude CLI can reference images by file path, so we save base64 images
+    /// to files within the working directory (so Claude CLI has permission to read them).
+    /// Images are stored in `.wonopcode/images/` within the working directory.
+    fn save_image_to_file(
+        &self,
+        media_type: &str,
+        data: &str,
+        index: usize,
+    ) -> Result<PathBuf, ProviderError> {
+        // Determine file extension from media type
+        let extension = match media_type {
+            "image/png" => "png",
+            "image/jpeg" | "image/jpg" => "jpg",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            _ => "png", // Default to png for unknown types
+        };
+
+        // Create a unique filename with timestamp for uniqueness
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let filename = format!("image_{}_{}.{}", timestamp, index, extension);
+
+        // Determine base directory - use working directory if set, otherwise temp dir
+        let base_dir = if let Some(ref workdir) = self.working_directory {
+            // Save in .wonopcode/images/ within the working directory
+            // This ensures Claude CLI has permission to read them
+            workdir.join(".wonopcode").join("images")
+        } else {
+            // Fallback to system temp dir (may not work without explicit permissions)
+            std::env::temp_dir().join("wonopcode_images")
+        };
+
+        // Ensure the directory exists
+        std::fs::create_dir_all(&base_dir).map_err(|e| {
+            ProviderError::internal(format!("Failed to create image directory: {e}"))
+        })?;
+
+        let path = base_dir.join(&filename);
+
+        // Decode base64 and write to file
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| ProviderError::internal(format!("Failed to decode base64 image: {e}")))?;
+
+        std::fs::write(&path, decoded)
+            .map_err(|e| ProviderError::internal(format!("Failed to write image to file: {e}")))?;
+
+        debug!(path = %path.display(), "Saved image for Claude CLI");
+        Ok(path)
+    }
+
+    /// Extract images from a message and save them to temp files.
+    ///
+    /// Returns a vector of file paths to the saved images.
+    fn extract_and_save_images(&self, msg: &Message) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        let mut image_index = 0;
+
+        for part in &msg.content {
+            if let ContentPart::Image { source } = part {
+                match source {
+                    ImageSource::Base64 { media_type, data } => {
+                        match self.save_image_to_file(media_type, data, image_index) {
+                            Ok(path) => {
+                                paths.push(path);
+                                image_index += 1;
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to save image to file");
+                            }
+                        }
+                    }
+                    ImageSource::Url { url } => {
+                        // For URL images, we'd need to download them first
+                        // For now, just log a warning
+                        warn!(url = %url, "URL images not yet supported in Claude CLI provider");
+                    }
+                }
+            }
+        }
+
+        paths
+    }
+
     /// Format messages into a prompt string for the CLI.
+    ///
+    /// This now handles images by saving them to temp files and referencing
+    /// the file paths in the prompt.
     fn format_messages(&self, messages: &[Message]) -> String {
         let mut parts = Vec::new();
 
@@ -663,8 +757,25 @@ impl ClaudeCliProvider {
                 crate::message::Role::Tool => "Tool Result",
             };
 
-            let content = msg.text();
-            if !content.is_empty() {
+            // Extract and save any images
+            let image_paths = self.extract_and_save_images(msg);
+
+            // Build content with text and image references
+            let mut content_parts = Vec::new();
+
+            // Add text content
+            let text = msg.text();
+            if !text.is_empty() {
+                content_parts.push(text);
+            }
+
+            // Add image file references
+            for path in &image_paths {
+                content_parts.push(format!("[Image: {}]", path.display()));
+            }
+
+            if !content_parts.is_empty() {
+                let content = content_parts.join("\n");
                 parts.push(format!("{role}: {content}"));
             }
         }
@@ -676,13 +787,32 @@ impl ClaudeCliProvider {
     ///
     /// When resuming a Claude CLI session, the conversation history is already
     /// stored by the CLI. We only need to send the new user message.
+    ///
+    /// This now handles images by saving them to temp files and referencing
+    /// the file paths in the prompt.
     fn extract_last_user_message(&self, messages: &[Message]) -> String {
         // Find the last user message
         for msg in messages.iter().rev() {
             if matches!(msg.role, crate::message::Role::User) {
-                let content = msg.text();
-                if !content.is_empty() {
-                    return content;
+                // Extract and save any images
+                let image_paths = self.extract_and_save_images(msg);
+
+                // Build content with text and image references
+                let mut content_parts = Vec::new();
+
+                // Add text content
+                let text = msg.text();
+                if !text.is_empty() {
+                    content_parts.push(text);
+                }
+
+                // Add image file references
+                for path in &image_paths {
+                    content_parts.push(format!("[Image: {}]", path.display()));
+                }
+
+                if !content_parts.is_empty() {
+                    return content_parts.join("\n");
                 }
             }
         }

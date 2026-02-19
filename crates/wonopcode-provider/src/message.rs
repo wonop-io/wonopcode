@@ -154,6 +154,16 @@ impl ContentPart {
             is_error: None,
         }
     }
+
+    /// Create an image content part from base64 data.
+    pub fn image_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        Self::Image {
+            source: ImageSource::Base64 {
+                media_type: media_type.into(),
+                data: data.into(),
+            },
+        }
+    }
 }
 
 /// Image source for image content.

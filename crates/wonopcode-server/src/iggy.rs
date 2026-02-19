@@ -855,6 +855,7 @@ pub fn client_payload_to_legacy_action(
     match payload {
         ClientPayload::SendPrompt { prompt } => Some(wonopcode_protocol::Action::SendPrompt {
             prompt: prompt.clone(),
+            images: vec![],
         }),
         ClientPayload::Cancel => Some(wonopcode_protocol::Action::Cancel),
         ClientPayload::ChangeModel { model } => Some(wonopcode_protocol::Action::ChangeModel {

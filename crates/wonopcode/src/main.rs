@@ -1236,7 +1236,7 @@ async fn run_headless(
     tokio::spawn(async move {
         while let Some(action) = protocol_action_rx.recv().await {
             let app_action = match action {
-                Action::SendPrompt { prompt } => {
+                Action::SendPrompt { prompt, images } => {
                     // Add user message to session state
                     {
                         let mut state = state_for_actions.write().await;
@@ -1256,7 +1256,11 @@ async fn run_headless(
                             });
                         }
                     }
-                    wonopcode_tui::AppAction::SendPrompt(prompt)
+                    if images.is_empty() {
+                        wonopcode_tui::AppAction::SendPrompt(prompt)
+                    } else {
+                        wonopcode_tui::AppAction::SendPromptWithImages { prompt, images }
+                    }
                 }
                 Action::Cancel => wonopcode_tui::AppAction::Cancel,
                 Action::Quit => {

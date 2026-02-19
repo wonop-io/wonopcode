@@ -282,6 +282,23 @@ pub struct LoopContext<'a> {
     /// When set, ticket tools (list, search, read, create) can access
     /// configured issue trackers.
     pub ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
+
+    /// Images attached to the current prompt.
+    ///
+    /// When set, these images should be included with the user message.
+    /// Each image contains base64 data and MIME type.
+    pub prompt_images: Vec<PromptImage>,
+}
+
+/// Image attached to a prompt.
+#[derive(Debug, Clone)]
+pub struct PromptImage {
+    /// Unique identifier for this image.
+    pub id: String,
+    /// Base64-encoded image data (without data: prefix).
+    pub data: String,
+    /// MIME type (e.g., "image/png", "image/jpeg").
+    pub media_type: String,
 }
 
 impl<'a> LoopContext<'a> {
