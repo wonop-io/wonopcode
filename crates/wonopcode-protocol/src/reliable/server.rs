@@ -228,7 +228,10 @@ pub enum ResponseData {
     },
 
     /// Response to ResetSession.
-    SessionReset,
+    SessionReset {
+        /// The workstream that was reset.
+        workstream_id: String,
+    },
 
     /// Response to ChangeModel.
     ModelChanged {
