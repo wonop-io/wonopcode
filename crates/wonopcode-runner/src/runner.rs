@@ -2493,6 +2493,16 @@ impl Runner {
                         let mut history = self.history.write().await;
                         history.clear();
                     }
+                    // Also clear CLI session if using Claude CLI provider
+                    // The CLI maintains its own session history, so we need to
+                    // reset it to start fresh.
+                    {
+                        let provider = self.provider.read().await;
+                        if provider.provider_id() == "anthropic-cli" {
+                            provider.set_cli_session_id(None).await;
+                            debug!("Cleared CLI session for new session");
+                        }
+                    }
                 }
                 AppAction::OpenEditor { .. } => {
                     // Editor is handled synchronously in the TUI, nothing to do here

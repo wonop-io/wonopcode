@@ -6217,6 +6217,7 @@ name = "wonopcode-protocol"
 version = "0.1.2"
 dependencies = [
  "chrono",
+ "js-sys",
  "pretty_assertions",
  "serde",
  "serde_json",
