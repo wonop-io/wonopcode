@@ -975,6 +975,54 @@ enum CliMessage {
         #[serde(default)]
         num_turns: Option<u32>,
     },
+    /// Real-time streaming events for token-by-token output
+    #[serde(rename = "stream_event")]
+    StreamEvent { event: StreamEventData },
+}
+
+/// Stream event data from Claude CLI's real-time streaming
+#[derive(Debug, Deserialize)]
+struct StreamEventData {
+    /// Event type: "content_block_start", "content_block_delta", "content_block_stop", etc.
+    #[serde(rename = "type")]
+    event_type: String,
+    /// Index of the content block (for multi-block responses)
+    #[serde(default)]
+    index: u32,
+    /// Content block for "content_block_start" events
+    #[serde(default)]
+    content_block: Option<StreamContentBlock>,
+    /// Delta for "content_block_delta" events
+    #[serde(default)]
+    delta: Option<StreamDelta>,
+}
+
+/// Content block information for stream_event content_block_start
+#[derive(Debug, Deserialize)]
+struct StreamContentBlock {
+    /// Block type: "text", "tool_use"
+    #[serde(rename = "type")]
+    block_type: String,
+    /// Tool use ID (only for tool_use blocks)
+    #[serde(default)]
+    id: Option<String>,
+    /// Tool name (only for tool_use blocks)
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Delta for stream_event content_block_delta
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    /// Delta type: "text_delta", "input_json_delta"
+    #[serde(rename = "type")]
+    delta_type: String,
+    /// Text content (for text_delta)
+    #[serde(default)]
+    text: Option<String>,
+    /// Partial JSON input (for input_json_delta - tool input streaming)
+    #[serde(default)]
+    partial_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1207,12 +1255,15 @@ impl LanguageModel for ClaudeCliProvider {
         );
 
         // Build CLI arguments
+        // Note: --include-partial-messages is REQUIRED for token-by-token streaming
+        // Without it, Claude CLI only emits full "assistant" messages, not stream_event deltas
         let mut args = vec![
             "-p".to_string(),
             prompt,
             "--output-format".to_string(),
             "stream-json".to_string(),
             "--verbose".to_string(),
+            "--include-partial-messages".to_string(),
             "--model".to_string(),
             self.model.id.clone(),
         ];
@@ -1337,6 +1388,15 @@ impl LanguageModel for ClaudeCliProvider {
             // Track tool calls so we can set finish_reason correctly
             let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
 
+            // Track streaming tool input JSON accumulation
+            // Maps content block index -> (tool_id, tool_name, accumulated_json)
+            let mut streaming_tool_inputs: std::collections::HashMap<u32, (String, String, String)> = std::collections::HashMap::new();
+
+            // Track which content blocks we've already emitted via stream_event
+            // so we don't duplicate when the full "assistant" message arrives
+            let mut streamed_text_indices: std::collections::HashSet<u32> = std::collections::HashSet::new();
+            let mut streamed_tool_indices: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
             while let Ok(Some(line)) = lines.next_line().await {
                 // Check for cancellation
                 if let Some(ref token) = abort {
@@ -1373,23 +1433,37 @@ impl LanguageModel for ClaudeCliProvider {
                             }
                         }
                         // Extract content from content blocks
-                        for block in message.content {
+                        for (block_index, block) in message.content.into_iter().enumerate() {
                             match block {
                                 ContentBlock::Text { text } => {
+                                    // Skip text blocks that were already streamed via stream_event
+                                    // This prevents duplicate text when the full "assistant" message arrives
+                                    if streamed_text_indices.contains(&(block_index as u32)) {
+                                        tracing::trace!(block_index, "Skipping already-streamed text block");
+                                        continue;
+                                    }
+
                                     if !text.is_empty() {
                                         if !text_started {
-                                            tracing::trace!("Starting text stream");
+                                            tracing::trace!("Starting text stream (from assistant message)");
                                             yield StreamChunk::TextStart;
                                             text_started = true;
                                         }
-                                        tracing::trace!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "Yielding TextDelta");
+                                        tracing::trace!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "Yielding TextDelta (from assistant message)");
                                         total_text.push_str(&text);
                                         yield StreamChunk::TextDelta(text);
                                     }
                                 }
                                 ContentBlock::ToolUse { id, name, input } => {
+                                    // Skip tool_use blocks that were already streamed via stream_event
+                                    // This prevents duplicate tool calls when the full "assistant" message arrives
+                                    if streamed_tool_indices.contains(&(block_index as u32)) {
+                                        tracing::trace!(block_index, tool_id = %id, "Skipping already-streamed tool_use block");
+                                        continue;
+                                    }
+
                                     // Tool use - emit as observed since CLI executes tools
-                                    debug!(id = %id, name = %name, "Emitting ToolObserved for CLI tool use");
+                                    debug!(id = %id, name = %name, "Emitting ToolObserved for CLI tool use (from assistant message)");
 
                                     // End text block if it was started
                                     if text_started {
@@ -1608,6 +1682,146 @@ impl LanguageModel for ClaudeCliProvider {
                         }
                         debug!("Received system message");
                     }
+                    Ok(CliMessage::StreamEvent { event }) => {
+                        // Real-time streaming events for token-by-token output
+                        match event.event_type.as_str() {
+                            "content_block_start" => {
+                                // A new content block is starting
+                                if let Some(ref content_block) = event.content_block {
+                                    match content_block.block_type.as_str() {
+                                        "text" => {
+                                            // Text block starting - emit TextStart if not already started
+                                            if !text_started {
+                                                tracing::trace!(index = event.index, "Starting text stream (from stream_event)");
+                                                yield StreamChunk::TextStart;
+                                                text_started = true;
+                                            }
+                                            // Mark this index as being streamed
+                                            streamed_text_indices.insert(event.index);
+                                        }
+                                        "tool_use" => {
+                                            // Tool use block starting - initialize accumulator
+                                            let tool_id = content_block.id.clone().unwrap_or_default();
+                                            let tool_name = content_block.name.clone().unwrap_or_default();
+                                            tracing::trace!(
+                                                index = event.index,
+                                                tool_id = %tool_id,
+                                                tool_name = %tool_name,
+                                                "Tool use block starting (from stream_event)"
+                                            );
+                                            streaming_tool_inputs.insert(event.index, (tool_id, tool_name, String::new()));
+                                        }
+                                        _ => {
+                                            tracing::trace!(
+                                                block_type = %content_block.block_type,
+                                                index = event.index,
+                                                "Unknown content block type in stream_event"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "content_block_delta" => {
+                                // Delta within a content block - this is the token-by-token streaming
+                                if let Some(ref delta) = event.delta {
+                                    match delta.delta_type.as_str() {
+                                        "text_delta" => {
+                                            // Text token - emit immediately
+                                            if let Some(ref text) = delta.text {
+                                                if !text.is_empty() {
+                                                    if !text_started {
+                                                        // Safety: start text if we somehow missed content_block_start
+                                                        tracing::trace!("Starting text stream (late, from text_delta)");
+                                                        yield StreamChunk::TextStart;
+                                                        text_started = true;
+                                                        streamed_text_indices.insert(event.index);
+                                                    }
+                                                    tracing::trace!(
+                                                        text_len = text.len(),
+                                                        text_preview = %text.chars().take(20).collect::<String>(),
+                                                        "Yielding TextDelta (from stream_event)"
+                                                    );
+                                                    total_text.push_str(text);
+                                                    yield StreamChunk::TextDelta(text.clone());
+                                                }
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            // Partial tool input JSON - accumulate
+                                            if let Some(ref partial) = delta.partial_json {
+                                                if let Some(entry) = streaming_tool_inputs.get_mut(&event.index) {
+                                                    entry.2.push_str(partial);
+                                                    tracing::trace!(
+                                                        index = event.index,
+                                                        partial_len = partial.len(),
+                                                        total_len = entry.2.len(),
+                                                        "Accumulating tool input JSON"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            tracing::trace!(
+                                                delta_type = %delta.delta_type,
+                                                index = event.index,
+                                                "Unknown delta type in stream_event"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "content_block_stop" => {
+                                // Content block finished
+                                tracing::trace!(index = event.index, "Content block stopped");
+
+                                // If this was a tool input, emit the complete tool call
+                                if let Some((tool_id, tool_name, accumulated_json)) = streaming_tool_inputs.remove(&event.index) {
+                                    // End text block if it was started
+                                    if text_started {
+                                        yield StreamChunk::TextEnd;
+                                        text_started = false;
+                                    }
+
+                                    // Parse the accumulated JSON or use empty object
+                                    let input_str = if accumulated_json.is_empty() {
+                                        "{}".to_string()
+                                    } else {
+                                        accumulated_json
+                                    };
+
+                                    debug!(
+                                        id = %tool_id,
+                                        name = %tool_name,
+                                        input_len = input_str.len(),
+                                        "Emitting ToolObserved from stream_event"
+                                    );
+
+                                    // Track the tool call for matching with results
+                                    tool_calls.push((tool_id.clone(), tool_name.clone(), input_str.clone()));
+
+                                    // Mark this tool index as streamed
+                                    streamed_tool_indices.insert(event.index);
+
+                                    // Emit observed tool (not ToolCall, so runner won't execute)
+                                    yield StreamChunk::ToolObserved {
+                                        id: tool_id,
+                                        name: tool_name,
+                                        input: input_str,
+                                    };
+                                }
+                            }
+                            "message_start" | "message_delta" | "message_stop" => {
+                                // Message-level events - we handle these via the full message types
+                                tracing::trace!(event_type = %event.event_type, "Ignoring message-level stream event");
+                            }
+                            _ => {
+                                tracing::trace!(
+                                    event_type = %event.event_type,
+                                    "Unknown stream event type"
+                                );
+                            }
+                        }
+                    }
                     Err(e) => {
                         // Not all lines are valid JSON messages (could be debug output)
                         tracing::trace!(error = %e, line_preview = %line.chars().take(100).collect::<String>(), "Failed to parse JSON line (may be debug output)");
@@ -1752,5 +1966,73 @@ mod tests {
         let config = McpCliConfig::new("http://localhost:3000/mcp/sse");
         assert!(config.use_custom_tools);
         assert_eq!(config.transport.url, "http://localhost:3000/mcp/sse");
+    }
+
+    #[test]
+    fn test_stream_event_text_delta_parsing() {
+        // Test that we can parse the exact format from Claude CLI stream-json output
+        let json = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"#;
+        let msg: CliMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            CliMessage::StreamEvent { event } => {
+                assert_eq!(event.event_type, "content_block_delta");
+                assert_eq!(event.index, 0);
+                let delta = event.delta.unwrap();
+                assert_eq!(delta.delta_type, "text_delta");
+                assert_eq!(delta.text.unwrap(), "Hello");
+            }
+            _ => panic!("Expected StreamEvent"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_content_block_start_parsing() {
+        // Test content_block_start for text blocks
+        let json = r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#;
+        let msg: CliMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            CliMessage::StreamEvent { event } => {
+                assert_eq!(event.event_type, "content_block_start");
+                assert_eq!(event.index, 0);
+                let content_block = event.content_block.unwrap();
+                assert_eq!(content_block.block_type, "text");
+            }
+            _ => panic!("Expected StreamEvent"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_tool_use_parsing() {
+        // Test content_block_start for tool_use blocks
+        let json = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"Read"}}}"#;
+        let msg: CliMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            CliMessage::StreamEvent { event } => {
+                assert_eq!(event.event_type, "content_block_start");
+                assert_eq!(event.index, 1);
+                let content_block = event.content_block.unwrap();
+                assert_eq!(content_block.block_type, "tool_use");
+                assert_eq!(content_block.id.unwrap(), "toolu_123");
+                assert_eq!(content_block.name.unwrap(), "Read");
+            }
+            _ => panic!("Expected StreamEvent"),
+        }
+    }
+
+    #[test]
+    fn test_stream_event_input_json_delta_parsing() {
+        // Test input_json_delta for tool input streaming
+        let json = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}}"#;
+        let msg: CliMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            CliMessage::StreamEvent { event } => {
+                assert_eq!(event.event_type, "content_block_delta");
+                assert_eq!(event.index, 1);
+                let delta = event.delta.unwrap();
+                assert_eq!(delta.delta_type, "input_json_delta");
+                assert_eq!(delta.partial_json.unwrap(), r#"{"path":"#);
+            }
+            _ => panic!("Expected StreamEvent"),
+        }
     }
 }
