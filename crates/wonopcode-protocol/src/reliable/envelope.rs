@@ -112,11 +112,7 @@ impl<T> Envelope<T> {
     /// Get the age of this message in milliseconds.
     pub fn age_ms(&self) -> u64 {
         let now = now_millis();
-        if now > self.timestamp {
-            now - self.timestamp
-        } else {
-            0
-        }
+        now.saturating_sub(self.timestamp)
     }
 }
 
@@ -176,7 +172,7 @@ impl Default for DeliveryMode {
 }
 
 /// Get current time in milliseconds since Unix epoch.
-/// 
+///
 /// On WASM with the `js` feature, uses `js_sys::Date::now()`.
 /// On other platforms, uses `std::time::SystemTime::now()`.
 #[cfg(feature = "js")]
@@ -185,7 +181,7 @@ pub fn now_millis() -> u64 {
 }
 
 /// Get current time in milliseconds since Unix epoch.
-/// 
+///
 /// On WASM with the `js` feature, uses `js_sys::Date::now()`.
 /// On other platforms, uses `std::time::SystemTime::now()`.
 #[cfg(not(feature = "js"))]

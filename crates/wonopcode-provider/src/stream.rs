@@ -191,7 +191,7 @@ impl AccumulatedUsage {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Add a usage to the accumulated totals.
     pub fn add(&mut self, usage: &Usage) {
         self.total_input_tokens += usage.input_tokens as u64;
@@ -200,13 +200,13 @@ impl AccumulatedUsage {
         self.total_cache_write_tokens += usage.cache_write_tokens as u64;
         self.total_reasoning_tokens += usage.reasoning_tokens as u64;
     }
-    
+
     /// Total input tokens including cache operations.
     /// This represents the full context processed.
     pub fn total_context_tokens(&self) -> u64 {
         self.total_input_tokens + self.total_cache_read_tokens + self.total_cache_write_tokens
     }
-    
+
     /// Reset the accumulated usage to zero.
     pub fn reset(&mut self) {
         *self = Self::default();

@@ -58,7 +58,7 @@ pub enum TicketStatus {
 
 impl TicketStatus {
     /// Parse status from string.
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "open" => TicketStatus::Open,
             "in-progress" | "inprogress" | "in_progress" => TicketStatus::InProgress,
@@ -288,21 +288,21 @@ mod tests {
 
     #[test]
     fn test_ticket_status_from_str() {
-        assert_eq!(TicketStatus::from_str("open"), TicketStatus::Open);
-        assert_eq!(TicketStatus::from_str("OPEN"), TicketStatus::Open);
+        assert_eq!(TicketStatus::parse("open"), TicketStatus::Open);
+        assert_eq!(TicketStatus::parse("OPEN"), TicketStatus::Open);
         assert_eq!(
-            TicketStatus::from_str("in-progress"),
+            TicketStatus::parse("in-progress"),
             TicketStatus::InProgress
         );
         assert_eq!(
-            TicketStatus::from_str("in_progress"),
+            TicketStatus::parse("in_progress"),
             TicketStatus::InProgress
         );
-        assert_eq!(TicketStatus::from_str("review"), TicketStatus::Review);
-        assert_eq!(TicketStatus::from_str("closed"), TicketStatus::Closed);
-        assert_eq!(TicketStatus::from_str("done"), TicketStatus::Closed);
+        assert_eq!(TicketStatus::parse("review"), TicketStatus::Review);
+        assert_eq!(TicketStatus::parse("closed"), TicketStatus::Closed);
+        assert_eq!(TicketStatus::parse("done"), TicketStatus::Closed);
         assert_eq!(
-            TicketStatus::from_str("custom-status"),
+            TicketStatus::parse("custom-status"),
             TicketStatus::Custom("custom-status".to_string())
         );
     }
@@ -344,7 +344,9 @@ mod tests {
 
     #[test]
     fn test_ticket_error_display() {
-        assert!(TicketError::NoTrackers.to_string().contains("No issue trackers"));
+        assert!(TicketError::NoTrackers
+            .to_string()
+            .contains("No issue trackers"));
         assert!(TicketError::TrackerNotFound("test".to_string())
             .to_string()
             .contains("test"));
@@ -431,6 +433,7 @@ pub mod mock {
         }
 
         /// Set the result for list_trackers.
+        #[allow(dead_code)]
         pub fn set_trackers_result(&self, result: Result<Vec<TrackerInfo>, TicketError>) {
             *self.trackers_result.lock().unwrap() = Some(result);
         }
@@ -600,6 +603,7 @@ pub mod mock {
     }
 
     /// Helper function to create sample tracker info for testing.
+    #[allow(dead_code)]
     pub fn sample_tracker_info() -> Vec<TrackerInfo> {
         vec![
             TrackerInfo {

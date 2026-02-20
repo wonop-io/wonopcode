@@ -104,9 +104,11 @@ Returns a formatted table of tickets with ID, title, status, and assignee."#
 
         // Build filter
         let filter = TicketFilter {
-            status: args
-                .status
-                .map(|s| s.into_iter().map(|st| TicketStatus::from_str(&st)).collect()),
+            status: args.status.map(|s| {
+                s.into_iter()
+                    .map(|st| TicketStatus::parse(&st))
+                    .collect()
+            }),
             assignee: args.assignee,
             labels: args.labels.unwrap_or_default(),
             limit: args.limit.min(100),
@@ -273,9 +275,15 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(args.status, Some(vec!["open".to_string(), "in-progress".to_string()]));
+        assert_eq!(
+            args.status,
+            Some(vec!["open".to_string(), "in-progress".to_string()])
+        );
         assert_eq!(args.assignee, Some("john".to_string()));
-        assert_eq!(args.labels, Some(vec!["bug".to_string(), "urgent".to_string()]));
+        assert_eq!(
+            args.labels,
+            Some(vec!["bug".to_string(), "urgent".to_string()])
+        );
         assert_eq!(args.limit, 25);
     }
 
@@ -368,7 +376,10 @@ mod tests {
         assert!(result.is_ok());
 
         let captured = mock.get_captured_filter().unwrap();
-        assert_eq!(captured.labels, vec!["bug".to_string(), "urgent".to_string()]);
+        assert_eq!(
+            captured.labels,
+            vec!["bug".to_string(), "urgent".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -482,6 +493,9 @@ mod tests {
         // Invalid status type
         let result = tool.execute(json!({"status": "not-an-array"}), &ctx).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid arguments"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid arguments"));
     }
 }

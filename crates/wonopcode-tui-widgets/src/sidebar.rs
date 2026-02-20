@@ -346,7 +346,12 @@ impl SidebarWidget {
     }
 
     /// Set context usage information for display.
-    pub fn set_context_usage(&mut self, estimated_tokens: u32, context_limit: u32, usage_percent: u8) {
+    pub fn set_context_usage(
+        &mut self,
+        estimated_tokens: u32,
+        context_limit: u32,
+        usage_percent: u8,
+    ) {
         self.context.estimated_tokens = estimated_tokens;
         self.context.max_tokens = context_limit;
         self.context.usage_percent = usage_percent;

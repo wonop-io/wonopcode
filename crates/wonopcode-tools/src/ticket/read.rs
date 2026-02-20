@@ -103,7 +103,8 @@ Provide the ticket ID (e.g., WON-167, GITHUB-123) to fetch its details."#
             .map_err(|e| ToolError::execution_failed(e.to_string()))?;
 
         // Format output
-        let output = format_ticket_details(&ticket, args.include_comments, args.include_attachments);
+        let output =
+            format_ticket_details(&ticket, args.include_comments, args.include_attachments);
 
         Ok(
             ToolOutput::new(format!("{}: {}", ticket.id, ticket.title), output).with_metadata(
@@ -205,10 +206,7 @@ fn format_ticket_details(
             output.push_str("|:---------|:-----|:-----|\n");
             for attachment in &ticket.attachments {
                 let size = format_file_size(attachment.size);
-                let mime = attachment
-                    .mime_type
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let mime = attachment.mime_type.as_deref().unwrap_or("unknown");
                 output.push_str(&format!(
                     "| {} | {} | {} |\n",
                     attachment.filename, size, mime
@@ -312,18 +310,16 @@ mod tests {
     #[test]
     fn test_format_ticket_details_with_comments() {
         let mut ticket = sample_ticket();
-        ticket.comments = vec![
-            TicketComment {
-                id: "c1".to_string(),
-                author: TicketUser {
-                    id: "2".to_string(),
-                    username: "reviewer".to_string(),
-                    name: None,
-                },
-                body: "Looks good!".to_string(),
-                created_at: Utc::now(),
+        ticket.comments = vec![TicketComment {
+            id: "c1".to_string(),
+            author: TicketUser {
+                id: "2".to_string(),
+                username: "reviewer".to_string(),
+                name: None,
             },
-        ];
+            body: "Looks good!".to_string(),
+            created_at: Utc::now(),
+        }];
 
         let output = format_ticket_details(&ticket, true, false);
         assert!(output.contains("## Comments (1)"));
@@ -334,15 +330,13 @@ mod tests {
     #[test]
     fn test_format_ticket_details_with_attachments() {
         let mut ticket = sample_ticket();
-        ticket.attachments = vec![
-            TicketAttachment {
-                id: "a1".to_string(),
-                filename: "screenshot.png".to_string(),
-                size: 1024 * 500, // 500 KB
-                mime_type: Some("image/png".to_string()),
-                url: Some("https://example.com/screenshot.png".to_string()),
-            },
-        ];
+        ticket.attachments = vec![TicketAttachment {
+            id: "a1".to_string(),
+            filename: "screenshot.png".to_string(),
+            size: 1024 * 500, // 500 KB
+            mime_type: Some("image/png".to_string()),
+            url: Some("https://example.com/screenshot.png".to_string()),
+        }];
 
         let output = format_ticket_details(&ticket, false, true);
         assert!(output.contains("## Attachments (1)"));
@@ -437,9 +431,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketReadTool;
 
-        let result = tool
-            .execute(json!({"ticket_id": "WON-123"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"ticket_id": "WON-123"}), &ctx).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -506,9 +498,7 @@ mod tests {
         let ctx = create_test_context_no_service();
         let tool = TicketReadTool;
 
-        let result = tool
-            .execute(json!({"ticket_id": "WON-123"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"ticket_id": "WON-123"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -549,9 +539,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketReadTool;
 
-        let result = tool
-            .execute(json!({"ticket_id": "WON-999"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"ticket_id": "WON-999"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -566,9 +554,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketReadTool;
 
-        let result = tool
-            .execute(json!({"ticket_id": "WON-123"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"ticket_id": "WON-123"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -601,9 +587,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketReadTool;
 
-        let result = tool
-            .execute(json!({"ticket_id": "WON-123"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"ticket_id": "WON-123"}), &ctx).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();

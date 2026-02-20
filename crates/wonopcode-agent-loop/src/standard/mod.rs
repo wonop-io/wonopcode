@@ -355,25 +355,30 @@ impl AgentLoop for StandardLoop {
                         // Calculate cost for THIS STEP only (delta, not cumulative)
                         // The receiver will accumulate these deltas
                         let model_info = ctx.model_info();
-                        let step_cost = model_info.cost.calculate(
-                            step_usage.input_tokens,
-                            step_usage.output_tokens,
-                        );
+                        let step_cost = model_info
+                            .cost
+                            .calculate(step_usage.input_tokens, step_usage.output_tokens);
 
                         // Extract accumulated values from provider (if available)
-                        let (accumulated_input, accumulated_output, accumulated_cost, last_request_input, last_request_output, last_request_cache_read) = 
-                            if let Some(acc) = &accumulated_usage {
-                                (
-                                    Some(acc.total_input_tokens), 
-                                    Some(acc.total_output_tokens), 
-                                    Some(acc.total_cost),
-                                    Some(acc.last_request_input),
-                                    Some(acc.last_request_output),
-                                    Some(acc.last_request_cache_read),
-                                )
-                            } else {
-                                (None, None, None, None, None, None)
-                            };
+                        let (
+                            accumulated_input,
+                            accumulated_output,
+                            accumulated_cost,
+                            last_request_input,
+                            last_request_output,
+                            last_request_cache_read,
+                        ) = if let Some(acc) = &accumulated_usage {
+                            (
+                                Some(acc.total_input_tokens),
+                                Some(acc.total_output_tokens),
+                                Some(acc.total_cost),
+                                Some(acc.last_request_input),
+                                Some(acc.last_request_output),
+                                Some(acc.last_request_cache_read),
+                            )
+                        } else {
+                            (None, None, None, None, None, None)
+                        };
 
                         info!(
                             step_input = step_usage.input_tokens,

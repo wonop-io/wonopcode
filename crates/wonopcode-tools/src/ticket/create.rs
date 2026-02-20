@@ -122,7 +122,7 @@ Returns the created ticket's ID and URL."#
         })?;
 
         // Parse status if provided
-        let status = args.status.map(|s| TicketStatus::from_str(&s));
+        let status = args.status.map(|s| TicketStatus::parse(&s));
 
         // Build the new ticket
         let new_ticket = NewTicket {
@@ -277,10 +277,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(args.title, "Full ticket");
-        assert_eq!(args.description, Some("Detailed description here".to_string()));
+        assert_eq!(
+            args.description,
+            Some("Detailed description here".to_string())
+        );
         assert_eq!(args.tracker_id, Some("tracker-1".to_string()));
         assert_eq!(args.assignee, Some("john".to_string()));
-        assert_eq!(args.labels, Some(vec!["bug".to_string(), "urgent".to_string()]));
+        assert_eq!(
+            args.labels,
+            Some(vec!["bug".to_string(), "urgent".to_string()])
+        );
         assert_eq!(args.status, Some("in-progress".to_string()));
     }
 
@@ -374,7 +380,10 @@ mod tests {
         assert!(result.is_ok());
 
         let captured = mock.get_captured_new_ticket().unwrap();
-        assert_eq!(captured.description, Some("Detailed description of the bug".to_string()));
+        assert_eq!(
+            captured.description,
+            Some("Detailed description of the bug".to_string())
+        );
     }
 
     #[tokio::test]
@@ -404,7 +413,10 @@ mod tests {
         assert_eq!(captured.title, "Full ticket");
         assert_eq!(captured.tracker_id, Some("tracker-1".to_string()));
         assert_eq!(captured.assignee, Some("john".to_string()));
-        assert_eq!(captured.labels, vec!["bug".to_string(), "urgent".to_string()]);
+        assert_eq!(
+            captured.labels,
+            vec!["bug".to_string(), "urgent".to_string()]
+        );
         assert!(captured.status.is_some());
     }
 
@@ -413,9 +425,7 @@ mod tests {
         let ctx = create_test_context_no_service();
         let tool = TicketCreateTool;
 
-        let result = tool
-            .execute(json!({"title": "Test ticket"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"title": "Test ticket"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -489,9 +499,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketCreateTool;
 
-        let result = tool
-            .execute(json!({"title": "Test ticket"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"title": "Test ticket"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -506,9 +514,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketCreateTool;
 
-        let result = tool
-            .execute(json!({"title": "Test ticket"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"title": "Test ticket"}), &ctx).await;
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -543,15 +549,10 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketCreateTool;
 
-        let result = tool
-            .execute(json!({"title": "Test ticket"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"title": "Test ticket"}), &ctx).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
-        assert_eq!(
-            output.metadata["url"],
-            "https://linear.app/team/WON-200"
-        );
+        assert_eq!(output.metadata["url"], "https://linear.app/team/WON-200");
     }
 }

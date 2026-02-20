@@ -235,7 +235,9 @@ mod tests {
     #[test]
     fn tool_registry_ticket_list_has_valid_schema() {
         let registry = ToolRegistry::with_builtins();
-        let tool = registry.get("ticket_list").expect("ticket_list should be registered");
+        let tool = registry
+            .get("ticket_list")
+            .expect("ticket_list should be registered");
 
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
@@ -248,12 +250,16 @@ mod tests {
     #[test]
     fn tool_registry_ticket_search_has_valid_schema() {
         let registry = ToolRegistry::with_builtins();
-        let tool = registry.get("ticket_search").expect("ticket_search should be registered");
+        let tool = registry
+            .get("ticket_search")
+            .expect("ticket_search should be registered");
 
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
 
-        let required = schema["required"].as_array().expect("should have required array");
+        let required = schema["required"]
+            .as_array()
+            .expect("should have required array");
         assert!(required.contains(&json!("query")));
 
         assert!(schema["properties"]["query"].is_object());
@@ -263,12 +269,16 @@ mod tests {
     #[test]
     fn tool_registry_ticket_read_has_valid_schema() {
         let registry = ToolRegistry::with_builtins();
-        let tool = registry.get("ticket_read").expect("ticket_read should be registered");
+        let tool = registry
+            .get("ticket_read")
+            .expect("ticket_read should be registered");
 
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
 
-        let required = schema["required"].as_array().expect("should have required array");
+        let required = schema["required"]
+            .as_array()
+            .expect("should have required array");
         assert!(required.contains(&json!("ticket_id")));
 
         assert!(schema["properties"]["ticket_id"].is_object());
@@ -279,12 +289,16 @@ mod tests {
     #[test]
     fn tool_registry_ticket_create_has_valid_schema() {
         let registry = ToolRegistry::with_builtins();
-        let tool = registry.get("ticket_create").expect("ticket_create should be registered");
+        let tool = registry
+            .get("ticket_create")
+            .expect("ticket_create should be registered");
 
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
 
-        let required = schema["required"].as_array().expect("should have required array");
+        let required = schema["required"]
+            .as_array()
+            .expect("should have required array");
         assert!(required.contains(&json!("title")));
 
         assert!(schema["properties"]["title"].is_object());
@@ -299,12 +313,27 @@ mod tests {
     fn tool_registry_ticket_tools_have_descriptions() {
         let registry = ToolRegistry::with_builtins();
 
-        let ticket_tools = ["ticket_list", "ticket_search", "ticket_read", "ticket_create"];
+        let ticket_tools = [
+            "ticket_list",
+            "ticket_search",
+            "ticket_read",
+            "ticket_create",
+        ];
         for tool_id in &ticket_tools {
-            let tool = registry.get(tool_id).expect(&format!("{} should be registered", tool_id));
+            let tool = registry
+                .get(tool_id)
+                .unwrap_or_else(|| panic!("{tool_id} should be registered"));
             let desc = tool.description();
-            assert!(!desc.is_empty(), "{} should have a non-empty description", tool_id);
-            assert!(desc.len() > 20, "{} description should be meaningful", tool_id);
+            assert!(
+                !desc.is_empty(),
+                "{} should have a non-empty description",
+                tool_id
+            );
+            assert!(
+                desc.len() > 20,
+                "{} description should be meaningful",
+                tool_id
+            );
         }
     }
 
@@ -327,7 +356,8 @@ mod tests {
         let registry = ToolRegistry::with_builtins();
 
         let tools = registry.list();
-        let ticket_ids: Vec<&str> = tools.into_iter()
+        let ticket_ids: Vec<&str> = tools
+            .into_iter()
             .filter(|id| id.starts_with("ticket_"))
             .collect();
 
@@ -335,6 +365,10 @@ mod tests {
         let mut unique = ticket_ids.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(ticket_ids.len(), unique.len(), "ticket tool IDs should be unique");
+        assert_eq!(
+            ticket_ids.len(),
+            unique.len(),
+            "ticket tool IDs should be unique"
+        );
     }
 }

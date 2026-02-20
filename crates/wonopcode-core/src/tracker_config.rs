@@ -28,7 +28,7 @@ struct LegacyTracker {
 
 impl LegacyTracker {
     /// Convert to the new TrackerCredential format
-    fn to_credential(self) -> Option<TrackerCredential> {
+    fn into_credential(self) -> Option<TrackerCredential> {
         let tracker_type = match self.tracker_type.to_lowercase().as_str() {
             "github" => TrackerType::Github,
             "linear" => TrackerType::Linear,
@@ -73,7 +73,11 @@ impl LegacyTracker {
                         return None;
                     }
                 };
-                let team_id = self.config.get("team_id").and_then(|v| v.as_str()).map(String::from);
+                let team_id = self
+                    .config
+                    .get("team_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 debug!(
                     tracker_id = %self.id,
                     name = %self.name,
@@ -159,9 +163,10 @@ impl TrackerConfig {
     pub fn display_info(&self) -> String {
         match self {
             TrackerConfig::Github(cfg) => format!("{}/{}", cfg.owner, cfg.repo),
-            TrackerConfig::Linear(cfg) => {
-                cfg.team_id.clone().unwrap_or_else(|| "All teams".to_string())
-            }
+            TrackerConfig::Linear(cfg) => cfg
+                .team_id
+                .clone()
+                .unwrap_or_else(|| "All teams".to_string()),
         }
     }
 
@@ -242,7 +247,7 @@ impl TrackerCredentialsManager {
     /// 2. Global config: `~/.config/wonopcode/trackers.json`
     pub fn new() -> Option<Self> {
         info!("TrackerCredentialsManager::new() called");
-        
+
         // Try Tauri app data directory first (Desktop app)
         if let Some(app_data) = Self::tauri_app_data_path() {
             info!(path = %app_data.display(), exists = app_data.exists(), "Checking Tauri app data path");
@@ -285,11 +290,11 @@ impl TrackerCredentialsManager {
     }
 
     /// Get the Tauri app data path for trackers.json
-    /// 
+    ///
     /// Tries multiple possible app identifiers since the app bundle ID has changed over time.
     fn tauri_app_data_path() -> Option<PathBuf> {
         let data_dir = dirs::data_dir()?;
-        
+
         // List of app identifiers to check (in order of preference)
         // - io.wonop.wonopcode: Current Tauri app identifier
         // - com.wonop.code: Legacy identifier
@@ -299,7 +304,7 @@ impl TrackerCredentialsManager {
             "com.wonop.code",
             "com.wonop.code.staging",
         ];
-        
+
         for app_id in &app_ids {
             let path = data_dir.join(app_id).join("trackers.json");
             if path.exists() {
@@ -307,7 +312,7 @@ impl TrackerCredentialsManager {
                 return Some(path);
             }
         }
-        
+
         // If none exist, return the primary path (io.wonop.wonopcode)
         // so new trackers will be created there
         Some(data_dir.join("io.wonop.wonopcode").join("trackers.json"))
@@ -361,7 +366,7 @@ impl TrackerCredentialsManager {
             content_len = content.len(),
             "Read legacy trackers file"
         );
-        
+
         // Try to parse as legacy array format
         let legacy_trackers: Vec<LegacyTracker> = serde_json::from_str(&content)?;
         info!(
@@ -375,7 +380,7 @@ impl TrackerCredentialsManager {
         let mut failed = 0;
         for legacy in legacy_trackers {
             let id = legacy.id.clone();
-            if let Some(credential) = legacy.to_credential() {
+            if let Some(credential) = legacy.into_credential() {
                 self.trackers.insert(credential.id.clone(), credential);
                 converted += 1;
             } else {
@@ -536,7 +541,10 @@ mod tests {
         // Reload and verify persistence
         let manager2 = TrackerCredentialsManager::with_path(config_path);
         assert!(manager2.has_trackers());
-        assert_eq!(manager2.get_tracker("test-github").unwrap().name, "Test GitHub");
+        assert_eq!(
+            manager2.get_tracker("test-github").unwrap().name,
+            "Test GitHub"
+        );
     }
 
     #[test]
@@ -583,25 +591,31 @@ mod tests {
 ]"#;
         std::fs::write(&config_path, legacy_json).unwrap();
 
-        let mut manager = TrackerCredentialsManager::with_path(config_path.clone());
-        
+        let mut manager = TrackerCredentialsManager::with_path(config_path);
+
         // This should fail because with_path calls load() not load_legacy()
         // Let's manually test load_legacy
         manager.trackers.clear();
         manager.load_legacy().unwrap();
-        
+
         println!("Trackers loaded: {}", manager.trackers.len());
         for (id, cred) in &manager.trackers {
             println!("  - {}: {} ({})", id, cred.name, cred.enabled);
         }
-        
-        assert!(manager.has_trackers(), "Should have trackers after load_legacy");
-        assert!(manager.has_enabled_trackers(), "Should have enabled trackers");
-        
+
+        assert!(
+            manager.has_trackers(),
+            "Should have trackers after load_legacy"
+        );
+        assert!(
+            manager.has_enabled_trackers(),
+            "Should have enabled trackers"
+        );
+
         let tracker = manager.get_tracker("tracker-1763472039984").unwrap();
         assert_eq!(tracker.name, "Linear");
         assert!(tracker.enabled);
-        
+
         match &tracker.config {
             TrackerConfig::Linear(cfg) => {
                 assert_eq!(cfg.api_key, "lin_api_test123");
@@ -613,11 +627,11 @@ mod tests {
 
     #[test]
     fn test_new_loads_from_real_tauri_path() {
-        // This test verifies that TrackerCredentialsManager::new() 
+        // This test verifies that TrackerCredentialsManager::new()
         // can find and load the actual trackers.json from Tauri app data.
         // The test passes whether or not trackers are configured - it just
         // verifies the loading mechanism works.
-        
+
         // TrackerCredentialsManager::new() should not panic
         let _ = TrackerCredentialsManager::new();
     }

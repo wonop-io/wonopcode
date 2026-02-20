@@ -45,8 +45,6 @@ use wonopcode_util::FileTimeState;
 use crate::compaction;
 use crate::compaction::{CompactionConfig, CompactionResult};
 
-
-
 /// Adapter that implements `PermissionChecker` for `PermissionManager`.
 ///
 /// This allows the agent loop to check permissions without directly depending
@@ -682,7 +680,7 @@ impl Runner {
             mcp_todo_adapter: None, // Will be initialized when MCP tools are loaded
             session_service: None,  // Will be set by new_with_session
             context_state: RwLock::new(ContextState::new(context_limit)),
-            ticket_service: None,   // Will be set by new_with_shared
+            ticket_service: None, // Will be set by new_with_shared
         })
     }
 
@@ -719,6 +717,7 @@ impl Runner {
     ///
     /// When providing an AgentLoop, the runner will use that instead of the default StandardLoop.
     /// This is how Pro injects WasmAgentLoop for WASM-based agent behavior.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new_with_shared(
         mut config: RunnerConfig,
         instance: Instance,
@@ -1145,12 +1144,14 @@ impl Runner {
     }
 
     /// Update context state with actual tokens from provider response.
+    #[allow(dead_code)]
     async fn update_context_actual(&self, input_tokens: u32, output_tokens: u32) {
         let mut state = self.context_state.write().await;
         state.update_actual(input_tokens, output_tokens);
     }
 
     /// Check if compaction is needed based on current context state.
+    #[allow(dead_code)]
     async fn needs_compaction(&self, messages: &[ProviderMessage]) -> bool {
         let mut state = self.context_state.write().await;
         state.update_estimated(messages);
@@ -1247,7 +1248,7 @@ impl Runner {
 
         // Compaction thresholds
         const TOKEN_COMPACTION_THRESHOLD_PERCENT: u8 = 80; // Compact at 80% context usage
-        const MESSAGE_COMPACTION_THRESHOLD: usize = 100;   // Fallback: also compact at 100+ messages
+        const MESSAGE_COMPACTION_THRESHOLD: usize = 100; // Fallback: also compact at 100+ messages
 
         let needs_token_compaction = usage_percent >= TOKEN_COMPACTION_THRESHOLD_PERCENT;
         let needs_message_compaction = messages.len() > MESSAGE_COMPACTION_THRESHOLD;
@@ -1327,17 +1328,25 @@ impl Runner {
                         let provider = self.provider.read().await;
                         if provider.provider_id() == "anthropic-cli" {
                             provider.set_cli_session_id(None).await;
-                            debug!("Cleared CLI session after compaction - next call will start fresh");
+                            debug!(
+                                "Cleared CLI session after compaction - next call will start fresh"
+                            );
                         }
                     }
 
                     let status = if messages_summarized > 0 {
                         format!(
                             "Compacted: {} → {} messages, {} → {} tokens",
-                            messages_before, messages.len(), tokens_before, tokens_after
+                            messages_before,
+                            messages.len(),
+                            tokens_before,
+                            tokens_after
                         )
                     } else {
-                        format!("Pruned old tool outputs: {} → {} tokens", tokens_before, tokens_after)
+                        format!(
+                            "Pruned old tool outputs: {} → {} tokens",
+                            tokens_before, tokens_after
+                        )
                     };
                     send_update(update_tx, AppUpdate::Status(status));
 
@@ -1637,7 +1646,9 @@ impl Runner {
                     );
                     send_update(
                         update_tx,
-                        AppUpdate::Status("Context overflow - performing emergency compaction...".to_string()),
+                        AppUpdate::Status(
+                            "Context overflow - performing emergency compaction...".to_string(),
+                        ),
                     );
 
                     // Perform emergency compaction
@@ -2082,13 +2093,13 @@ impl Runner {
         {
             let context_state = self.get_context_state().await;
             let history = self.history.read().await;
-            
+
             // If we have history, send token usage estimate
             if !history.is_empty() {
                 let estimated_tokens = context_state.estimated_tokens;
                 let context_limit = context_state.context_limit;
                 let usage_percent = context_state.usage_percent();
-                
+
                 // Send ContextStatus for accurate context usage display
                 send_update(
                     &update_tx,
@@ -2099,7 +2110,7 @@ impl Runner {
                         needs_compaction: context_state.needs_compaction(),
                     },
                 );
-                
+
                 debug!(
                     estimated_tokens = estimated_tokens,
                     context_limit = context_limit,

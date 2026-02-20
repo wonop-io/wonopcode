@@ -72,7 +72,7 @@ impl HeadlessState {
     }
 
     /// Create a new headless state with an unbounded action channel.
-    /// 
+    ///
     /// **Deprecated**: Use `new()` with a bounded channel instead.
     /// This is kept for backward compatibility with existing callers.
     #[deprecated(since = "0.2.0", note = "Use new() with bounded channel instead")]
@@ -398,10 +398,13 @@ async fn action_prompt(
     Json(req): Json<PromptRequest>,
 ) -> impl IntoResponse {
     debug!(prompt = %req.prompt, "Received prompt action");
-    match state.send_action(Action::SendPrompt {
-        prompt: req.prompt,
-        images: vec![],
-    }).await {
+    match state
+        .send_action(Action::SendPrompt {
+            prompt: req.prompt,
+            images: vec![],
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -425,7 +428,10 @@ async fn action_model(
     Json(req): Json<ModelRequest>,
 ) -> impl IntoResponse {
     debug!(model = %req.model, "Received model change action");
-    match state.send_action(Action::ChangeModel { model: req.model }).await {
+    match state
+        .send_action(Action::ChangeModel { model: req.model })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -441,7 +447,10 @@ async fn action_agent(
     Json(req): Json<AgentRequest>,
 ) -> impl IntoResponse {
     debug!(agent = %req.agent, "Received agent change action");
-    match state.send_action(Action::ChangeAgent { agent: req.agent }).await {
+    match state
+        .send_action(Action::ChangeAgent { agent: req.agent })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -465,9 +474,12 @@ async fn action_session_switch(
     Json(req): Json<SessionSwitchRequest>,
 ) -> impl IntoResponse {
     debug!(session_id = %req.session_id, "Received session switch action");
-    match state.send_action(Action::SwitchSession {
-        session_id: req.session_id,
-    }).await {
+    match state
+        .send_action(Action::SwitchSession {
+            session_id: req.session_id,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -483,7 +495,10 @@ async fn action_session_rename(
     Json(req): Json<SessionRenameRequest>,
 ) -> impl IntoResponse {
     debug!(title = %req.title, "Received session rename action");
-    match state.send_action(Action::RenameSession { title: req.title }).await {
+    match state
+        .send_action(Action::RenameSession { title: req.title })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -499,9 +514,12 @@ async fn action_session_fork(
     Json(req): Json<SessionForkRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = ?req.message_id, "Received session fork action");
-    match state.send_action(Action::ForkSession {
-        message_id: req.message_id,
-    }).await {
+    match state
+        .send_action(Action::ForkSession {
+            message_id: req.message_id,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -549,9 +567,12 @@ async fn action_revert(
     Json(req): Json<RevertRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = %req.message_id, "Received revert action");
-    match state.send_action(Action::Revert {
-        message_id: req.message_id,
-    }).await {
+    match state
+        .send_action(Action::Revert {
+            message_id: req.message_id,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -607,7 +628,10 @@ async fn action_mcp_toggle(
     Json(req): Json<McpToggleRequest>,
 ) -> impl IntoResponse {
     debug!(name = %req.name, "Received MCP toggle action");
-    match state.send_action(Action::McpToggle { name: req.name }).await {
+    match state
+        .send_action(Action::McpToggle { name: req.name })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -623,7 +647,10 @@ async fn action_mcp_reconnect(
     Json(req): Json<McpReconnectRequest>,
 ) -> impl IntoResponse {
     debug!(name = %req.name, "Received MCP reconnect action");
-    match state.send_action(Action::McpReconnect { name: req.name }).await {
+    match state
+        .send_action(Action::McpReconnect { name: req.name })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -639,9 +666,12 @@ async fn action_goto(
     Json(req): Json<GotoRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = %req.message_id, "Received goto action");
-    match state.send_action(Action::GotoMessage {
-        message_id: req.message_id,
-    }).await {
+    match state
+        .send_action(Action::GotoMessage {
+            message_id: req.message_id,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -658,10 +688,13 @@ async fn action_settings(
     Json(req): Json<SettingsRequest>,
 ) -> impl IntoResponse {
     debug!(scope = ?req.scope, "Received settings action");
-    match state.send_action(Action::SaveSettings {
-        scope: req.scope,
-        config: req.config,
-    }).await {
+    match state
+        .send_action(Action::SaveSettings {
+            scope: req.scope,
+            config: req.config,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -679,11 +712,14 @@ async fn action_permission(
     Json(req): Json<PermissionRequest>,
 ) -> impl IntoResponse {
     debug!(request_id = %req.request_id, allow = req.allow, "Received permission response");
-    match state.send_action(Action::PermissionResponse {
-        request_id: req.request_id,
-        allow: req.allow,
-        remember: req.remember,
-    }).await {
+    match state
+        .send_action(Action::PermissionResponse {
+            request_id: req.request_id,
+            allow: req.allow,
+            remember: req.remember,
+        })
+        .await
+    {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }

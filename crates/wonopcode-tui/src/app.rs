@@ -3308,7 +3308,8 @@ async function fetchUserData(userId) {
                 }
                 // Store last request values if provided
                 if let (Some(last_in), Some(last_out)) = (last_request_input, last_request_output) {
-                    self.sidebar.set_last_request_tokens(last_in as u32, last_out as u32);
+                    self.sidebar
+                        .set_last_request_tokens(last_in as u32, last_out as u32);
                 }
                 // Note: last_request_cache_read not yet used in TUI sidebar
                 let _ = last_request_cache_read;
@@ -3323,12 +3324,15 @@ async function fetchUserData(userId) {
                 needs_compaction,
             } => {
                 // Update sidebar with context usage information
-                self.sidebar.set_context_usage(estimated_tokens, context_limit, usage_percent);
+                self.sidebar
+                    .set_context_usage(estimated_tokens, context_limit, usage_percent);
                 if needs_compaction {
                     // Show warning in footer when compaction is needed
-                    self.footer.set_status(crate::widgets::footer::FooterStatus::Running(
-                        format!("Context usage: {}% - compaction may occur", usage_percent)
-                    ));
+                    self.footer
+                        .set_status(crate::widgets::footer::FooterStatus::Running(format!(
+                            "Context usage: {}% - compaction may occur",
+                            usage_percent
+                        )));
                 }
             }
             AppUpdate::Sessions(sessions) => {

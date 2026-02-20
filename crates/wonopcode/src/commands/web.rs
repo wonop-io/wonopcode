@@ -115,7 +115,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             snapshot: self.snapshot.clone(),
             file_time: Some(self.file_time.clone()),
             sandbox,
-            event_tx: None, // MCP HTTP doesn't need event_tx
+            event_tx: None,       // MCP HTTP doesn't need event_tx
             ticket_service: None, // No ticket service in MCP HTTP
         };
 

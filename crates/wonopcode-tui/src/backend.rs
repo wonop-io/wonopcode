@@ -1310,13 +1310,15 @@ fn server_payload_to_app_updates(payload: ServerPayload) -> Vec<AppUpdate> {
             action,
             description,
             path,
-        } => vec![AppUpdate::PermissionRequest(crate::PermissionRequestUpdate {
-            id,
-            tool,
-            action,
-            description,
-            path,
-        })],
+        } => vec![AppUpdate::PermissionRequest(
+            crate::PermissionRequestUpdate {
+                id,
+                tool,
+                action,
+                description,
+                path,
+            },
+        )],
         ServerPayload::PermissionResolved {
             request_id,
             allowed,

@@ -93,11 +93,13 @@ Returns a list of matching tickets sorted by relevance."#
         // Format output
         let output = format_search_results(query, &tickets);
 
-        Ok(ToolOutput::new(format!("Search: {}", query), output).with_metadata(json!({
-            "query": query,
-            "count": tickets.len(),
-            "limit": args.limit
-        })))
+        Ok(
+            ToolOutput::new(format!("Search: {}", query), output).with_metadata(json!({
+                "query": query,
+                "count": tickets.len(),
+                "limit": args.limit
+            })),
+        )
     }
 }
 
@@ -110,7 +112,11 @@ fn format_search_results(query: &str, tickets: &[TicketSummary]) -> String {
         );
     }
 
-    let mut output = format!("## Search Results for \"{}\" ({} found)\n\n", query, tickets.len());
+    let mut output = format!(
+        "## Search Results for \"{}\" ({} found)\n\n",
+        query,
+        tickets.len()
+    );
     output.push_str("| ID | Title | Status | Tracker |\n");
     output.push_str("|:---|:------|:-------|:--------|\n");
 
@@ -122,9 +128,7 @@ fn format_search_results(query: &str, tickets: &[TicketSummary]) -> String {
         ));
     }
 
-    output.push_str(&format!(
-        "\nUse `ticket_read` with a ticket ID to see full details."
-    ));
+    output.push_str("\nUse `ticket_read` with a ticket ID to see full details.");
 
     output
 }
@@ -323,9 +327,7 @@ mod tests {
         let ctx = create_test_context(mock.clone());
         let tool = TicketSearchTool;
 
-        let result = tool
-            .execute(json!({"query": "nonexistent"}), &ctx)
-            .await;
+        let result = tool.execute(json!({"query": "nonexistent"}), &ctx).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();

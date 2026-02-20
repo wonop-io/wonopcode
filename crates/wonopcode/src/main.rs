@@ -1479,7 +1479,7 @@ async fn run_headless(
                     let final_input = accumulated_input.map(|v| v as u32).unwrap_or(*input);
                     let final_output = accumulated_output.map(|v| v as u32).unwrap_or(*output);
                     let final_cost = accumulated_cost.unwrap_or(*cost);
-                    
+
                     let mut state = state_for_updates.write().await;
                     state.token_usage.input = final_input;
                     state.token_usage.output = final_output;

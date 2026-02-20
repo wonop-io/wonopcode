@@ -462,7 +462,9 @@ impl ClaudeCliProvider {
             mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: None,
-            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(
+                AccumulatedUsage::default(),
+            )),
         })
     }
 
@@ -481,7 +483,9 @@ impl ClaudeCliProvider {
             mcp_config: Some(mcp_config),
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: None,
-            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(
+                AccumulatedUsage::default(),
+            )),
         })
     }
 
@@ -512,7 +516,9 @@ impl ClaudeCliProvider {
             mcp_config: None,
             session_id: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
             working_directory: Some(working_directory),
-            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(AccumulatedUsage::default())),
+            accumulated_usage: std::sync::Arc::new(tokio::sync::RwLock::new(
+                AccumulatedUsage::default(),
+            )),
         })
     }
 
@@ -1088,7 +1094,7 @@ impl MessageUsage {
         let cache_read = self.cache_read_input_tokens.unwrap_or(0);
         base + cache_creation + cache_read
     }
-    
+
     /// Get input tokens that are NEW this turn (not cache reads).
     /// This is the actual delta that should be accumulated across turns.
     /// = input_tokens + cache_creation_input_tokens (excludes cache_read)
@@ -1098,7 +1104,7 @@ impl MessageUsage {
         // Deliberately exclude cache_read_input_tokens as those were counted in previous turns
         base + cache_creation
     }
-    
+
     /// Get cache read tokens for this turn.
     fn cache_read_tokens(&self) -> u64 {
         self.cache_read_input_tokens.unwrap_or(0)
@@ -1124,7 +1130,7 @@ impl CliUsage {
         let cache_read = self.cache_read_input_tokens.unwrap_or(0);
         base + cache_creation + cache_read
     }
-    
+
     /// Get input tokens that are NEW this turn (not cache reads).
     /// This is the actual delta that should be accumulated across turns.
     /// = input_tokens + cache_creation_input_tokens (excludes cache_read)
@@ -1134,7 +1140,7 @@ impl CliUsage {
         // Deliberately exclude cache_read_input_tokens as those were counted in previous turns
         base + cache_creation
     }
-    
+
     /// Get cache read tokens for this turn.
     fn cache_read_tokens(&self) -> u64 {
         self.cache_read_input_tokens.unwrap_or(0)
@@ -1323,6 +1329,7 @@ impl LanguageModel for ClaudeCliProvider {
             // This stores the cache read tokens for this turn
             let mut cli_cache_read_tokens: u64 = 0;
             let mut cli_output_tokens: u64 = 0;
+            #[allow(unused_assignments)]
             let mut cli_cost: Option<f64> = None;
             let mut text_started = false;
             let mut captured_session_id: Option<String> = None;

@@ -52,11 +52,7 @@ impl UserInputRequest {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        if now > self.created_at {
-            now - self.created_at
-        } else {
-            0
-        }
+        now.saturating_sub(self.created_at)
     }
 }
 

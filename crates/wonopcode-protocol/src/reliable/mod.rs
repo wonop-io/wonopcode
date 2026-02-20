@@ -26,19 +26,19 @@
 //! - `Reliable`: Message must be acknowledged, will retry on timeout
 //! - `BestEffort`: Fire-and-forget, no ack required
 
-mod envelope;
 mod client;
-mod server;
+mod envelope;
 mod events;
-mod snapshot;
 mod input;
+mod server;
+mod snapshot;
 
-pub use envelope::*;
 pub use client::*;
-pub use server::*;
+pub use envelope::*;
 pub use events::*;
-pub use snapshot::*;
 pub use input::*;
+pub use server::*;
+pub use snapshot::*;
 
 /// Protocol version for compatibility checks
 pub const PROTOCOL_VERSION: u32 = 2;

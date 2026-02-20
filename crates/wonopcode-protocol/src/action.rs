@@ -54,8 +54,7 @@ impl ImageData {
         let estimated_size = (self.data.len() * 3) / 4;
         if estimated_size > MAX_IMAGE_SIZE_BYTES {
             return Err(format!(
-                "Image too large ({} bytes). Maximum: {} bytes",
-                estimated_size, MAX_IMAGE_SIZE_BYTES
+                "Image too large ({estimated_size} bytes). Maximum: {MAX_IMAGE_SIZE_BYTES} bytes"
             ));
         }
 

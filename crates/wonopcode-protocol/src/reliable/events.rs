@@ -198,6 +198,15 @@ pub enum WorkstreamEventData {
         /// Status message.
         message: String,
     },
+
+    // =========================================================================
+    // Permission State
+    // =========================================================================
+    /// Allow-all mode changed.
+    AllowAllChanged {
+        /// Whether allow-all mode is enabled.
+        enabled: bool,
+    },
 }
 
 /// A part of a message (for rich reconstruction).

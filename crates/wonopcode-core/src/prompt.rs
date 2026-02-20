@@ -309,7 +309,7 @@ impl PromptLoop {
                     }
                     StreamChunk::FinishStep {
                         usage,
-                        accumulated_usage: _,  // Not used in basic prompt loop
+                        accumulated_usage: _, // Not used in basic prompt loop
                         finish_reason: reason,
                     } => {
                         step_input_tokens = usage.input_tokens;
