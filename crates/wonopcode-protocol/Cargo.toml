@@ -18,7 +18,7 @@ serde_json = "1"
 
 # Time and IDs (for reliable protocol)
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.0", features = ["v7", "serde"] }
+uuid = { version = "1.21", features = ["v7", "serde"] }
 
 # WASM/JS support (optional, enabled by "js" feature)
 js-sys = { version = "0.3", optional = true }
