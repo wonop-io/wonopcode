@@ -903,7 +903,9 @@ async fn run_headless(
 ) -> anyhow::Result<()> {
     use tokio::sync::mpsc;
     use wonopcode_protocol::{Action, Update};
-    use wonopcode_server::{create_headless_router_with_options, HeadlessState};
+    use wonopcode_server::{
+        create_headless_router_with_options, HeadlessState, DEFAULT_ACTION_CHANNEL_CAPACITY,
+    };
 
     info!("Starting headless server on {}", address);
     println!("Wonopcode headless server v{}", env!("CARGO_PKG_VERSION"));
@@ -992,7 +994,9 @@ async fn run_headless(
     info!("Shared permission manager initialized for headless mode");
 
     // Create channels for action/update communication
-    let (protocol_action_tx, mut protocol_action_rx) = mpsc::unbounded_channel::<Action>();
+    // Using bounded channels for backpressure control
+    let (protocol_action_tx, mut protocol_action_rx) =
+        mpsc::channel::<Action>(DEFAULT_ACTION_CHANNEL_CAPACITY);
     let (app_action_tx, app_action_rx) = mpsc::unbounded_channel::<wonopcode_tui::AppAction>();
     let (app_update_tx, mut app_update_rx) = mpsc::unbounded_channel::<wonopcode_tui::AppUpdate>();
 

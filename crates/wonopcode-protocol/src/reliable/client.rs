@@ -193,6 +193,99 @@ pub enum ClientMessage {
         /// MCP server name.
         name: String,
     },
+
+    // =========================================================================
+    // Extended Operations (for feature parity with V1)
+    // =========================================================================
+    /// Refresh the workstream list (re-scan git worktrees).
+    RefreshWorkstreams,
+
+    /// Stop/cancel the currently running agent.
+    StopAgent {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Get git status for a workstream.
+    GitStatus {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Commit and push changes for a workstream.
+    GitCommitAndPush {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Files to commit (paths relative to worktree root).
+        files: Vec<String>,
+        /// Commit message.
+        message: String,
+    },
+
+    /// Get diff files list for a workstream.
+    GetDiffFiles {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Diff mode: "all", "branch", or "uncommitted".
+        #[serde(default)]
+        mode: String,
+    },
+
+    /// Get diff for a specific file.
+    GetFileDiff {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Path to the file.
+        file_path: String,
+        /// Diff mode: "all", "branch", or "uncommitted".
+        #[serde(default)]
+        mode: String,
+    },
+
+    /// Get list of available models.
+    GetAvailableModels,
+
+    /// Close a workstream (deactivate agent, optionally remove worktree).
+    CloseWorkstream {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Get list of ACE artifacts for a workstream.
+    GetArtifacts {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Get full detail for a specific artifact.
+    GetArtifactDetail {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Artifact ID (e.g., "REQ-001").
+        artifact_id: String,
+    },
+
+    /// Get server configuration.
+    GetConfig,
+
+    /// Get provider status (authenticated status for each provider).
+    GetProviderStatus,
+
+    /// Set API key for a provider.
+    SetApiKey {
+        /// Provider name (e.g., "anthropic", "openai").
+        provider: String,
+        /// API key.
+        key: String,
+    },
+
+    /// Set authentication method for a provider.
+    SetAuthMethod {
+        /// Provider name.
+        provider: String,
+        /// Method: "api_key" or "oauth".
+        method: String,
+    },
 }
 
 /// Topics that clients can subscribe to.

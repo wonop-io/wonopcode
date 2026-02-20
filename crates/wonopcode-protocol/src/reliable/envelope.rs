@@ -176,6 +176,19 @@ impl Default for DeliveryMode {
 }
 
 /// Get current time in milliseconds since Unix epoch.
+/// 
+/// On WASM with the `js` feature, uses `js_sys::Date::now()`.
+/// On other platforms, uses `std::time::SystemTime::now()`.
+#[cfg(feature = "js")]
+pub fn now_millis() -> u64 {
+    js_sys::Date::now() as u64
+}
+
+/// Get current time in milliseconds since Unix epoch.
+/// 
+/// On WASM with the `js` feature, uses `js_sys::Date::now()`.
+/// On other platforms, uses `std::time::SystemTime::now()`.
+#[cfg(not(feature = "js"))]
 pub fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

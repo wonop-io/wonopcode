@@ -39,11 +39,15 @@ use tracing::{debug, info, warn, Span};
 use wonopcode_mcp::{create_mcp_router, McpHttpState};
 use wonopcode_protocol::{Action, State as ProtocolState, Update};
 
+/// Default channel capacity for action messages.
+/// This provides backpressure when the runner is overwhelmed.
+pub const DEFAULT_ACTION_CHANNEL_CAPACITY: usize = 256;
+
 /// State for the headless server.
 #[derive(Clone)]
 pub struct HeadlessState {
-    /// Sender for actions to the runner.
-    pub action_tx: mpsc::UnboundedSender<Action>,
+    /// Sender for actions to the runner (bounded for backpressure).
+    pub action_tx: mpsc::Sender<Action>,
     /// Broadcast sender for updates from the runner.
     pub update_tx: broadcast::Sender<Update>,
     /// Current state for initial sync.
@@ -55,8 +59,8 @@ pub struct HeadlessState {
 }
 
 impl HeadlessState {
-    /// Create a new headless state.
-    pub fn new(action_tx: mpsc::UnboundedSender<Action>) -> Self {
+    /// Create a new headless state with a bounded action channel.
+    pub fn new(action_tx: mpsc::Sender<Action>) -> Self {
         let (update_tx, _) = broadcast::channel(256);
         Self {
             action_tx,
@@ -67,10 +71,34 @@ impl HeadlessState {
         }
     }
 
+    /// Create a new headless state with an unbounded action channel.
+    /// 
+    /// **Deprecated**: Use `new()` with a bounded channel instead.
+    /// This is kept for backward compatibility with existing callers.
+    #[deprecated(since = "0.2.0", note = "Use new() with bounded channel instead")]
+    pub fn new_unbounded(action_tx: mpsc::UnboundedSender<Action>) -> Self {
+        // Create a bounded channel and spawn a forwarder task
+        let (bounded_tx, mut bounded_rx) = mpsc::channel::<Action>(DEFAULT_ACTION_CHANNEL_CAPACITY);
+        tokio::spawn(async move {
+            while let Some(action) = bounded_rx.recv().await {
+                if action_tx.send(action).is_err() {
+                    break;
+                }
+            }
+        });
+        Self::new(bounded_tx)
+    }
+
     /// Set the shutdown sender for graceful server shutdown.
     pub fn with_shutdown_tx(mut self, tx: mpsc::Sender<()>) -> Self {
         self.shutdown_tx = Some(tx);
         self
+    }
+
+    /// Send an action to the runner.
+    /// Returns Ok if the action was queued, Err if the channel is closed.
+    pub async fn send_action(&self, action: Action) -> Result<(), mpsc::error::SendError<Action>> {
+        self.action_tx.send(action).await
     }
 
     /// Send an update to all connected clients.
@@ -370,10 +398,10 @@ async fn action_prompt(
     Json(req): Json<PromptRequest>,
 ) -> impl IntoResponse {
     debug!(prompt = %req.prompt, "Received prompt action");
-    match state.action_tx.send(Action::SendPrompt {
+    match state.send_action(Action::SendPrompt {
         prompt: req.prompt,
         images: vec![],
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -381,7 +409,7 @@ async fn action_prompt(
 
 async fn action_cancel(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received cancel action");
-    match state.action_tx.send(Action::Cancel) {
+    match state.send_action(Action::Cancel).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -397,10 +425,7 @@ async fn action_model(
     Json(req): Json<ModelRequest>,
 ) -> impl IntoResponse {
     debug!(model = %req.model, "Received model change action");
-    match state
-        .action_tx
-        .send(Action::ChangeModel { model: req.model })
-    {
+    match state.send_action(Action::ChangeModel { model: req.model }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -416,10 +441,7 @@ async fn action_agent(
     Json(req): Json<AgentRequest>,
 ) -> impl IntoResponse {
     debug!(agent = %req.agent, "Received agent change action");
-    match state
-        .action_tx
-        .send(Action::ChangeAgent { agent: req.agent })
-    {
+    match state.send_action(Action::ChangeAgent { agent: req.agent }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -427,7 +449,7 @@ async fn action_agent(
 
 async fn action_session_new(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received new session action");
-    match state.action_tx.send(Action::NewSession) {
+    match state.send_action(Action::NewSession).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -443,9 +465,9 @@ async fn action_session_switch(
     Json(req): Json<SessionSwitchRequest>,
 ) -> impl IntoResponse {
     debug!(session_id = %req.session_id, "Received session switch action");
-    match state.action_tx.send(Action::SwitchSession {
+    match state.send_action(Action::SwitchSession {
         session_id: req.session_id,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -461,10 +483,7 @@ async fn action_session_rename(
     Json(req): Json<SessionRenameRequest>,
 ) -> impl IntoResponse {
     debug!(title = %req.title, "Received session rename action");
-    match state
-        .action_tx
-        .send(Action::RenameSession { title: req.title })
-    {
+    match state.send_action(Action::RenameSession { title: req.title }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -480,9 +499,9 @@ async fn action_session_fork(
     Json(req): Json<SessionForkRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = ?req.message_id, "Received session fork action");
-    match state.action_tx.send(Action::ForkSession {
+    match state.send_action(Action::ForkSession {
         message_id: req.message_id,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -490,7 +509,7 @@ async fn action_session_fork(
 
 async fn action_session_share(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received session share action");
-    match state.action_tx.send(Action::ShareSession) {
+    match state.send_action(Action::ShareSession).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -498,7 +517,7 @@ async fn action_session_share(State(state): State<HeadlessState>) -> impl IntoRe
 
 async fn action_session_unshare(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received session unshare action");
-    match state.action_tx.send(Action::UnshareSession) {
+    match state.send_action(Action::UnshareSession).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -506,7 +525,7 @@ async fn action_session_unshare(State(state): State<HeadlessState>) -> impl Into
 
 async fn action_undo(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received undo action");
-    match state.action_tx.send(Action::Undo) {
+    match state.send_action(Action::Undo).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -514,7 +533,7 @@ async fn action_undo(State(state): State<HeadlessState>) -> impl IntoResponse {
 
 async fn action_redo(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received redo action");
-    match state.action_tx.send(Action::Redo) {
+    match state.send_action(Action::Redo).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -530,9 +549,9 @@ async fn action_revert(
     Json(req): Json<RevertRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = %req.message_id, "Received revert action");
-    match state.action_tx.send(Action::Revert {
+    match state.send_action(Action::Revert {
         message_id: req.message_id,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -540,7 +559,7 @@ async fn action_revert(
 
 async fn action_unrevert(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received unrevert action");
-    match state.action_tx.send(Action::Unrevert) {
+    match state.send_action(Action::Unrevert).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -548,7 +567,7 @@ async fn action_unrevert(State(state): State<HeadlessState>) -> impl IntoRespons
 
 async fn action_compact(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received compact action");
-    match state.action_tx.send(Action::Compact) {
+    match state.send_action(Action::Compact).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -556,7 +575,7 @@ async fn action_compact(State(state): State<HeadlessState>) -> impl IntoResponse
 
 async fn action_sandbox_start(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received sandbox start action");
-    match state.action_tx.send(Action::SandboxStart) {
+    match state.send_action(Action::SandboxStart).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -564,7 +583,7 @@ async fn action_sandbox_start(State(state): State<HeadlessState>) -> impl IntoRe
 
 async fn action_sandbox_stop(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received sandbox stop action");
-    match state.action_tx.send(Action::SandboxStop) {
+    match state.send_action(Action::SandboxStop).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -572,7 +591,7 @@ async fn action_sandbox_stop(State(state): State<HeadlessState>) -> impl IntoRes
 
 async fn action_sandbox_restart(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received sandbox restart action");
-    match state.action_tx.send(Action::SandboxRestart) {
+    match state.send_action(Action::SandboxRestart).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -588,7 +607,7 @@ async fn action_mcp_toggle(
     Json(req): Json<McpToggleRequest>,
 ) -> impl IntoResponse {
     debug!(name = %req.name, "Received MCP toggle action");
-    match state.action_tx.send(Action::McpToggle { name: req.name }) {
+    match state.send_action(Action::McpToggle { name: req.name }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -604,10 +623,7 @@ async fn action_mcp_reconnect(
     Json(req): Json<McpReconnectRequest>,
 ) -> impl IntoResponse {
     debug!(name = %req.name, "Received MCP reconnect action");
-    match state
-        .action_tx
-        .send(Action::McpReconnect { name: req.name })
-    {
+    match state.send_action(Action::McpReconnect { name: req.name }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -623,9 +639,9 @@ async fn action_goto(
     Json(req): Json<GotoRequest>,
 ) -> impl IntoResponse {
     debug!(message_id = %req.message_id, "Received goto action");
-    match state.action_tx.send(Action::GotoMessage {
+    match state.send_action(Action::GotoMessage {
         message_id: req.message_id,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -642,10 +658,10 @@ async fn action_settings(
     Json(req): Json<SettingsRequest>,
 ) -> impl IntoResponse {
     debug!(scope = ?req.scope, "Received settings action");
-    match state.action_tx.send(Action::SaveSettings {
+    match state.send_action(Action::SaveSettings {
         scope: req.scope,
         config: req.config,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -663,11 +679,11 @@ async fn action_permission(
     Json(req): Json<PermissionRequest>,
 ) -> impl IntoResponse {
     debug!(request_id = %req.request_id, allow = req.allow, "Received permission response");
-    match state.action_tx.send(Action::PermissionResponse {
+    match state.send_action(Action::PermissionResponse {
         request_id: req.request_id,
         allow: req.allow,
         remember: req.remember,
-    }) {
+    }).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -676,7 +692,7 @@ async fn action_permission(
 async fn action_quit(State(state): State<HeadlessState>) -> impl IntoResponse {
     debug!("Received quit action");
     *state.shutdown.write().await = true;
-    match state.action_tx.send(Action::Quit) {
+    match state.send_action(Action::Quit).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -689,7 +705,7 @@ async fn action_shutdown(State(state): State<HeadlessState>) -> impl IntoRespons
     *state.shutdown.write().await = true;
 
     // Try to send quit action to runner
-    let _ = state.action_tx.send(Action::Quit);
+    let _ = state.send_action(Action::Quit).await;
 
     // Trigger server shutdown if channel is configured
     if let Some(ref tx) = state.shutdown_tx {
@@ -1044,7 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_new() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         assert!(state.shutdown_tx.is_none());
@@ -1054,7 +1070,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_with_shutdown_tx() {
-        let (action_tx, _action_rx) = mpsc::unbounded_channel();
+        let (action_tx, _action_rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let (shutdown_tx, _shutdown_rx) = mpsc::channel(1);
 
         let state = HeadlessState::new(action_tx).with_shutdown_tx(shutdown_tx);
@@ -1063,7 +1079,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_send_update() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         // Subscribe before sending
@@ -1079,7 +1095,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_update_state() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         state
@@ -1094,7 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_clone() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         state
@@ -1581,7 +1597,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_multiple_updates() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         state
@@ -1595,9 +1611,9 @@ mod tests {
         assert_eq!(current.project, "/second");
     }
 
-    #[test]
-    fn test_headless_state_send_update_without_subscribers() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+    #[tokio::test]
+    async fn test_headless_state_send_update_without_subscribers() {
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         // Should not panic even with no subscribers
@@ -1608,7 +1624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_initial_current_state() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         let current = state.current_state.read().await;
@@ -1618,7 +1634,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_shutdown_flag() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         // Initially not shutdown
@@ -1860,7 +1876,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_headless_state_broadcast_multiple_subscribers() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::channel(DEFAULT_ACTION_CHANNEL_CAPACITY);
         let state = HeadlessState::new(tx);
 
         let mut rx1 = state.update_tx.subscribe();

@@ -249,6 +249,168 @@ pub enum ResponseData {
 
     /// Generic success with no data.
     Ok,
+
+    // =========================================================================
+    // Extended Response Types (for feature parity with V1)
+    // =========================================================================
+    /// Response to RefreshWorkstreams.
+    WorkstreamsRefreshed {
+        /// Number of workstreams found.
+        count: usize,
+    },
+
+    /// Response to StopAgent.
+    AgentStopped,
+
+    /// Response to GitStatus.
+    GitStatus {
+        /// List of file statuses.
+        files: Vec<GitFileStatus>,
+    },
+
+    /// Response to GitCommitAndPush.
+    GitOperationComplete {
+        /// Whether the operation succeeded.
+        success: bool,
+        /// Operation type (e.g., "commit_and_push").
+        operation: String,
+        /// Result message.
+        message: Option<String>,
+    },
+
+    /// Response to GetDiffFiles.
+    DiffFiles {
+        /// List of changed files.
+        files: Vec<DiffFileInfo>,
+    },
+
+    /// Response to GetFileDiff.
+    FileDiff {
+        /// File path.
+        file_path: String,
+        /// Diff lines.
+        lines: Vec<DiffLine>,
+    },
+
+    /// Response to GetAvailableModels.
+    AvailableModels {
+        /// List of available models.
+        models: Vec<ModelInfo>,
+    },
+
+    /// Response to CloseWorkstream.
+    WorkstreamClosed {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Response to GetArtifacts.
+    Artifacts {
+        /// List of artifacts.
+        artifacts: Vec<ArtifactInfo>,
+    },
+
+    /// Response to GetArtifactDetail.
+    ArtifactDetail {
+        /// Artifact info.
+        artifact: ArtifactInfo,
+        /// Full artifact content.
+        content: String,
+    },
+
+    /// Response to GetConfig.
+    Config {
+        /// Configuration data.
+        config: serde_json::Value,
+    },
+
+    /// Response to GetProviderStatus.
+    ProviderStatus {
+        /// List of provider statuses.
+        providers: Vec<ProviderStatusInfo>,
+    },
+
+    /// Response to SetApiKey or SetAuthMethod.
+    ConfigUpdated,
+}
+
+/// Git file status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitFileStatus {
+    /// File path relative to worktree root.
+    pub path: String,
+    /// Git status (e.g., "modified", "added", "deleted").
+    pub status: String,
+    /// Whether the file is staged.
+    pub staged: bool,
+}
+
+/// Diff file info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffFileInfo {
+    /// File path.
+    pub path: String,
+    /// Change type (e.g., "added", "modified", "deleted").
+    pub change_type: String,
+    /// Number of additions.
+    #[serde(default)]
+    pub additions: usize,
+    /// Number of deletions.
+    #[serde(default)]
+    pub deletions: usize,
+}
+
+/// Diff line.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffLine {
+    /// Line type (e.g., "header", "added", "removed", "unchanged").
+    pub line_type: String,
+    /// Old file line number (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_line_num: Option<usize>,
+    /// New file line number (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_line_num: Option<usize>,
+    /// Line content.
+    pub content: String,
+}
+
+/// Model info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    /// Model ID.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Provider name.
+    pub provider: String,
+    /// Context window size.
+    #[serde(default)]
+    pub context_window: usize,
+}
+
+/// Artifact info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactInfo {
+    /// Artifact ID (e.g., "REQ-001").
+    pub id: String,
+    /// Artifact type (e.g., "requirement", "design").
+    pub artifact_type: String,
+    /// Title.
+    pub title: String,
+    /// Status.
+    pub status: String,
+}
+
+/// Provider status info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderStatusInfo {
+    /// Provider name.
+    pub name: String,
+    /// Whether authenticated.
+    pub authenticated: bool,
+    /// Authentication method.
+    pub auth_method: String,
 }
 
 /// Information about a workstream.

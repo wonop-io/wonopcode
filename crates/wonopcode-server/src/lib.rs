@@ -19,7 +19,7 @@ pub mod ws;
 pub use git::{GitCommitInfo, GitError, GitFileState, GitFileStatus, GitOperations, GitStatus};
 pub use headless::{
     create_headless_router, create_headless_router_with_mcp, create_headless_router_with_options,
-    HeadlessState,
+    HeadlessState, DEFAULT_ACTION_CHANNEL_CAPACITY,
 };
 pub use iggy::{
     app_update_to_server_payload, client_payload_to_app_action, client_payload_to_legacy_action,

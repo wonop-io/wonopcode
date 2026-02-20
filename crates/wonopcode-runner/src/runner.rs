@@ -1,6 +1,10 @@
 //! Runner module - connects the TUI to the AI prompt loop.
 // @ace:implements COMP-T90R9Q-8J4
 
+/// Default capacity for the action channel.
+/// This provides backpressure when the runner is overwhelmed with incoming actions.
+pub const DEFAULT_ACTION_CHANNEL_CAPACITY: usize = 256;
+
 use async_trait::async_trait;
 use futures::future::join_all;
 use std::collections::HashMap;
@@ -40,6 +44,8 @@ use wonopcode_util::FileTimeState;
 
 use crate::compaction;
 use crate::compaction::{CompactionConfig, CompactionResult};
+
+
 
 /// Adapter that implements `PermissionChecker` for `PermissionManager`.
 ///
@@ -1985,6 +1991,18 @@ impl Runner {
     }
 
     /// Run the action handler loop.
+    ///
+    /// This is the primary interface for running the action handler, accepting
+    /// unbounded channels for compatibility with the TUI which uses unbounded
+    /// channels internally.
+    ///
+    /// For server/headless mode where backpressure control is needed, the caller
+    /// should create a bounded channel and spawn a forwarding task from the
+    /// bounded channel to an unbounded one.
+    ///
+    /// # Arguments
+    /// * `action_rx` - Unbounded receiver for incoming actions.
+    /// * `update_tx` - Unbounded sender for outgoing updates.
     pub async fn run(
         self,
         mut action_rx: mpsc::UnboundedReceiver<AppAction>,
