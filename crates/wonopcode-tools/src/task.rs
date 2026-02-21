@@ -203,6 +203,7 @@ Usage notes:
             sandbox: ctx.sandbox.clone(),
             event_tx: ctx.event_tx.clone(),
             ticket_service: ctx.ticket_service.clone(),
+            memory_service: ctx.memory_service.clone(),
         };
 
         // Execute the subagent
@@ -315,6 +316,7 @@ mod tests {
             sandbox: None,
             event_tx: None,
             ticket_service: None,
+            memory_service: None,
         }
     }
 

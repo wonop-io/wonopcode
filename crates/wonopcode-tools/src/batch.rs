@@ -281,6 +281,7 @@ impl Clone for ToolContext {
             sandbox: self.sandbox.clone(),
             event_tx: self.event_tx.clone(),
             ticket_service: self.ticket_service.clone(),
+            memory_service: self.memory_service.clone(),
         }
     }
 }
@@ -373,6 +374,7 @@ mod tests {
             sandbox: None,
             event_tx: None,
             ticket_service: None,
+            memory_service: None,
         }
     }
 

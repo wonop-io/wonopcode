@@ -18,8 +18,8 @@ mod runner;
 
 pub use compaction::{CompactionConfig, CompactionResult};
 pub use runner::{
-    get_auth_method, get_provider_status, get_server_config, has_credentials, load_api_key,
-    PermissionCheckerAdapter, Runner, RunnerConfig, SandboxRuntimeWrapper,
+    get_auth_method, get_provider_status, get_server_config, get_workstream_id, has_credentials,
+    load_api_key, PermissionCheckerAdapter, Runner, RunnerConfig, SandboxRuntimeWrapper,
     DEFAULT_ACTION_CHANNEL_CAPACITY,
 };
 

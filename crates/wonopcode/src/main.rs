@@ -584,6 +584,19 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
     // Get MCP config from config file
     let mcp_configs = config_file.mcp.clone();
 
+    // Initialize memory service for persistent memory across sessions
+    let memory_service: Option<wonopcode_tools::SharedMemoryService> =
+        match wonop_memory::MemoryService::new() {
+            Ok(service) => {
+                info!("Memory service initialized");
+                Some(std::sync::Arc::new(service))
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to initialize memory service, memory features will be disabled");
+                None
+            }
+        };
+
     // Check if update notification is ready (with timeout)
     let update_msg = tokio::time::timeout(std::time::Duration::from_secs(2), update_notification)
         .await
@@ -609,6 +622,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
             mcp_configs,
             shared_bus,
             shared_permission_manager,
+            memory_service,
         )
         .await?;
     } else {
@@ -622,6 +636,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
             update_msg,
             shared_bus,
             shared_permission_manager,
+            memory_service,
         )
         .await?;
     }
@@ -647,6 +662,7 @@ async fn run_basic_mode(
     mcp_configs: Option<std::collections::HashMap<String, wonopcode_core::config::McpConfig>>,
     shared_bus: wonopcode_core::bus::Bus,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
+    memory_service: Option<wonopcode_tools::SharedMemoryService>,
 ) -> anyhow::Result<()> {
     use std::io::{self, BufRead, Write};
 
@@ -673,6 +689,7 @@ async fn run_basic_mode(
         Some(session_service),
         None, // Use default StandardLoop
         None, // No ticket service in CLI mode
+        memory_service, // Memory service for persistent memory
     )
     .await
     {
@@ -809,6 +826,7 @@ async fn run_tui_mode(
     update_notification: Option<String>,
     shared_bus: wonopcode_core::bus::Bus,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
+    memory_service: Option<wonopcode_tools::SharedMemoryService>,
 ) -> anyhow::Result<()> {
     use wonopcode_tui::{App, SidebarWidget};
 
@@ -850,7 +868,8 @@ async fn run_tui_mode(
         Some(shared_permission_manager),
         Some(session_service_web),
         None, // Use default StandardLoop
-        None, // No ticket service in web mode
+        None, // No ticket service in TUI mode
+        memory_service, // Memory service for persistent memory
     )
     .await
     {
@@ -973,6 +992,19 @@ async fn run_headless(
 
     // Get MCP config
     let mcp_configs = config_file.mcp.clone();
+
+    // Initialize memory service for persistent memory across sessions
+    let memory_service: Option<wonopcode_tools::SharedMemoryService> =
+        match wonop_memory::MemoryService::new() {
+            Ok(service) => {
+                info!("Memory service initialized for headless mode");
+                Some(std::sync::Arc::new(service))
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to initialize memory service in headless mode");
+                None
+            }
+        };
 
     // Create shared permission manager for both Runner and MCP HTTP server.
     // This ensures sandbox state is shared between them - when sandbox is started
@@ -1220,6 +1252,7 @@ async fn run_headless(
         Some(session_service_headless),
         None, // Use default StandardLoop
         None, // No ticket service in headless mode
+        memory_service, // Memory service for persistent memory
     )
     .await
     {

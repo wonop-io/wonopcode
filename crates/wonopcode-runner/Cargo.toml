@@ -23,6 +23,7 @@ wonopcode-sandbox.workspace = true
 wonopcode-mcp.workspace = true
 wonopcode-lsp.workspace = true
 wonopcode-agent-loop.workspace = true
+wonop-memory.workspace = true
 
 # Async
 async-trait.workspace = true

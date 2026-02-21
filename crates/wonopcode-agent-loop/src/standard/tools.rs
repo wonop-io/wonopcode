@@ -25,6 +25,10 @@ pub struct ToolExecutor<'a> {
     /// Optional timeout for tool execution (including permission checks).
     /// When set, permission requests will be cancelled after this duration.
     tool_timeout: Option<std::time::Duration>,
+    /// Optional ticket service for ticket management tools.
+    ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
+    /// Optional memory service for memory tools.
+    memory_service: Option<wonopcode_tools::SharedMemoryService>,
 }
 
 impl<'a> ToolExecutor<'a> {
@@ -43,6 +47,8 @@ impl<'a> ToolExecutor<'a> {
             event_tx: None,
             permission_checker: None,
             tool_timeout: None,
+            ticket_service: None,
+            memory_service: None,
         }
     }
 
@@ -65,6 +71,8 @@ impl<'a> ToolExecutor<'a> {
             event_tx,
             permission_checker: None,
             tool_timeout: None,
+            ticket_service: None,
+            memory_service: None,
         }
     }
 
@@ -94,6 +102,36 @@ impl<'a> ToolExecutor<'a> {
             event_tx,
             permission_checker,
             tool_timeout,
+            ticket_service: None,
+            memory_service: None,
+        }
+    }
+
+    /// Create a tool executor with all services.
+    ///
+    /// This is the full constructor that includes ticket and memory services.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_services(
+        tools: &'a ToolRegistry,
+        snapshot_store: Option<Arc<SnapshotStore>>,
+        file_time: Arc<FileTimeState>,
+        sandbox: Option<Arc<dyn SandboxRuntime>>,
+        event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
+        permission_checker: Option<Arc<dyn PermissionChecker>>,
+        tool_timeout: Option<std::time::Duration>,
+        ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
+        memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    ) -> Self {
+        Self {
+            tools,
+            snapshot_store,
+            file_time,
+            sandbox,
+            event_tx,
+            permission_checker,
+            tool_timeout,
+            ticket_service,
+            memory_service,
         }
     }
 
@@ -189,7 +227,8 @@ impl<'a> ToolExecutor<'a> {
             file_time: Some(self.file_time.clone()),
             sandbox: self.sandbox.clone(),
             event_tx: self.event_tx.clone(),
-            ticket_service: None,
+            ticket_service: self.ticket_service.clone(),
+            memory_service: self.memory_service.clone(),
         };
 
         // Execute

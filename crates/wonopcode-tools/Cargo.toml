@@ -16,6 +16,7 @@ wonopcode-snapshot.workspace = true
 wonopcode-lsp.workspace = true
 wonopcode-mcp.workspace = true
 wonopcode-sandbox.workspace = true
+wonop-memory.workspace = true
 
 anyhow.workspace = true
 thiserror.workspace = true

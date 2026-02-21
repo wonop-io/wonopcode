@@ -69,6 +69,9 @@ wonopcode-transport = { path = "crates/wonopcode-transport" }
 wonopcode-iggy-embedded = { path = "crates/wonopcode-iggy-embedded" }
 wonopcode-git = { path = "crates/wonopcode-git" }
 
+# External workspace crates
+wonop-memory = { path = "../../../crates/wonop-memory" }
+
 # TUI sub-crates
 wonopcode-tui-core = { path = "crates/wonopcode-tui-core" }
 wonopcode-tui-render = { path = "crates/wonopcode-tui-render" }

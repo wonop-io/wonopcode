@@ -137,6 +137,19 @@ pub async fn run_command(
     let todo_path = wonopcode_tools::todo::SharedFileTodoStore::init_env();
     info!(path = %todo_path.display(), "Initialized shared todo storage");
 
+    // Initialize memory service for persistent memory
+    let memory_service: Option<wonopcode_tools::SharedMemoryService> =
+        match wonop_memory::MemoryService::new() {
+            Ok(service) => {
+                info!("Memory service initialized for run command");
+                Some(std::sync::Arc::new(service))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to initialize memory service in run command");
+                None
+            }
+        };
+
     // Get API key for MCP server authentication
     // Priority: CLI arg > environment variable > config file
     let secret = cli_secret
@@ -191,6 +204,7 @@ pub async fn run_command(
         None, // No session service in run command
         None, // Use default StandardLoop
         None, // No ticket service in run command
+        memory_service, // Memory service for persistent memory
     )
     .await
     {

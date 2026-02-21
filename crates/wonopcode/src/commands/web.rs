@@ -17,6 +17,7 @@ struct ToolExecutorWrapper {
     file_time: Arc<wonopcode_util::FileTimeState>,
     cancel: tokio_util::sync::CancellationToken,
     permissions: Arc<wonopcode_core::permission::PermissionManager>,
+    memory_service: Option<wonopcode_tools::SharedMemoryService>,
 }
 
 #[async_trait::async_trait]
@@ -115,8 +116,9 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             snapshot: self.snapshot.clone(),
             file_time: Some(self.file_time.clone()),
             sandbox,
-            event_tx: None,       // MCP HTTP doesn't need event_tx
-            ticket_service: None, // No ticket service in MCP HTTP
+            event_tx: None,                               // MCP HTTP doesn't need event_tx
+            ticket_service: None,                         // No ticket service in MCP HTTP
+            memory_service: self.memory_service.clone(),  // Share memory service with tools
         };
 
         tracing::info!(
@@ -298,6 +300,8 @@ pub async fn create_mcp_http_state(
     };
 
     // Create tool registry with all tools
+    // Note: Memory tools are included in with_builtins() and access the service
+    // through ctx.memory_service at execution time (same pattern as ticket tools)
     let mut tools = ToolRegistry::with_builtins();
     tools.register(Arc::new(wonopcode_tools::bash::BashTool));
     tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
@@ -309,6 +313,29 @@ pub async fn create_mcp_http_state(
     )));
     tools.register(Arc::new(wonopcode_tools::lsp::LspTool::new()));
 
+    // Create memory service and initialize workstream
+    // The service is passed to ToolExecutorWrapper so tools can access it via ctx.memory_service
+    let memory_service: Option<wonopcode_tools::SharedMemoryService> =
+        match wonop_memory::MemoryService::new() {
+            Ok(memory_service) => {
+                let memory_service = Arc::new(memory_service);
+                // Initialize workstream based on git branch or directory name
+                let workstream_id = wonopcode_runner::get_workstream_id(cwd);
+                if let Err(e) =
+                    memory_service.set_workstream(cwd.to_path_buf(), workstream_id.clone())
+                {
+                    tracing::warn!(error = %e, workstream_id = %workstream_id, "Failed to initialize workstream memory for MCP");
+                } else {
+                    tracing::info!(workstream_id = %workstream_id, "Workstream memory initialized for MCP");
+                }
+                Some(memory_service)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to create memory service for MCP, memory tools will return an error if called");
+                None
+            }
+        };
+
     // Build MCP server tools map
     let mut mcp_tools = std::collections::HashMap::new();
     let cancel = CancellationToken::new();
@@ -319,6 +346,7 @@ pub async fn create_mcp_http_state(
         let ft = file_time.clone();
         let cancel_clone = cancel.clone();
         let perm = permission_manager.clone();
+        let mem_svc = memory_service.clone();
 
         let executor = ToolExecutorWrapper {
             tool: tool_clone,
@@ -326,6 +354,7 @@ pub async fn create_mcp_http_state(
             file_time: ft,
             cancel: cancel_clone,
             permissions: perm,
+            memory_service: mem_svc,
         };
 
         mcp_tools.insert(

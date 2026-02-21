@@ -16,6 +16,7 @@ pub mod grep;
 pub mod list;
 pub mod lsp;
 pub mod mcp;
+pub mod memory;
 pub mod mcp_todo_adapter;
 pub mod multiedit;
 pub mod patch;
@@ -41,6 +42,11 @@ pub use ace::{
 // Re-export ticket tools for convenience
 pub use ticket::{
     TicketCreateTool, TicketListTool, TicketReadTool, TicketSearchTool, TicketService,
+};
+
+// Re-export memory tools for convenience
+pub use memory::{
+    MemoryClearTool, MemoryRecallTool, MemorySearchTool, MemoryStoreTool, SharedMemoryService,
 };
 
 use async_trait::async_trait;
@@ -100,6 +106,8 @@ pub struct ToolContext {
     pub event_tx: Option<mpsc::UnboundedSender<ToolEvent>>,
     /// Optional ticket service for ticket management tools.
     pub ticket_service: Option<Arc<dyn TicketService>>,
+    /// Optional memory service for memory tools.
+    pub memory_service: Option<SharedMemoryService>,
 }
 
 impl ToolContext {
@@ -225,6 +233,7 @@ mod tests {
             sandbox: None,
             event_tx: None,
             ticket_service: None,
+            memory_service: None,
         }
     }
 

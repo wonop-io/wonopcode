@@ -555,6 +555,9 @@ pub struct Runner {
     /// Optional ticket service for ticket management tools.
     /// When set, ticket tools can access configured issue trackers.
     ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
+    /// Optional memory service for memory tools.
+    /// When set, memory tools can store and retrieve information across scopes.
+    memory_service: Option<wonopcode_tools::SharedMemoryService>,
 }
 
 impl Runner {
@@ -681,6 +684,7 @@ impl Runner {
             session_service: None,  // Will be set by new_with_session
             context_state: RwLock::new(ContextState::new(context_limit)),
             ticket_service: None, // Will be set by new_with_shared
+            memory_service: None, // Will be set by new_with_shared
         })
     }
 
@@ -700,7 +704,7 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None, None).await
     }
 
     /// Create a new runner with optional shared Bus, PermissionManager, SessionService, and AgentLoop.
@@ -727,6 +731,7 @@ impl Runner {
         session_service: Option<Arc<SessionService>>,
         agent_loop: Option<BoxedAgentLoop>,
         ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
+        memory_service: Option<wonopcode_tools::SharedMemoryService>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -782,7 +787,8 @@ impl Runner {
         }
 
         // Initialize snapshot store with proper directory
-        let cwd = runner.instance.directory();
+        // Clone to avoid borrow issues when later mutably borrowing runner
+        let cwd = runner.instance.directory().to_path_buf();
         let snapshot_dir = cwd.join(".wonopcode").join("snapshots");
 
         match SnapshotStore::new(snapshot_dir, cwd.to_path_buf(), SnapshotConfig::default()).await {
@@ -937,7 +943,22 @@ impl Runner {
             warn!("Could not register skill tool: tools registry already shared");
         }
 
+        // Store memory service BEFORE MCP initialization
+        // Also initialize workstream for memory service based on project directory
+        // Note: Memory tools are registered in ToolRegistry::with_builtins() and access
+        // the service through ctx.memory_service at execution time (same pattern as ticket tools)
+        if let Some(ref mem_svc) = memory_service {
+            let workstream_id = get_workstream_id(&cwd);
+            if let Err(e) = mem_svc.set_workstream(cwd.to_path_buf(), workstream_id.clone()) {
+                warn!(error = %e, workstream_id = %workstream_id, "Failed to initialize workstream memory");
+            } else {
+                info!(workstream_id = %workstream_id, "Workstream memory initialized");
+            }
+        }
+        runner.memory_service = memory_service;
+
         // Initialize MCP client if configured
+        // NOTE: This may replace the entire tool registry, so memory tools are also added there
         if let Some(configs) = mcp_configs {
             if !configs.is_empty() {
                 runner.initialize_mcp(configs).await;
@@ -1104,6 +1125,9 @@ impl Runner {
             let skill_dirs = vec![cwd.to_path_buf()];
             let skill_tool = wonopcode_tools::skill::SkillTool::discover(&skill_dirs).await;
             new_tools.register(Arc::new(skill_tool));
+
+            // Note: Memory tools are already registered in ToolRegistry::with_builtins()
+            // They access the service through ctx.memory_service (same pattern as ticket tools)
 
             // Register MCP tools
             for tool in mcp_tools {
@@ -1295,7 +1319,7 @@ impl Runner {
             {
                 CompactionResult::Compacted {
                     messages: new_messages,
-                    summary: _,
+                    summary,
                     messages_summarized,
                 } => {
                     let duration = compact_start.elapsed();
@@ -1310,6 +1334,52 @@ impl Runner {
                         "Auto-compaction successful"
                     );
                     messages = new_messages;
+
+                    // Store compaction summary in memory for future retrieval
+                    if !summary.is_empty() {
+                        if let Some(ref mem_svc) = self.memory_service {
+                            let timestamp = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let store_result = mem_svc
+                                .store(wonop_memory::MemoryStoreParams {
+                                    key: format!("compaction_summary_{}", timestamp),
+                                    content: summary.clone(),
+                                    scope: Some("workstream".to_string()),
+                                    tags: Some(vec![
+                                        "compaction".to_string(),
+                                        "context".to_string(),
+                                        "summary".to_string(),
+                                    ]),
+                                    index: Some(true),
+                                    metadata: Some(
+                                        serde_json::json!({
+                                            "messages_summarized": messages_summarized,
+                                            "tokens_before": tokens_before,
+                                            "tokens_after": tokens_after,
+                                        })
+                                        .as_object()
+                                        .cloned()
+                                        .unwrap_or_default()
+                                        .into_iter()
+                                        .collect(),
+                                    ),
+                                })
+                                .await;
+                            match store_result {
+                                Ok(entry) => {
+                                    debug!(
+                                        id = %entry.id,
+                                        "Stored compaction summary in workstream memory"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to store compaction summary in memory");
+                                }
+                            }
+                        }
+                    }
 
                     // Update history with compacted messages
                     {
@@ -1622,6 +1692,7 @@ impl Runner {
             tool_event_tx: Some(tool_event_tx),
             permission_checker: Some(permission_checker),
             ticket_service: self.ticket_service.clone(),
+            memory_service: self.memory_service.clone(),
             prompt_images: images,
         };
 
@@ -4280,4 +4351,33 @@ fn convert_sandbox_config(core_config: &CoreSandboxConfig) -> SandboxConfig {
         keep_alive: core_config.keep_alive.unwrap_or(true),
         startup_timeout_secs: 60,
     }
+}
+
+/// Get a workstream ID based on the current directory.
+///
+/// This uses the git branch name if available, otherwise falls back to
+/// a sanitized version of the directory name.
+pub fn get_workstream_id(cwd: &Path) -> String {
+    // Try to get the git branch name
+    if let Ok(output) = std::process::Command::new("git")
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("HEAD")
+        .current_dir(cwd)
+        .output()
+    {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !branch.is_empty() && branch != "HEAD" {
+                // Sanitize branch name for use as directory name
+                return branch.replace('/', "-").replace('\\', "-");
+            }
+        }
+    }
+
+    // Fall back to directory name
+    cwd.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "default".to_string())
 }

@@ -38,6 +38,7 @@ wonopcode-lsp.workspace = true
 wonopcode-acp.workspace = true
 wonopcode-protocol.workspace = true
 wonopcode-runner.workspace = true
+wonop-memory.workspace = true
 wonopcode-discover = { workspace = true, optional = true }
 wonopcode-message = { workspace = true, optional = true }
 wonopcode-transport = { workspace = true, optional = true }

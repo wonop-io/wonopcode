@@ -392,6 +392,7 @@ mod tests {
             sandbox: None,
             event_tx: None,
             ticket_service: None,
+            memory_service: None,
         }
     }
 

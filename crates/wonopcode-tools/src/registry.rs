@@ -49,6 +49,12 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::ticket::TicketReadTool));
         registry.register(Arc::new(crate::ticket::TicketCreateTool));
 
+        // Register memory tools
+        registry.register(Arc::new(crate::memory::MemoryStoreTool));
+        registry.register(Arc::new(crate::memory::MemoryRecallTool));
+        registry.register(Arc::new(crate::memory::MemorySearchTool));
+        registry.register(Arc::new(crate::memory::MemoryClearTool));
+
         registry
     }
 

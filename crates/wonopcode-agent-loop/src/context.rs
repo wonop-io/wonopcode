@@ -283,6 +283,12 @@ pub struct LoopContext<'a> {
     /// configured issue trackers.
     pub ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
 
+    /// Optional memory service for memory tools (store, recall, search, clear).
+    ///
+    /// When set, memory tools can access the Super Memory system for
+    /// persistent storage across global, workstream, and session scopes.
+    pub memory_service: Option<wonopcode_tools::SharedMemoryService>,
+
     /// Images attached to the current prompt.
     ///
     /// When set, these images should be included with the user message.

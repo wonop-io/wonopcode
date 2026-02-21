@@ -172,6 +172,43 @@ impl AgentLoop for StandardLoop {
         };
         ctx.messages.push(user_msg);
 
+        // RAG: Search memory for relevant context based on user input
+        // Only on first call (not tool result iterations)
+        let memory_context = if let Some(ref mem_svc) = ctx.memory_service {
+            match mem_svc
+                .search(wonop_memory::MemorySearchParams {
+                    query: user_input.to_string(),
+                    scopes: None, // Search all scopes
+                    threshold: Some(0.3), // Reasonable similarity threshold
+                    limit: Some(3), // Limit to top 3 relevant memories
+                })
+                .await
+            {
+                Ok(result) if !result.entries.is_empty() => {
+                    let context_parts: Vec<String> = result
+                        .entries
+                        .iter()
+                        .map(|e| format!("- {}: {}", e.key, e.content))
+                        .collect();
+                    debug!(
+                        memories_found = result.entries.len(),
+                        "RAG: Found relevant memories"
+                    );
+                    Some(format!(
+                        "\n\n[Relevant context from memory]\n{}",
+                        context_parts.join("\n")
+                    ))
+                }
+                Ok(_) => None, // No relevant memories found
+                Err(e) => {
+                    debug!(error = %e, "RAG: Failed to search memory");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let mut final_text = String::new();
         let mut iteration = 0;
 
@@ -198,11 +235,17 @@ impl AgentLoop for StandardLoop {
 
             debug!(iteration, "Starting loop iteration");
 
-            // Build generation options
+            // Build generation options with optional RAG context
+            let system_prompt = match (&ctx.config.system_prompt, &memory_context) {
+                (Some(base), Some(rag)) if iteration == 1 => Some(format!("{}{}", base, rag)),
+                (None, Some(rag)) if iteration == 1 => Some(rag.clone()),
+                (system, _) => system.clone(),
+            };
+
             let options = GenerateOptions {
                 temperature: ctx.config.temperature,
                 max_tokens: ctx.config.max_tokens,
-                system: ctx.config.system_prompt.clone(),
+                system: system_prompt,
                 tools: ctx.tool_defs.clone(),
                 abort: Some(ctx.cancel.clone()),
                 ..Default::default()
@@ -498,7 +541,7 @@ impl AgentLoop for StandardLoop {
             // Execute tool calls
             // Get the provider's tool timeout (if any) for permission checking
             let tool_timeout = ctx.provider.tool_timeout();
-            let tool_executor = ToolExecutor::with_permissions(
+            let tool_executor = ToolExecutor::with_services(
                 ctx.tools,
                 ctx.snapshot_store.cloned(),
                 ctx.file_time.clone(),
@@ -506,6 +549,8 @@ impl AgentLoop for StandardLoop {
                 ctx.tool_event_tx.clone(),
                 ctx.permission_checker.clone(),
                 tool_timeout,
+                ctx.ticket_service.clone(),
+                ctx.memory_service.clone(),
             );
 
             let mut tool_results = Vec::new();
