@@ -286,6 +286,31 @@ pub enum ClientMessage {
         /// Method: "api_key" or "oauth".
         method: String,
     },
+
+    // =========================================================================
+    // Agents Template Management (AGENTS.md/CLAUDE.md editor)
+    // =========================================================================
+    /// Get the AGENTS.TEMPLATE.md content for a workstream.
+    GetAgentsTemplate {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Save the AGENTS.TEMPLATE.md content (renders to AGENTS.md + CLAUDE.md).
+    SaveAgentsTemplate {
+        /// Workstream ID.
+        workstream_id: String,
+        /// The raw Tera template content.
+        template_content: String,
+    },
+
+    /// Preview rendering of the template without saving.
+    PreviewAgentsTemplate {
+        /// Workstream ID.
+        workstream_id: String,
+        /// The raw Tera template content to preview.
+        template_content: String,
+    },
 }
 
 /// Topics that clients can subscribe to.

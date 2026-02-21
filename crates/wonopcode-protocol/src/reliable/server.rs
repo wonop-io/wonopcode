@@ -335,6 +335,35 @@ pub enum ResponseData {
 
     /// Response to SetApiKey or SetAuthMethod.
     ConfigUpdated,
+
+    // =========================================================================
+    // Agents Template Responses (AGENTS.md/CLAUDE.md editor)
+    // =========================================================================
+    /// Response to GetAgentsTemplate.
+    AgentsTemplate {
+        /// The raw Tera template content (AGENTS.TEMPLATE.md).
+        template_content: String,
+        /// The rendered AGENTS.md content (empty if render_error is set).
+        rendered_content: String,
+        /// Whether the template file exists (false = using default).
+        template_exists: bool,
+        /// Rendering error if the template failed to render.
+        render_error: Option<String>,
+    },
+
+    /// Response to SaveAgentsTemplate.
+    AgentsTemplateSaved {
+        /// The template content that was saved.
+        template_content: String,
+        /// The rendered content that was written.
+        rendered_content: String,
+    },
+
+    /// Response to PreviewAgentsTemplate.
+    AgentsTemplatePreview {
+        /// The rendered preview content.
+        rendered_content: String,
+    },
 }
 
 /// Git file status.
