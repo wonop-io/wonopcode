@@ -1792,6 +1792,9 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::CompactionStarted { .. } => {
                     continue;
                 }
+                wonopcode_tui::AppUpdate::CompactionProgress { .. } => {
+                    continue;
+                }
                 wonopcode_tui::AppUpdate::CompactionPerformed { .. } => {
                     continue;
                 }

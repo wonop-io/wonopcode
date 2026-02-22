@@ -1033,6 +1033,12 @@ mod tests {
             session_id: "ses_1".to_string(),
             message_id: "msg_1".to_string(),
             original_message_id: "msg_original".to_string(),
+            compaction_type: "automatic".to_string(),
+            messages_before: 100,
+            messages_after: 50,
+            tokens_before: 10000,
+            tokens_after: 5000,
+            summary: Some("Test summary".to_string()),
         });
         assert_eq!(part.id(), "part_1");
         assert_eq!(part.session_id(), "ses_1");

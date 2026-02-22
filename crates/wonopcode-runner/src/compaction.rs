@@ -500,14 +500,48 @@ pub async fn compact_with_summary(
         return CompactionResult::InsufficientMessages;
     }
 
-    // Dynamically calculate preserve_recent:
+    // Dynamically calculate preserve_recent based on BOTH message count AND token budget.
+    // We want to keep recent messages but must respect the target_tokens limit.
+    
+    // Step 1: Calculate message-based limit
     // - Default: config.preserve_recent_messages (e.g., 50)
     // - If fewer messages, keep at most half the messages
-    // This ensures we always have something to summarize
-    let preserve_recent = config
+    let message_based_limit = config
         .preserve_recent_messages
         .min(messages.len() / 2)
-        .max(1); // Keep at least 1 recent message
+        .max(1);
+    
+    // Step 2: Calculate token-based limit
+    // Reserve tokens for: first message + summary (~5K) + some headroom
+    let first_msg_tokens = estimate_message_tokens(&messages[0]);
+    let summary_estimate = 5000_u32; // Estimate for the summary message
+    let headroom = config.target_tokens / 10; // 10% headroom
+    let available_for_recent = config.target_tokens
+        .saturating_sub(first_msg_tokens)
+        .saturating_sub(summary_estimate)
+        .saturating_sub(headroom);
+    
+    // Calculate how many recent messages can fit in the token budget
+    // Start from the end and count backwards until we exceed budget
+    let mut token_based_limit = 0;
+    let mut tokens_used = 0_u32;
+    
+    for msg in messages.iter().rev() {
+        let msg_tokens = estimate_message_tokens(msg);
+        if tokens_used + msg_tokens > available_for_recent {
+            break;
+        }
+        tokens_used += msg_tokens;
+        token_based_limit += 1;
+    }
+    
+    // Use the smaller of message-based and token-based limits
+    let preserve_recent = message_based_limit.min(token_based_limit).max(1);
+    
+    info!(
+        "COMPACTION: preserve_recent calculation: message_limit={}, token_limit={}, chosen={}, target_tokens={}, available_for_recent={}",
+        message_based_limit, token_based_limit, preserve_recent, config.target_tokens, available_for_recent
+    );
 
     // Find the split point: keep first message, summarize middle, keep recent N messages
     // Example with 219 messages, preserve_recent=50:
