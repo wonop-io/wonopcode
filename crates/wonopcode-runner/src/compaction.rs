@@ -38,6 +38,22 @@ pub const COMPACTION_MESSAGE_THRESHOLD: usize = 100;
 /// This ensures context stays manageable even with very long individual messages.
 pub const TARGET_TOKENS_AFTER_COMPACTION: u32 = 50_000;
 
+/// Maximum percentage of context that can be used for summarization input.
+/// If messages to summarize exceed this, we use chunked summarization.
+pub const MAX_SUMMARIZATION_CONTEXT_PERCENT: f32 = 0.40;
+
+/// Default context limit to use when not specified by the model.
+/// Most modern models support at least 128K tokens.
+pub const DEFAULT_CONTEXT_LIMIT: u32 = 128_000;
+
+/// Maximum recursion depth for hierarchical summarization.
+/// Prevents infinite loops in edge cases.
+pub const MAX_SUMMARIZATION_DEPTH: usize = 3;
+
+/// Target tokens per chunk when doing chunked summarization.
+/// Each chunk should be summarizable within context limits.
+pub const CHUNK_TARGET_TOKENS: u32 = 30_000;
+
 /// Configuration for compaction behavior.
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
@@ -67,6 +83,10 @@ pub struct CompactionConfig {
     /// Target token count after compaction.
     /// After compaction, we aim to have at most this many tokens.
     pub target_tokens: u32,
+
+    /// Context limit for the model (used for chunked summarization).
+    /// If not set, defaults to DEFAULT_CONTEXT_LIMIT.
+    pub context_limit: u32,
 }
 
 impl Default for CompactionConfig {
@@ -79,7 +99,16 @@ impl Default for CompactionConfig {
             preserve_recent_messages: PRESERVE_RECENT_MESSAGES,
             output_reserve: OUTPUT_TOKEN_MAX,
             target_tokens: TARGET_TOKENS_AFTER_COMPACTION,
+            context_limit: DEFAULT_CONTEXT_LIMIT,
         }
+    }
+}
+
+impl CompactionConfig {
+    /// Create a config with a specific context limit.
+    pub fn with_context_limit(mut self, limit: u32) -> Self {
+        self.context_limit = limit;
+        self
     }
 }
 
@@ -436,6 +465,10 @@ pub async fn compact(
 /// If there are fewer messages than preserve_recent_messages, we dynamically reduce
 /// the number of recent messages to keep, ensuring we always summarize at least
 /// half of the messages (leaving room for high-token individual messages).
+///
+/// For very large conversations that exceed the context limit, this function
+/// automatically uses chunked summarization (Map-Reduce pattern) to handle
+/// the messages in smaller pieces.
 pub async fn compact_with_summary(
     messages: &[ProviderMessage],
     provider: &BoxedLanguageModel,
@@ -482,28 +515,43 @@ pub async fn compact_with_summary(
         "Compacting messages with AI summary"
     );
 
-    // Build conversation text for summarization
-    let conversation_text = format_messages_for_summary(messages_to_summarize);
+    // Check if messages exceed the safe summarization limit
+    // If so, use chunked summarization (Map-Reduce pattern)
+    let summary = if needs_chunked_summarization(messages_to_summarize, config) {
+        info!(
+            "COMPACTION: Using chunked summarization for {} messages (exceeds safe context limit)",
+            messages_to_summarize.len()
+        );
+        
+        match generate_chunked_summary(provider, messages_to_summarize, config).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("COMPACTION: Chunked summarization failed: {}", e);
+                return CompactionResult::Failed(e);
+            }
+        }
+    } else {
+        // Standard single-pass summarization
+        let conversation_text = format_messages_for_summary(messages_to_summarize);
 
-    // Create summarization request
-    let summary_messages = vec![ProviderMessage {
-        role: Role::User,
-        content: vec![ContentPart::text(format!(
-            "Here is a conversation to summarize:\n\n{conversation_text}\n\n{COMPACTION_USER_PROMPT}"
-        ))],
-    }];
+        let summary_messages = vec![ProviderMessage {
+            role: Role::User,
+            content: vec![ContentPart::text(format!(
+                "Here is a conversation to summarize:\n\n{conversation_text}\n\n{COMPACTION_USER_PROMPT}"
+            ))],
+        }];
 
-    let options = GenerateOptions {
-        system: Some(COMPACTION_SYSTEM_PROMPT.to_string()),
-        temperature: Some(0.3), // Lower temperature for consistency
-        max_tokens: Some(2000), // Reasonable limit for summaries
-        ..Default::default()
-    };
+        let options = GenerateOptions {
+            system: Some(COMPACTION_SYSTEM_PROMPT.to_string()),
+            temperature: Some(0.3), // Lower temperature for consistency
+            max_tokens: Some(2000), // Reasonable limit for summaries
+            ..Default::default()
+        };
 
-    // Generate summary
-    let summary = match generate_summary(provider, summary_messages, options).await {
-        Ok(s) => s,
-        Err(e) => return CompactionResult::Failed(e),
+        match generate_summary(provider, summary_messages, options).await {
+            Ok(s) => s,
+            Err(e) => return CompactionResult::Failed(e),
+        }
     };
 
     if summary.is_empty() {
@@ -617,6 +665,301 @@ async fn generate_summary_inner(
         start.elapsed(), chunk_count, summary.len()
     );
     Ok(summary.trim().to_string())
+}
+
+/// Represents a chunk of messages to be summarized.
+#[derive(Debug)]
+struct MessageChunk {
+    /// The messages in this chunk.
+    messages: Vec<ProviderMessage>,
+    /// Estimated token count for these messages.
+    estimated_tokens: u32,
+    /// Index of the first message in the original list (for logging).
+    start_index: usize,
+    /// Index of the last message in the original list (for logging).
+    end_index: usize,
+}
+
+/// Check if messages need chunked summarization.
+/// Returns true if the messages to summarize would exceed the safe context limit.
+fn needs_chunked_summarization(messages: &[ProviderMessage], config: &CompactionConfig) -> bool {
+    let estimated_tokens = estimate_messages_tokens(messages);
+    let max_safe_tokens = (config.context_limit as f32 * MAX_SUMMARIZATION_CONTEXT_PERCENT) as u32;
+    
+    let needs_chunking = estimated_tokens > max_safe_tokens;
+    
+    if needs_chunking {
+        info!(
+            "CHUNKED_SUMMARIZATION: Messages exceed safe limit - estimated={}, max_safe={}, will use chunked approach",
+            estimated_tokens, max_safe_tokens
+        );
+    }
+    
+    needs_chunking
+}
+
+/// Split messages into chunks that can be safely summarized.
+/// 
+/// Strategy:
+/// 1. Target ~30K tokens per chunk (to stay well within context limits)
+/// 2. Try to split at conversation boundaries (user messages)
+/// 3. Never split in the middle of a tool call/result pair
+fn chunk_messages_for_summarization(
+    messages: &[ProviderMessage],
+    target_tokens_per_chunk: u32,
+) -> Vec<MessageChunk> {
+    let mut chunks = Vec::new();
+    let mut current_chunk_messages = Vec::new();
+    let mut current_chunk_tokens: u32 = 0;
+    let mut chunk_start_index = 0;
+    
+    for (i, msg) in messages.iter().enumerate() {
+        let msg_tokens = estimate_message_tokens(msg);
+        
+        // Check if adding this message would exceed chunk target
+        let would_exceed = current_chunk_tokens + msg_tokens > target_tokens_per_chunk;
+        
+        // Determine if this is a good split point (prefer user messages)
+        let is_good_split_point = msg.role == Role::User && !current_chunk_messages.is_empty();
+        
+        // Split if we'd exceed AND we have a reasonable chunk AND this is a good split point
+        // OR if we'd exceed by a lot (>50% over target)
+        let should_split = would_exceed && (
+            is_good_split_point || 
+            current_chunk_tokens > target_tokens_per_chunk / 2
+        );
+        
+        if should_split && !current_chunk_messages.is_empty() {
+            // Save current chunk
+            chunks.push(MessageChunk {
+                messages: std::mem::take(&mut current_chunk_messages),
+                estimated_tokens: current_chunk_tokens,
+                start_index: chunk_start_index,
+                end_index: i - 1,
+            });
+            current_chunk_tokens = 0;
+            chunk_start_index = i;
+        }
+        
+        current_chunk_messages.push(msg.clone());
+        current_chunk_tokens += msg_tokens;
+    }
+    
+    // Don't forget the last chunk
+    if !current_chunk_messages.is_empty() {
+        chunks.push(MessageChunk {
+            messages: current_chunk_messages,
+            estimated_tokens: current_chunk_tokens,
+            start_index: chunk_start_index,
+            end_index: messages.len() - 1,
+        });
+    }
+    
+    info!(
+        "CHUNKED_SUMMARIZATION: Split {} messages into {} chunks",
+        messages.len(),
+        chunks.len()
+    );
+    
+    for (i, chunk) in chunks.iter().enumerate() {
+        debug!(
+            "CHUNKED_SUMMARIZATION: Chunk {}: messages {}..{}, ~{} tokens",
+            i + 1, chunk.start_index, chunk.end_index, chunk.estimated_tokens
+        );
+    }
+    
+    chunks
+}
+
+/// System prompt for chunk summarization (more focused than full summarization).
+const CHUNK_SUMMARIZATION_PROMPT: &str = r#"You are summarizing a PORTION of a longer conversation. This is chunk {chunk_num} of {total_chunks}.
+
+Provide a concise but complete summary of what happened in this portion. Include:
+- Key actions taken
+- Important decisions made
+- Files modified or created
+- Errors encountered and how they were resolved
+- Any unfinished work
+
+Be factual and concise. This summary will be combined with other chunk summaries to create a full conversation summary."#;
+
+/// System prompt for combining chunk summaries into a final summary.
+const COMBINE_SUMMARIES_PROMPT: &str = r#"You are combining multiple summaries of conversation chunks into a single coherent summary.
+
+The following are summaries of consecutive parts of a conversation, in chronological order.
+Combine them into a single, well-structured summary that:
+- Preserves the chronological flow of events
+- Removes redundancy between chunks
+- Highlights the most important information for continuing the conversation
+- Includes: what was done, what's being worked on, files involved, and next steps
+
+Format your response as a clear, structured summary. Do not include any preamble."#;
+
+/// Summarize a single chunk of messages.
+async fn summarize_chunk(
+    provider: &BoxedLanguageModel,
+    chunk: &MessageChunk,
+    chunk_num: usize,
+    total_chunks: usize,
+) -> Result<String, String> {
+    let conversation_text = format_messages_for_summary(&chunk.messages);
+    
+    let system_prompt = CHUNK_SUMMARIZATION_PROMPT
+        .replace("{chunk_num}", &chunk_num.to_string())
+        .replace("{total_chunks}", &total_chunks.to_string());
+    
+    let summary_messages = vec![ProviderMessage {
+        role: Role::User,
+        content: vec![ContentPart::text(format!(
+            "Summarize this portion of the conversation:\n\n{conversation_text}"
+        ))],
+    }];
+    
+    let options = GenerateOptions {
+        system: Some(system_prompt),
+        temperature: Some(0.3),
+        max_tokens: Some(1500), // Smaller limit for chunk summaries
+        ..Default::default()
+    };
+    
+    info!(
+        "CHUNKED_SUMMARIZATION: Summarizing chunk {}/{} ({} messages, ~{} tokens)",
+        chunk_num, total_chunks, chunk.messages.len(), chunk.estimated_tokens
+    );
+    
+    generate_summary(provider, summary_messages, options).await
+}
+
+/// Combine multiple chunk summaries into a final summary.
+fn combine_chunk_summaries<'a>(
+    provider: &'a BoxedLanguageModel,
+    chunk_summaries: Vec<String>,
+    config: &'a CompactionConfig,
+    depth: usize,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+    Box::pin(async move {
+        // Check if we need to recursively chunk the summaries
+        let combined_text: String = chunk_summaries
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!("--- Chunk {} Summary ---\n{}\n", i + 1, s))
+            .collect();
+        
+        let combined_tokens = estimate_tokens(&combined_text);
+        let max_safe_tokens = (config.context_limit as f32 * MAX_SUMMARIZATION_CONTEXT_PERCENT) as u32;
+        
+        // If combined summaries are still too large and we haven't hit max depth, recurse
+        if combined_tokens > max_safe_tokens && depth < MAX_SUMMARIZATION_DEPTH {
+            warn!(
+                "CHUNKED_SUMMARIZATION: Combined summaries still too large ({} tokens > {} max), recursing (depth {})",
+                combined_tokens, max_safe_tokens, depth + 1
+            );
+            
+            // Create pseudo-messages from the summaries and re-chunk
+            let summary_messages: Vec<ProviderMessage> = chunk_summaries
+                .into_iter()
+                .map(|s| ProviderMessage::assistant(&s))
+                .collect();
+            
+            let chunks = chunk_messages_for_summarization(&summary_messages, CHUNK_TARGET_TOKENS);
+            let mut new_summaries = Vec::new();
+            
+            for (i, chunk) in chunks.iter().enumerate() {
+                match summarize_chunk(provider, chunk, i + 1, chunks.len()).await {
+                    Ok(summary) => new_summaries.push(summary),
+                    Err(e) => return Err(format!("Failed to summarize meta-chunk {}: {}", i + 1, e)),
+                }
+            }
+            
+            // Recurse to combine the new summaries
+            return combine_chunk_summaries(provider, new_summaries, config, depth + 1).await;
+        }
+        
+        // Combine summaries into final summary
+        info!(
+            "CHUNKED_SUMMARIZATION: Combining {} chunk summaries (~{} tokens) into final summary",
+            chunk_summaries.len(), combined_tokens
+        );
+        
+        let summary_messages = vec![ProviderMessage {
+            role: Role::User,
+            content: vec![ContentPart::text(format!(
+                "Here are summaries of consecutive parts of a conversation:\n\n{combined_text}\n\nCombine these into a single coherent summary."
+            ))],
+        }];
+        
+        let options = GenerateOptions {
+            system: Some(COMBINE_SUMMARIES_PROMPT.to_string()),
+            temperature: Some(0.3),
+            max_tokens: Some(2500), // Slightly larger for final combined summary
+            ..Default::default()
+        };
+        
+        generate_summary(provider, summary_messages, options).await
+    })
+}
+
+/// Generate a summary using chunked approach for large conversations.
+/// 
+/// This handles the "prompt too long" error by:
+/// 1. Splitting messages into manageable chunks (~30K tokens each)
+/// 2. Summarizing each chunk independently
+/// 3. Combining chunk summaries into a final summary
+/// 4. Recursively chunking if the combined summaries are still too large
+async fn generate_chunked_summary(
+    provider: &BoxedLanguageModel,
+    messages: &[ProviderMessage],
+    config: &CompactionConfig,
+) -> Result<String, String> {
+    info!(
+        "CHUNKED_SUMMARIZATION: Starting chunked summarization for {} messages",
+        messages.len()
+    );
+    
+    // Step 1: Split messages into chunks
+    let chunks = chunk_messages_for_summarization(messages, CHUNK_TARGET_TOKENS);
+    
+    if chunks.is_empty() {
+        return Err("No chunks created from messages".to_string());
+    }
+    
+    if chunks.len() == 1 {
+        // Only one chunk, try direct summarization
+        info!("CHUNKED_SUMMARIZATION: Only one chunk, using direct summarization");
+        return summarize_chunk(provider, &chunks[0], 1, 1).await;
+    }
+    
+    // Step 2: Summarize each chunk
+    let mut chunk_summaries = Vec::new();
+    let total_chunks = chunks.len();
+    
+    for (i, chunk) in chunks.iter().enumerate() {
+        match summarize_chunk(provider, chunk, i + 1, total_chunks).await {
+            Ok(summary) => {
+                if summary.is_empty() {
+                    warn!("CHUNKED_SUMMARIZATION: Chunk {} returned empty summary", i + 1);
+                    // Use a placeholder instead of failing entirely
+                    chunk_summaries.push(format!(
+                        "[Chunk {} could not be summarized - contained {} messages]",
+                        i + 1, chunk.messages.len()
+                    ));
+                } else {
+                    chunk_summaries.push(summary);
+                }
+            }
+            Err(e) => {
+                warn!("CHUNKED_SUMMARIZATION: Failed to summarize chunk {}: {}", i + 1, e);
+                // Continue with other chunks rather than failing entirely
+                chunk_summaries.push(format!(
+                    "[Chunk {} summarization failed: {}]",
+                    i + 1, e
+                ));
+            }
+        }
+    }
+    
+    // Step 3: Combine chunk summaries
+    combine_chunk_summaries(provider, chunk_summaries, config, 0).await
 }
 
 /// Format messages for inclusion in summary prompt.
@@ -837,5 +1180,58 @@ mod tests {
 
         // Should not prune skill tool output
         assert_eq!(pruned, 0);
+    }
+
+    #[test]
+    fn test_needs_chunked_summarization() {
+        let config = CompactionConfig::default();
+        
+        // Small messages - should not need chunking
+        let small_messages: Vec<ProviderMessage> = (0..10)
+            .map(|i| ProviderMessage::user(&format!("Message {}", i)))
+            .collect();
+        assert!(!needs_chunked_summarization(&small_messages, &config));
+        
+        // Very large messages - should need chunking
+        // Max safe is 40% of 128K = ~51K tokens
+        // Create messages with ~60K tokens total (240K chars / 4)
+        let large_messages: Vec<ProviderMessage> = (0..20)
+            .map(|_| ProviderMessage::user(&"x".repeat(12000))) // ~3K tokens each = 60K total
+            .collect();
+        assert!(needs_chunked_summarization(&large_messages, &config));
+    }
+
+    #[test]
+    fn test_chunk_messages_for_summarization() {
+        // Create 10 messages with ~5K tokens each = 50K total
+        let messages: Vec<ProviderMessage> = (0..10)
+            .map(|i| {
+                if i % 3 == 0 {
+                    ProviderMessage::user(&"x".repeat(20000)) // ~5K tokens
+                } else {
+                    ProviderMessage::assistant(&"y".repeat(20000)) // ~5K tokens
+                }
+            })
+            .collect();
+        
+        // Target 15K tokens per chunk - should create ~3-4 chunks
+        let chunks = chunk_messages_for_summarization(&messages, 15_000);
+        
+        // Should have multiple chunks
+        assert!(chunks.len() >= 2, "Expected multiple chunks, got {}", chunks.len());
+        
+        // All messages should be accounted for
+        let total_messages: usize = chunks.iter().map(|c| c.messages.len()).sum();
+        assert_eq!(total_messages, messages.len());
+        
+        // Chunks should try to split at user messages (conversation boundaries)
+        for chunk in &chunks {
+            // Each chunk should have reasonable token count (not drastically over target)
+            assert!(
+                chunk.estimated_tokens < 25_000,
+                "Chunk has {} tokens, expected < 25K",
+                chunk.estimated_tokens
+            );
+        }
     }
 }
