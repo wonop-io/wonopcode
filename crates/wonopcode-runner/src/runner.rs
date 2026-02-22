@@ -1443,25 +1443,26 @@ impl Runner {
                         },
                     );
 
-                    // Persist compaction event to session for history reload
+                    // Persist compacted messages to session for history reload
+                    // This replaces all existing messages with the new compacted history
                     if let Some(ref svc) = self.session_service {
-                        if let Err(e) = svc
-                            .save_compaction_event(
-                                "", // No parent message ID for auto-compaction
-                                "automatic",
-                                messages_before,
-                                messages.len(),
-                                tokens_before,
-                                tokens_after,
-                                if !summary.is_empty() {
-                                    Some(summary.clone())
-                                } else {
-                                    None
-                                },
-                            )
-                            .await
-                        {
-                            warn!(error = %e, "Failed to persist compaction event to session");
+                        match svc.replace_with_compacted_messages(
+                            &messages,
+                            "automatic",
+                            messages_before,
+                            tokens_before,
+                            tokens_after,
+                            if !summary.is_empty() { Some(summary.clone()) } else { None },
+                        ).await {
+                            Ok(saved_count) => {
+                                info!(
+                                    saved_count = saved_count,
+                                    "COMPACTION_DEBUG: Persisted compacted messages to session"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to persist compacted messages to session");
+                            }
                         }
                     }
 
@@ -1857,25 +1858,26 @@ impl Runner {
                                 },
                             );
 
-                            // Persist emergency compaction event to session
+                            // Persist compacted messages to session for history reload
+                            // This replaces all existing messages with the new compacted history
                             if let Some(ref svc) = self.session_service {
-                                if let Err(e) = svc
-                                    .save_compaction_event(
-                                        "", // No parent message ID for emergency compaction
-                                        "emergency",
-                                        messages_before,
-                                        new_messages.len(),
-                                        tokens_before,
-                                        tokens_after,
-                                        if !summary.is_empty() {
-                                            Some(summary.clone())
-                                        } else {
-                                            None
-                                        },
-                                    )
-                                    .await
-                                {
-                                    warn!(error = %e, "Failed to persist emergency compaction event to session");
+                                match svc.replace_with_compacted_messages(
+                                    ctx.messages,
+                                    "emergency",
+                                    messages_before,
+                                    tokens_before,
+                                    tokens_after,
+                                    if !summary.is_empty() { Some(summary.clone()) } else { None },
+                                ).await {
+                                    Ok(saved_count) => {
+                                        info!(
+                                            saved_count = saved_count,
+                                            "COMPACTION_DEBUG: Persisted compacted messages to session (emergency)"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to persist compacted messages to session (emergency)");
+                                    }
                                 }
                             }
 
@@ -2879,25 +2881,26 @@ impl Runner {
                                 },
                             );
 
-                            // Persist manual compaction event to session
+                            // Persist compacted messages to session for history reload
+                            // This replaces all existing messages with the new compacted history
                             if let Some(ref svc) = self.session_service {
-                                if let Err(e) = svc
-                                    .save_compaction_event(
-                                        "", // No parent message ID for manual compaction
-                                        "manual",
-                                        messages_before,
-                                        new_messages.len(),
-                                        tokens_before,
-                                        tokens_after,
-                                        if !summary.is_empty() {
-                                            Some(summary.clone())
-                                        } else {
-                                            None
-                                        },
-                                    )
-                                    .await
-                                {
-                                    warn!(error = %e, "Failed to persist manual compaction event to session");
+                                match svc.replace_with_compacted_messages(
+                                    &new_messages,
+                                    "manual",
+                                    messages_before,
+                                    tokens_before,
+                                    tokens_after,
+                                    if !summary.is_empty() { Some(summary.clone()) } else { None },
+                                ).await {
+                                    Ok(saved_count) => {
+                                        info!(
+                                            saved_count = saved_count,
+                                            "COMPACTION_DEBUG: Persisted compacted messages to session (manual)"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to persist compacted messages to session (manual)");
+                                    }
                                 }
                             }
                         }
@@ -2922,6 +2925,55 @@ impl Runner {
                             );
                         }
                     }
+                }
+                AppAction::EmulateHistory { message_pairs } => {
+                    info!(
+                        message_pairs = message_pairs,
+                        "EMULATE_HISTORY: Injecting test messages"
+                    );
+                    
+                    // Generate test messages and inject them into history
+                    let lorem_user = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.";
+                    let lorem_agent = "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.";
+                    
+                    let mut new_messages = Vec::new();
+                    for i in 0..message_pairs {
+                        // Add user message
+                        let user_content = format!(
+                            "Test message #{} from user. {} Here's some code:\n```rust\nfn test_{}() {{\n    println!(\"Hello from message {}\");\n}}\n```",
+                            i + 1, lorem_user, i, i + 1
+                        );
+                        new_messages.push(ProviderMessage::user(&user_content));
+                        
+                        // Add assistant message
+                        let assistant_content = format!(
+                            "Test response #{} from agent. This is a simulated response to test context compaction. {} Here's some code:\n```rust\nfn example_{}() {{\n    println!(\"Hello from message {}\");\n}}\n```",
+                            i + 1, lorem_agent, i, i + 1
+                        );
+                        new_messages.push(ProviderMessage::assistant(&assistant_content));
+                    }
+                    
+                    // Inject into history
+                    let messages_added = new_messages.len();
+                    let final_count = {
+                        let mut history = self.history.write().await;
+                        history.extend(new_messages);
+                        history.len()
+                    };
+                    
+                    info!(
+                        messages_added = messages_added,
+                        total_messages = final_count,
+                        "EMULATE_HISTORY: Injected test messages into runner history"
+                    );
+                    
+                    send_update(
+                        &update_tx,
+                        AppUpdate::Status(format!(
+                            "Emulated {} message pairs. Runner now has {} messages. Run /compact to test compaction.",
+                            message_pairs, final_count
+                        )),
+                    );
                 }
                 AppAction::RenameSession { title } => {
                     debug!(title = %title, "Rename session requested");

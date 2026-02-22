@@ -739,6 +739,12 @@ fn app_action_to_protocol(action: AppAction) -> BackendResult<wonopcode_protocol
                 "Git actions should be handled via HTTP endpoints".to_string(),
             ));
         }
+        // EmulateHistory is only for desktop testing, not supported in TUI
+        AppAction::EmulateHistory { .. } => {
+            return Err(BackendError::RequestFailed(
+                "EmulateHistory is only available in the Desktop app".to_string(),
+            ));
+        }
     })
 }
 
@@ -1220,6 +1226,12 @@ fn app_action_to_client_payload(action: AppAction) -> BackendResult<ClientPayloa
         | AppAction::GitPull => {
             return Err(BackendError::RequestFailed(
                 "Git operations are not yet supported via Iggy backend".to_string(),
+            ));
+        }
+        // EmulateHistory is only for desktop testing, not supported in TUI
+        AppAction::EmulateHistory { .. } => {
+            return Err(BackendError::RequestFailed(
+                "EmulateHistory is only available in the Desktop app".to_string(),
             ));
         }
     })

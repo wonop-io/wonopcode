@@ -32,6 +32,11 @@ pub const PRESERVE_RECENT_MESSAGES: usize = 50;
 /// When message count exceeds this, compaction is triggered.
 pub const COMPACTION_MESSAGE_THRESHOLD: usize = 100;
 
+/// Target token count after compaction.
+/// After compaction, we aim to have at most this many tokens.
+/// This ensures context stays manageable even with very long individual messages.
+pub const TARGET_TOKENS_AFTER_COMPACTION: u32 = 50_000;
+
 /// Configuration for compaction behavior.
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
@@ -57,6 +62,10 @@ pub struct CompactionConfig {
 
     /// Maximum output tokens to reserve.
     pub output_reserve: u32,
+
+    /// Target token count after compaction.
+    /// After compaction, we aim to have at most this many tokens.
+    pub target_tokens: u32,
 }
 
 impl Default for CompactionConfig {
@@ -68,6 +77,7 @@ impl Default for CompactionConfig {
             compaction_threshold: COMPACTION_MESSAGE_THRESHOLD,
             preserve_recent_messages: PRESERVE_RECENT_MESSAGES,
             output_reserve: OUTPUT_TOKEN_MAX,
+            target_tokens: TARGET_TOKENS_AFTER_COMPACTION,
         }
     }
 }
@@ -324,16 +334,19 @@ Format your response as a clear, structured summary. Do not include any preamble
 
 const COMPACTION_USER_PROMPT: &str = r#"Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."#;
 
-/// Perform full compaction: prune first, then always summarize if >100 messages.
+/// Perform full compaction: prune first, then summarize if needed.
 ///
 /// Strategy:
 /// 1. Prune old tool outputs (mark as [compacted])
 /// 2. If message count > compaction_threshold (default: 100), summarize older messages
-/// 3. Keep the last preserve_recent_messages (default: 50) messages
-/// 4. Optionally add "Continue if you have next steps" message
+/// 3. OR if token count > target_tokens (default: 50K), force summarization
+/// 4. Keep the last preserve_recent_messages (default: 50) messages
+/// 5. Optionally add "Continue if you have next steps" message
 ///
 /// This ensures we always produce a summary when compacting, making the behavior
-/// predictable: >100 messages triggers summarization, keeping the last 50.
+/// predictable. Summarization is triggered when either:
+/// - Message count exceeds threshold (100+)
+/// - Token count exceeds target (50K+) after pruning
 pub async fn compact(
     messages: &mut [ProviderMessage],
     provider: &BoxedLanguageModel,
@@ -349,12 +362,26 @@ pub async fn compact(
         debug!(pruned = pruned_tokens, "Pruned tool outputs");
     }
 
-    // Phase 2: Summarize if we have more messages than the compaction threshold
-    // Trigger at 100 messages, preserve last 50
-    let needs_summarization = messages.len() > config.compaction_threshold;
+    // Re-estimate tokens after pruning
+    let current_tokens = estimate_messages_tokens(messages);
+
+    // Phase 2: Summarize if we have more messages than threshold OR tokens still too high
+    // Trigger at 100 messages OR 50K tokens (after pruning)
+    let needs_message_based_summarization = messages.len() > config.compaction_threshold;
+    let needs_token_based_summarization = current_tokens > config.target_tokens;
+    let needs_summarization = needs_message_based_summarization || needs_token_based_summarization;
+
+    if needs_token_based_summarization && !needs_message_based_summarization {
+        info!(
+            current_tokens = current_tokens,
+            target_tokens = config.target_tokens,
+            message_count = messages.len(),
+            "Token count exceeds target after pruning, forcing summarization"
+        );
+    }
 
     if !needs_summarization {
-        // Not enough messages to summarize, but we may have pruned
+        // Not enough messages or tokens to summarize, but we may have pruned
         if pruned_tokens > 0 {
             return CompactionResult::Compacted {
                 messages: messages.to_vec(),
@@ -404,24 +431,35 @@ pub async fn compact(
 /// - Messages 2-70 (69 messages) - summarized into one AI-generated summary
 /// - Messages 71-120 (last 50) - kept as-is
 /// - Result: 1 (first) + 1 (summary) + 50 (recent) = 52 messages
+///
+/// If there are fewer messages than preserve_recent_messages, we dynamically reduce
+/// the number of recent messages to keep, ensuring we always summarize at least
+/// half of the messages (leaving room for high-token individual messages).
 pub async fn compact_with_summary(
     messages: &[ProviderMessage],
     provider: &BoxedLanguageModel,
     config: &CompactionConfig,
 ) -> CompactionResult {
-    let preserve_recent = config.preserve_recent_messages;
-
-    // Need more messages than we're preserving to have something to summarize
-    // Plus we need at least the first message and something to summarize
-    if messages.len() <= preserve_recent + 1 {
+    // Need at least 4 messages to summarize meaningfully:
+    // 1 first + at least 2 to summarize + 1 recent
+    if messages.len() < 4 {
         return CompactionResult::InsufficientMessages;
     }
 
+    // Dynamically calculate preserve_recent:
+    // - Default: config.preserve_recent_messages (e.g., 50)
+    // - If fewer messages, keep at most half the messages
+    // This ensures we always have something to summarize
+    let preserve_recent = config
+        .preserve_recent_messages
+        .min(messages.len() / 2)
+        .max(1); // Keep at least 1 recent message
+
     // Find the split point: keep first message, summarize middle, keep recent N messages
-    // Example with 219 messages, preserve_recent=100:
+    // Example with 219 messages, preserve_recent=50:
     //   - first_message = messages[0]
-    //   - messages_to_summarize = messages[1..119] (118 messages)
-    //   - recent_messages = messages[119..219] (100 messages)
+    //   - messages_to_summarize = messages[1..169] (168 messages)
+    //   - recent_messages = messages[169..219] (50 messages)
     let middle_end = messages.len().saturating_sub(preserve_recent);
 
     if middle_end <= 1 {
@@ -496,37 +534,87 @@ pub async fn compact_with_summary(
     }
 }
 
-/// Generate a summary using the provider.
+/// Generate a summary using the provider with a timeout.
+/// Compaction summaries should complete within 60 seconds.
 async fn generate_summary(
     provider: &BoxedLanguageModel,
     messages: Vec<ProviderMessage>,
     options: GenerateOptions,
 ) -> Result<String, String> {
+    // Wrap the actual summary generation in a timeout
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        generate_summary_inner(provider, messages, options)
+    ).await {
+        Ok(result) => result,
+        Err(_) => {
+            warn!("COMPACTION_DEBUG: Summary generation timed out after 120 seconds");
+            Err("Summary generation timed out after 120 seconds".to_string())
+        }
+    }
+}
+
+/// Inner function for summary generation (called with timeout wrapper).
+async fn generate_summary_inner(
+    provider: &BoxedLanguageModel,
+    messages: Vec<ProviderMessage>,
+    options: GenerateOptions,
+) -> Result<String, String> {
+    info!("COMPACTION_DEBUG: generate_summary() starting, calling provider.generate()");
+    let start = std::time::Instant::now();
+    
     let stream = provider
         .generate(messages, options)
         .await
-        .map_err(|e| format!("Failed to start summary generation: {e}"))?;
+        .map_err(|e| {
+            warn!("COMPACTION_DEBUG: provider.generate() failed: {}", e);
+            format!("Failed to start summary generation: {e}")
+        })?;
+    
+    info!("COMPACTION_DEBUG: provider.generate() returned successfully after {:?}, starting to consume stream", start.elapsed());
 
     let mut stream = Box::pin(stream);
     let mut summary = String::new();
+    let mut chunk_count = 0;
+    let mut last_chunk_time = std::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
+        chunk_count += 1;
+        let now = std::time::Instant::now();
+        let chunk_interval = now.duration_since(last_chunk_time);
+        last_chunk_time = now;
+        
+        // Log if chunks are arriving slowly (more than 5 seconds apart)
+        if chunk_interval.as_secs() > 5 {
+            debug!(
+                "COMPACTION_DEBUG: Slow chunk - {} seconds since last chunk (chunk #{})", 
+                chunk_interval.as_secs(), chunk_count
+            );
+        }
+        
         match chunk_result {
             Ok(StreamChunk::TextDelta(text)) => {
                 summary.push_str(&text);
+                if chunk_count % 10 == 0 {
+                    debug!("COMPACTION_DEBUG: Received {} chunks, summary length so far: {}", chunk_count, summary.len());
+                }
             }
             Ok(StreamChunk::Error(e)) => {
-                warn!("Error generating summary: {}", e);
+                warn!("COMPACTION_DEBUG: Error generating summary at chunk {}: {}", chunk_count, e);
                 return Err(format!("Summary generation error: {e}"));
             }
             Err(e) => {
-                warn!("Stream error: {}", e);
+                warn!("COMPACTION_DEBUG: Stream error at chunk {}: {}", chunk_count, e);
                 return Err(format!("Stream error: {e}"));
             }
             _ => {}
         }
     }
 
+    info!(
+        "COMPACTION_DEBUG: generate_summary() completed after {:?}, received {} chunks, summary length: {}", 
+        start.elapsed(), chunk_count, summary.len()
+    );
     Ok(summary.trim().to_string())
 }
 

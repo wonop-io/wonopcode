@@ -129,6 +129,25 @@ impl SessionService {
         // 2. Sessions from other worktrees (same project_id, different directory) are NOT loaded
         match service.repo.list(&project_id).await {
             Ok(sessions) => {
+                info!(
+                    project_id = %project_id,
+                    directory = %cwd,
+                    session_count = sessions.len(),
+                    "COMPACTION_DEBUG: from_instance - found {} sessions for project",
+                    sessions.len()
+                );
+                
+                // Debug: Log all session directories for comparison
+                for (i, s) in sessions.iter().enumerate() {
+                    info!(
+                        session_index = i,
+                        session_id = %s.id,
+                        session_directory = %s.directory,
+                        "COMPACTION_DEBUG: from_instance - session {} has directory: {}",
+                        i, s.directory
+                    );
+                }
+                
                 // Filter sessions to only those matching this workstream's directory
                 // Sessions are already sorted by ID descending (newest first)
                 let matching_session = sessions.into_iter().find(|s| s.directory == cwd);
@@ -145,13 +164,14 @@ impl SessionService {
                     info!(
                         session_id = %session.id,
                         directory = %cwd,
-                        "Loaded most recent session for workstream"
+                        "COMPACTION_DEBUG: Loaded most recent session for workstream"
                     );
                 } else {
-                    debug!(
+                    info!(
                         project_id = %project_id,
                         directory = %cwd,
-                        "No existing sessions found for this workstream directory"
+                        "COMPACTION_DEBUG: No existing sessions found for directory '{}' - this means history will NOT be loaded",
+                        cwd
                     );
                 }
             }
@@ -160,7 +180,7 @@ impl SessionService {
                     project_id = %project_id,
                     directory = %cwd,
                     error = %e,
-                    "Failed to list sessions, starting without history"
+                    "COMPACTION_DEBUG: Failed to list sessions, starting without history"
                 );
             }
         }
@@ -533,6 +553,137 @@ impl SessionService {
         Ok(message_id)
     }
 
+    /// Replace all session messages with compacted messages.
+    ///
+    /// This is called after compaction to persist the new, reduced message history.
+    /// It deletes all existing messages and saves the new compacted messages,
+    /// along with a compaction marker message that will be rendered in the UI.
+    ///
+    /// The compacted messages typically consist of:
+    /// 1. First user message (preserved)
+    /// 2. Summary assistant message (AI-generated summary of compacted messages)
+    /// 3. Recent messages (last N messages, preserved as-is)
+    /// 4. Compaction marker message (added by this method)
+    ///
+    /// Returns the number of messages saved.
+    pub async fn replace_with_compacted_messages(
+        &self,
+        compacted_messages: &[ProviderMessage],
+        compaction_type: &str,
+        messages_before: usize,
+        tokens_before: u32,
+        tokens_after: u32,
+        summary: Option<String>,
+    ) -> CoreResult<usize> {
+        let session = self.ensure_session().await?;
+        let session_id = session.id.clone();
+
+        // First, get all existing message IDs
+        let existing_messages = self.repo
+            .messages(&self.project_id, &session_id, None)
+            .await?;
+
+        info!(
+            session_id = %session_id,
+            existing_count = existing_messages.len(),
+            new_count = compacted_messages.len(),
+            "Replacing session messages with compacted history"
+        );
+
+        // Delete all existing messages
+        for msg_with_parts in &existing_messages {
+            let msg_id = msg_with_parts.message.id();
+            if let Err(e) = self.repo.delete_message(&session_id, msg_id).await {
+                warn!(
+                    message_id = %msg_id,
+                    error = %e,
+                    "Failed to delete message during compaction"
+                );
+            }
+        }
+
+        // Save the new compacted messages
+        let mut saved_count = 0;
+        let mut last_saved_id = String::new();
+        let mut summary_message_id: Option<String> = None;
+
+        for (idx, provider_msg) in compacted_messages.iter().enumerate() {
+            match provider_msg.role {
+                wonopcode_provider::Role::User => {
+                    match self.save_user_message(provider_msg).await {
+                        Ok(id) => {
+                            last_saved_id = id;
+                            saved_count += 1;
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to save user message during compaction");
+                        }
+                    }
+                }
+                wonopcode_provider::Role::Assistant => {
+                    match self.save_assistant_message(provider_msg, &last_saved_id).await {
+                        Ok(id) => {
+                            // The second message (index 1) is the summary message
+                            if idx == 1 {
+                                summary_message_id = Some(id.clone());
+                            }
+                            last_saved_id = id;
+                            saved_count += 1;
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to save assistant message during compaction");
+                        }
+                    }
+                }
+                // System and Tool messages are not persisted to conversation history
+                wonopcode_provider::Role::System | wonopcode_provider::Role::Tool => {
+                    debug!("Skipping {:?} message during compaction persistence", provider_msg.role);
+                }
+            }
+        }
+
+        // Save a compaction marker message right after the summary
+        // This will be rendered as the CompactionNotice in the UI
+        let parent_id = summary_message_id.unwrap_or_else(|| last_saved_id.clone());
+        info!(
+            session_id = %session_id,
+            parent_id = %parent_id,
+            compaction_type = %compaction_type,
+            "COMPACTION_DEBUG: Saving compaction marker message"
+        );
+        match self.save_compaction_event(
+            &parent_id,
+            compaction_type,
+            messages_before,
+            compacted_messages.len(),
+            tokens_before,
+            tokens_after,
+            summary,
+        ).await {
+            Ok(marker_id) => {
+                saved_count += 1;
+                info!(
+                    session_id = %session_id,
+                    marker_message_id = %marker_id,
+                    "COMPACTION_DEBUG: Saved compaction marker message with ID {}",
+                    marker_id
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to save compaction marker message");
+            }
+        }
+
+        info!(
+            session_id = %session_id,
+            deleted = existing_messages.len(),
+            saved = saved_count,
+            "Compaction persistence complete"
+        );
+
+        Ok(saved_count)
+    }
+
     // ========================================================================
     // History Access (for client queries)
     // ========================================================================
@@ -544,12 +695,37 @@ impl SessionService {
     pub async fn get_history(&self) -> CoreResult<Vec<MessageWithParts>> {
         let session_id = match self.current_session_id().await {
             Some(id) => id,
-            None => return Ok(Vec::new()),
+            None => {
+                info!("COMPACTION_DEBUG: get_history - no current session ID");
+                return Ok(Vec::new());
+            }
         };
 
-        self.repo
+        info!(
+            session_id = %session_id,
+            "COMPACTION_DEBUG: get_history loading messages for session"
+        );
+        
+        let messages = self.repo
             .messages(&self.project_id, &session_id, None)
-            .await
+            .await?;
+        
+        // Debug: Check for compaction parts
+        let compaction_count = messages.iter()
+            .flat_map(|m| m.parts.iter())
+            .filter(|p| matches!(p, crate::message::MessagePart::Compaction(_)))
+            .count();
+        
+        info!(
+            session_id = %session_id,
+            message_count = messages.len(),
+            compaction_parts = compaction_count,
+            "COMPACTION_DEBUG: get_history loaded {} messages with {} compaction parts",
+            messages.len(),
+            compaction_count
+        );
+        
+        Ok(messages)
     }
 
     /// Get recent history with a limit.

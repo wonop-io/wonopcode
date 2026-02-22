@@ -323,6 +323,16 @@ pub enum ClientMessage {
         /// Workstream ID.
         workstream_id: String,
     },
+
+    /// Emulate history by injecting test messages (for debugging/testing).
+    ///
+    /// This is used to test context compaction without making real LLM calls.
+    EmulateHistory {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Number of test message pairs (user + assistant) to inject.
+        message_pairs: usize,
+    },
 }
 
 /// Topics that clients can subscribe to.

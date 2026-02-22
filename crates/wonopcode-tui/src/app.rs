@@ -219,6 +219,11 @@ pub enum AppAction {
     Unrevert,
     /// Compact the conversation (prune/summarize).
     Compact,
+    /// Emulate history by injecting test messages (for debugging/testing).
+    EmulateHistory {
+        /// Number of test message pairs (user + assistant) to inject.
+        message_pairs: usize,
+    },
     /// Rename the current session.
     RenameSession { title: String },
     /// Toggle an MCP server on/off.
