@@ -11,6 +11,7 @@
 //! - RAII-based timing for operation measurement
 //! - Performance monitoring and metrics
 //! - Timeout constants for permission and MCP operations
+//! - String utilities for safe UTF-8 handling
 
 pub mod bash_permission;
 pub mod error;
@@ -19,6 +20,7 @@ pub mod id;
 pub mod log;
 pub mod path;
 pub mod perf;
+pub mod string;
 pub mod timeout;
 pub mod timing;
 pub mod wildcard;
@@ -31,5 +33,6 @@ pub use error::{Error, Result};
 pub use file_time::{shared_file_time_state, FileTimeError, FileTimeState, FileTimeTracker};
 pub use id::Identifier;
 pub use perf::{PerfEvent, PerfEventType};
+pub use string::truncate_to_char_boundary;
 pub use timeout::DEFAULT_PERMISSION_TIMEOUT_SECS;
 pub use timing::TimingGuard;

@@ -151,7 +151,10 @@ async fn list_mcp_servers(cwd: &Path) -> anyhow::Result<()> {
 
         // Truncate endpoint if too long
         let endpoint_display = if endpoint.len() > 30 {
-            format!("{}...", &endpoint[..27])
+            format!(
+                "{}...",
+                wonopcode_util::truncate_to_char_boundary(&endpoint, 27)
+            )
         } else {
             endpoint
         };

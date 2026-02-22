@@ -404,7 +404,10 @@ impl BashTool {
 fn truncate_command(cmd: &str) -> String {
     let first_line = cmd.lines().next().unwrap_or(cmd);
     if first_line.len() > 50 {
-        format!("{}...", &first_line[..47])
+        format!(
+            "{}...",
+            wonopcode_util::truncate_to_char_boundary(first_line, 47)
+        )
     } else {
         first_line.to_string()
     }

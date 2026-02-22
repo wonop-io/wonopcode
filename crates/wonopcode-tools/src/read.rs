@@ -193,7 +193,10 @@ Usage:
             .map(|(i, line)| {
                 // Truncate long lines
                 let truncated = if line.len() > 2000 {
-                    format!("{}... [truncated]", &line[..2000])
+                    format!(
+                        "{}... [truncated]",
+                        wonopcode_util::truncate_to_char_boundary(line, 2000)
+                    )
                 } else {
                     (*line).to_string()
                 };

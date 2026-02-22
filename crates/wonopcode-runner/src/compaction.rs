@@ -7,6 +7,7 @@
 
 use futures::StreamExt;
 use tracing::{debug, info, warn};
+use wonopcode_util::truncate_to_char_boundary;
 use wonopcode_provider::{
     BoxedLanguageModel, ContentPart, GenerateOptions, Message as ProviderMessage, Role, StreamChunk,
 };
@@ -637,7 +638,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                 ContentPart::Text { text } => {
                     // Truncate very long text parts
                     if text.len() > 2000 {
-                        output.push_str(&text[..2000]);
+                        output.push_str(truncate_to_char_boundary(text, 2000));
                         output.push_str("... [truncated]\n");
                     } else {
                         output.push_str(text);
@@ -654,7 +655,7 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                     } else if content.len() > 500 {
                         output.push_str(&format!(
                             "[Tool result: {}... [truncated]]\n",
-                            &content[..500]
+                            truncate_to_char_boundary(content, 500)
                         ));
                     } else {
                         output.push_str(&format!("[Tool result: {content}]\n"));
@@ -665,7 +666,10 @@ fn format_messages_for_summary(messages: &[ProviderMessage]) -> String {
                 }
                 ContentPart::Thinking { text } => {
                     if text.len() > 500 {
-                        output.push_str(&format!("[Thinking: {}... [truncated]]\n", &text[..500]));
+                        output.push_str(&format!(
+                            "[Thinking: {}... [truncated]]\n",
+                            truncate_to_char_boundary(text, 500)
+                        ));
                     } else {
                         output.push_str(&format!("[Thinking: {text}]\n"));
                     }

@@ -308,7 +308,10 @@ pub fn display_stats(stats: &SessionStats, tool_limit: Option<usize>) {
             let percentage = (*count as f64 / total_tool_usage as f64) * 100.0;
 
             let tool_display = if tool.len() > 18 {
-                format!("{}...", &tool[..15])
+                format!(
+                    "{}...",
+                    wonopcode_util::truncate_to_char_boundary(tool, 15)
+                )
             } else {
                 tool.clone()
             };

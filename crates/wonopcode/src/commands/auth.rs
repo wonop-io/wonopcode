@@ -301,8 +301,15 @@ fn mask_api_key(key: &str) -> String {
     if key.len() <= 8 {
         return "*".repeat(key.len());
     }
-    let prefix = &key[..4];
-    let suffix = &key[key.len() - 4..];
+    // API keys are ASCII, but use safe truncation for robustness
+    let prefix = wonopcode_util::truncate_to_char_boundary(key, 4);
+    let suffix_start = key.len().saturating_sub(4);
+    // Find a valid char boundary for the suffix
+    let mut start = suffix_start;
+    while start < key.len() && !key.is_char_boundary(start) {
+        start += 1;
+    }
+    let suffix = &key[start..];
     format!("{prefix}...{suffix}")
 }
 

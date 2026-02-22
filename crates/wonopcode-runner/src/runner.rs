@@ -3942,7 +3942,7 @@ impl Runner {
 
             // Truncate long descriptions
             let short_desc = if description.len() > 80 {
-                format!("{}...", &description[..77])
+                format!("{}...", wonopcode_util::truncate_to_char_boundary(&description, 77))
             } else {
                 description.to_string()
             };

@@ -153,7 +153,10 @@ pub async fn handle_agent(command: AgentCommands, cwd: &Path) -> anyhow::Result<
                         println!("Custom prompt:");
                         // Truncate long prompts
                         let display = if prompt.len() > 200 {
-                            format!("{}...", &prompt[..200])
+                            format!(
+                                "{}...",
+                                wonopcode_util::truncate_to_char_boundary(prompt, 200)
+                            )
                         } else {
                             prompt.clone()
                         };
