@@ -122,6 +122,34 @@ pub enum Update {
 
     /// Permission request was resolved (dismiss dialog).
     PermissionResolved { request_id: String, allowed: bool },
+
+    /// Context compaction has started (show running indicator).
+    CompactionStarted {
+        /// Type of compaction: "automatic", "emergency", or "manual"
+        compaction_type: String,
+        /// Number of messages before compaction
+        messages_before: usize,
+    },
+
+    /// Context compaction was performed (compaction completed).
+    CompactionPerformed {
+        /// Type of compaction: "automatic", "emergency", or "manual"
+        compaction_type: String,
+        /// Number of messages before compaction
+        messages_before: usize,
+        /// Number of messages after compaction
+        messages_after: usize,
+        /// Token count before compaction
+        tokens_before: u32,
+        /// Token count after compaction
+        tokens_after: u32,
+        /// Optional summary of compacted content
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+    },
+
+    /// Context compaction was not needed (message count below threshold).
+    CompactionNotNeeded,
 }
 
 /// Session info for session list updates.
@@ -206,6 +234,9 @@ impl Update {
             Update::AgentChanged { .. } => "agent_changed",
             Update::PermissionRequest { .. } => "permission_request",
             Update::PermissionResolved { .. } => "permission_resolved",
+            Update::CompactionStarted { .. } => "compaction_started",
+            Update::CompactionPerformed { .. } => "compaction_performed",
+            Update::CompactionNotNeeded => "compaction_not_needed",
         }
     }
 }
@@ -443,6 +474,14 @@ mod tests {
             Update::PermissionResolved {
                 request_id: "".to_string(),
                 allowed: true,
+            },
+            Update::CompactionPerformed {
+                compaction_type: "automatic".to_string(),
+                messages_before: 100,
+                messages_after: 50,
+                tokens_before: 50000,
+                tokens_after: 25000,
+                summary: Some("Earlier conversation summarized".to_string()),
             },
         ];
 

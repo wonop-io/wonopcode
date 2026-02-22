@@ -842,6 +842,31 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                 )
             },
         },
+        // CompactionStarted - forward to clients
+        wonopcode_tui::AppUpdate::CompactionStarted {
+            compaction_type,
+            messages_before,
+        } => ServerPayload::CompactionStarted {
+            compaction_type: format!("{:?}", compaction_type).to_lowercase(),
+            messages_before: *messages_before,
+        },
+        // CompactionPerformed - forward to clients
+        wonopcode_tui::AppUpdate::CompactionPerformed {
+            compaction_type,
+            messages_before,
+            messages_after,
+            tokens_before,
+            tokens_after,
+            summary,
+        } => ServerPayload::CompactionPerformed {
+            compaction_type: format!("{:?}", compaction_type).to_lowercase(),
+            messages_before: *messages_before,
+            messages_after: *messages_after,
+            tokens_before: *tokens_before,
+            tokens_after: *tokens_after,
+            summary: summary.clone(),
+        },
+        wonopcode_tui::AppUpdate::CompactionNotNeeded => ServerPayload::CompactionNotNeeded,
     }
 }
 
@@ -1122,6 +1147,29 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             request_id: request_id.clone(),
             allowed: *allowed,
         },
+        wonopcode_protocol::Update::CompactionStarted {
+            compaction_type,
+            messages_before,
+        } => ServerPayload::CompactionStarted {
+            compaction_type: compaction_type.clone(),
+            messages_before: *messages_before,
+        },
+        wonopcode_protocol::Update::CompactionPerformed {
+            compaction_type,
+            messages_before,
+            messages_after,
+            tokens_before,
+            tokens_after,
+            summary,
+        } => ServerPayload::CompactionPerformed {
+            compaction_type: compaction_type.clone(),
+            messages_before: *messages_before,
+            messages_after: *messages_after,
+            tokens_before: *tokens_before,
+            tokens_after: *tokens_after,
+            summary: summary.clone(),
+        },
+        wonopcode_protocol::Update::CompactionNotNeeded => ServerPayload::CompactionNotNeeded,
     }
 }
 

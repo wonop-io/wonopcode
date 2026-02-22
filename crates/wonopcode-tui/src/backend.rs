@@ -909,6 +909,60 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
             request_id,
             allowed,
         },
+        Update::CompactionStarted {
+            compaction_type,
+            messages_before,
+        } => {
+            tracing::info!(
+                compaction_type = %compaction_type,
+                messages_before = %messages_before,
+                "COMPACTION_DEBUG: TUI backend converting CompactionStarted"
+            );
+            let ct = match compaction_type.as_str() {
+                "emergency" => crate::CompactionType::Emergency,
+                "manual" => crate::CompactionType::Manual,
+                _ => crate::CompactionType::Automatic,
+            };
+            AppUpdate::CompactionStarted {
+                compaction_type: ct,
+                messages_before,
+            }
+        }
+        Update::CompactionPerformed {
+            compaction_type,
+            messages_before,
+            messages_after,
+            tokens_before,
+            tokens_after,
+            summary,
+        } => {
+            tracing::info!(
+                compaction_type = %compaction_type,
+                messages_before = %messages_before,
+                messages_after = %messages_after,
+                tokens_before = %tokens_before,
+                tokens_after = %tokens_after,
+                has_summary = summary.is_some(),
+                "COMPACTION_DEBUG: TUI backend converting CompactionPerformed"
+            );
+            let ct = match compaction_type.as_str() {
+                "emergency" => crate::CompactionType::Emergency,
+                "manual" => crate::CompactionType::Manual,
+                _ => crate::CompactionType::Automatic,
+            };
+            AppUpdate::CompactionPerformed {
+                compaction_type: ct,
+                messages_before,
+                messages_after,
+                tokens_before,
+                tokens_after,
+                summary,
+            }
+        }
+        Update::CompactionNotNeeded => {
+            tracing::info!("COMPACTION_DEBUG: TUI backend converting CompactionNotNeeded");
+            AppUpdate::CompactionNotNeeded
+        }
     }
 }
 
@@ -1488,6 +1542,9 @@ fn server_payload_to_app_updates(payload: ServerPayload) -> Vec<AppUpdate> {
         | ServerPayload::AgentStopped
         | ServerPayload::SessionStats { .. }
         | ServerPayload::AvailableModels { .. }
-        | ServerPayload::AllowAllChanged { .. } => vec![],
+        | ServerPayload::AllowAllChanged { .. }
+        | ServerPayload::CompactionPerformed { .. }
+        | ServerPayload::CompactionStarted { .. }
+        | ServerPayload::CompactionNotNeeded => vec![],
     }
 }

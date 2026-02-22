@@ -268,6 +268,34 @@ pub enum ServerPayload {
 
     /// Allow-all mode changed.
     AllowAllChanged { enabled: bool },
+
+    /// Context compaction has started.
+    CompactionStarted {
+        /// Type of compaction: "automatic", "emergency", or "manual"
+        compaction_type: String,
+        /// Number of messages before compaction
+        messages_before: usize,
+    },
+
+    /// Context compaction was performed (completed).
+    CompactionPerformed {
+        /// Type of compaction: "automatic", "emergency", or "manual"
+        compaction_type: String,
+        /// Number of messages before compaction
+        messages_before: usize,
+        /// Number of messages after compaction
+        messages_after: usize,
+        /// Token count before compaction
+        tokens_before: u32,
+        /// Token count after compaction
+        tokens_after: u32,
+        /// Optional summary of compacted content
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+    },
+
+    /// Context compaction was not needed (message count below threshold).
+    CompactionNotNeeded,
 }
 
 /// Simplified model info for transmission
@@ -361,6 +389,9 @@ impl ServerPayload {
             ServerPayload::SessionStats { .. } => "session_stats",
             ServerPayload::AvailableModels { .. } => "available_models",
             ServerPayload::AllowAllChanged { .. } => "allow_all_changed",
+            ServerPayload::CompactionStarted { .. } => "compaction_started",
+            ServerPayload::CompactionPerformed { .. } => "compaction_performed",
+            ServerPayload::CompactionNotNeeded => "compaction_not_needed",
         }
     }
 }

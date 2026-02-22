@@ -113,6 +113,31 @@ pub trait LanguageModel: Send + Sync {
     /// Get the provider ID (e.g., "anthropic", "openai").
     fn provider_id(&self) -> &str;
 
+    /// Check if this provider maintains stateful sessions.
+    ///
+    /// Stateful providers (like Claude CLI with --resume) maintain conversation
+    /// history on the server/process side. When context compaction occurs,
+    /// these providers must reset their session and start fresh with the
+    /// compacted message history.
+    ///
+    /// Returns `false` by default (API-based providers are stateless).
+    fn is_stateful(&self) -> bool {
+        false
+    }
+
+    /// Reset the provider's session state.
+    ///
+    /// Called after context compaction to ensure stateful providers start
+    /// a fresh session with the compacted message history. For stateless
+    /// providers, this is a no-op.
+    ///
+    /// This clears any session ID, cached state, or server-side context
+    /// that would cause the provider to use outdated conversation history.
+    async fn reset_session(&self) {
+        // Default implementation: clear CLI session ID if any
+        self.set_cli_session_id(None).await;
+    }
+
     /// Get the CLI session ID if this provider uses CLI-based access.
     ///
     /// This is used for session persistence with providers like Claude CLI.

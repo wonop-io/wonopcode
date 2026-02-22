@@ -456,6 +456,83 @@ impl SessionService {
         Ok(())
     }
 
+    /// Save a compaction event as a system message.
+    ///
+    /// Called when context compaction completes. Creates a special "system" message
+    /// that represents the compaction event, allowing it to appear in the correct
+    /// chronological order when history is reloaded.
+    ///
+    /// The parent_message_id should be the ID of the user message that triggered
+    /// the compaction (i.e., the message that was being processed when compaction
+    /// was needed).
+    pub async fn save_compaction_event(
+        &self,
+        parent_message_id: &str,
+        compaction_type: &str,
+        messages_before: usize,
+        messages_after: usize,
+        tokens_before: u32,
+        tokens_after: u32,
+        summary: Option<String>,
+    ) -> CoreResult<String> {
+        let session = self.ensure_session().await?;
+        let session_id = session.id.clone();
+
+        // Create a synthetic assistant message to hold the compaction part
+        let message_id = wonopcode_util::Identifier::message();
+        let ctx = self.conversion_ctx.read().await;
+        let message = crate::message::Message::Assistant(crate::message::AssistantMessage {
+            id: message_id.clone(),
+            session_id: session_id.clone(),
+            time: crate::message::AssistantTime {
+                created: chrono::Utc::now().timestamp_millis(),
+                completed: Some(chrono::Utc::now().timestamp_millis()),
+            },
+            error: None,
+            parent_id: parent_message_id.to_string(),
+            model_id: ctx.model_id.clone(),
+            provider_id: ctx.provider_id.clone(),
+            agent: ctx.agent.clone(),
+            path: crate::message::PathContext {
+                cwd: ctx.cwd.clone(),
+                root: ctx.root.clone(),
+            },
+            summary: None,
+            cost: 0.0,
+            tokens: crate::message::TokenUsage::default(),
+            finish: Some("compaction".to_string()),
+        });
+
+        // Create the compaction part
+        let compaction_part = MessagePart::Compaction(crate::message::CompactionPart {
+            id: wonopcode_util::Identifier::part(),
+            session_id: session_id.clone(),
+            message_id: message_id.clone(),
+            original_message_id: String::new(),
+            compaction_type: compaction_type.to_string(),
+            messages_before,
+            messages_after,
+            tokens_before,
+            tokens_after,
+            summary,
+        });
+
+        // Save the message and part
+        self.repo.save_message(&message).await?;
+        self.repo.save_part(&compaction_part).await?;
+
+        debug!(
+            session_id = %session_id,
+            message_id = %message_id,
+            compaction_type = %compaction_type,
+            messages_before = messages_before,
+            messages_after = messages_after,
+            "Saved compaction event"
+        );
+
+        Ok(message_id)
+    }
+
     // ========================================================================
     // History Access (for client queries)
     // ========================================================================

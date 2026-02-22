@@ -1297,14 +1297,23 @@ impl Runner {
                 reason = %reason,
                 "Triggering automatic compaction"
             );
-            send_update(
-                update_tx,
-                AppUpdate::Status(format!("Auto-compacting: {}...", reason)),
-            );
-
             let compact_start = Instant::now();
             let messages_before = messages.len();
             let tokens_before = estimated_tokens.total();
+
+            // Send CompactionStarted event so UI can show running indicator
+            info!(
+                messages_before = messages_before,
+                tokens_before = tokens_before,
+                "COMPACTION_DEBUG: Sending CompactionStarted (automatic)"
+            );
+            send_update(
+                update_tx,
+                AppUpdate::CompactionStarted {
+                    compaction_type: wonopcode_tui::CompactionType::Automatic,
+                    messages_before,
+                },
+            );
 
             let provider = self.provider.read().await;
             match compaction::compact(
@@ -1390,35 +1399,71 @@ impl Runner {
                     // Update context state with new token estimate
                     self.update_context_estimate(&messages).await;
 
-                    // CRITICAL: Reset CLI session after compaction
-                    // When using Claude CLI provider, the CLI maintains its own session history.
-                    // After compaction, we need to start a fresh CLI session with the compacted
-                    // history, otherwise the CLI's session still has the old (large) context.
+                    // CRITICAL: Reset stateful provider sessions after compaction
+                    // Stateful providers (like Claude CLI with --resume) maintain their own
+                    // conversation history. After compaction, we must reset the session so the
+                    // provider starts fresh with the compacted message history.
                     {
                         let provider = self.provider.read().await;
-                        if provider.provider_id() == "anthropic-cli" {
-                            provider.set_cli_session_id(None).await;
-                            debug!(
-                                "Cleared CLI session after compaction - next call will start fresh"
-                            );
+                        let is_stateful = provider.is_stateful();
+                        info!(
+                            is_stateful = is_stateful,
+                            provider_id = %provider.provider_id(),
+                            "COMPACTION_DEBUG: Checking if provider is stateful for session reset"
+                        );
+                        if is_stateful {
+                            info!("COMPACTION_DEBUG: Calling reset_session() on stateful provider");
+                            provider.reset_session().await;
+                            info!("COMPACTION_DEBUG: reset_session() completed");
                         }
                     }
 
-                    let status = if messages_summarized > 0 {
-                        format!(
-                            "Compacted: {} → {} messages, {} → {} tokens",
+                    // Send compaction performed event to UI
+                    info!(
+                        messages_before = messages_before,
+                        messages_after = messages.len(),
+                        tokens_before = tokens_before,
+                        tokens_after = tokens_after,
+                        has_summary = !summary.is_empty(),
+                        "COMPACTION_DEBUG: Sending CompactionPerformed (automatic)"
+                    );
+                    send_update(
+                        update_tx,
+                        AppUpdate::CompactionPerformed {
+                            compaction_type: wonopcode_tui::CompactionType::Automatic,
                             messages_before,
-                            messages.len(),
+                            messages_after: messages.len(),
                             tokens_before,
-                            tokens_after
-                        )
-                    } else {
-                        format!(
-                            "Pruned old tool outputs: {} → {} tokens",
-                            tokens_before, tokens_after
-                        )
-                    };
-                    send_update(update_tx, AppUpdate::Status(status));
+                            tokens_after,
+                            summary: if !summary.is_empty() {
+                                Some(summary.clone())
+                            } else {
+                                None
+                            },
+                        },
+                    );
+
+                    // Persist compaction event to session for history reload
+                    if let Some(ref svc) = self.session_service {
+                        if let Err(e) = svc
+                            .save_compaction_event(
+                                "", // No parent message ID for auto-compaction
+                                "automatic",
+                                messages_before,
+                                messages.len(),
+                                tokens_before,
+                                tokens_after,
+                                if !summary.is_empty() {
+                                    Some(summary.clone())
+                                } else {
+                                    None
+                                },
+                            )
+                            .await
+                        {
+                            warn!(error = %e, "Failed to persist compaction event to session");
+                        }
+                    }
 
                     // Send context status update
                     let new_usage_percent = if usable_context > 0 {
@@ -1438,6 +1483,11 @@ impl Runner {
                 }
                 CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
                     debug!("Compaction not needed or insufficient messages");
+                    // Send event so UI can clear any in-progress indicator
+                    send_update(
+                        update_tx,
+                        AppUpdate::CompactionNotNeeded,
+                    );
                 }
                 CompactionResult::Failed(err) => {
                     warn!(
@@ -1702,6 +1752,10 @@ impl Runner {
         let mut overflow_retries = 0;
         let result: Result<String, LoopError>;
 
+        // Send Started event now that pre-prompt compaction is complete.
+        // This ensures the compaction message appears BEFORE the streaming message in the UI.
+        send_update(update_tx, AppUpdate::Started);
+
         loop {
             let loop_result = {
                 let agent_loop = self.agent_loop.lock().await;
@@ -1715,11 +1769,20 @@ impl Runner {
                         retry = overflow_retries,
                         "Context overflow detected, performing emergency compaction"
                     );
+
+                    // Send CompactionStarted event so UI can show running indicator
+                    let messages_before = ctx.messages.len();
+                    info!(
+                        messages_before = messages_before,
+                        retry = overflow_retries,
+                        "COMPACTION_DEBUG: Sending CompactionStarted (emergency)"
+                    );
                     send_update(
                         update_tx,
-                        AppUpdate::Status(
-                            "Context overflow - performing emergency compaction...".to_string(),
-                        ),
+                        AppUpdate::CompactionStarted {
+                            compaction_type: wonopcode_tui::CompactionType::Emergency,
+                            messages_before,
+                        },
                     );
 
                     // Perform emergency compaction
@@ -1738,12 +1801,14 @@ impl Runner {
                     {
                         CompactionResult::Compacted {
                             messages: new_messages,
-                            summary: _,
+                            summary,
                             messages_summarized,
                         } => {
+                            let messages_before = ctx.messages.len();
+                            let tokens_before = estimated_tokens.total();
                             let tokens_after = compaction::estimate_messages_tokens(&new_messages);
                             info!(
-                                messages_before = ctx.messages.len(),
+                                messages_before = messages_before,
                                 messages_after = new_messages.len(),
                                 tokens_after = tokens_after,
                                 messages_summarized = messages_summarized,
@@ -1751,7 +1816,7 @@ impl Runner {
                             );
 
                             // Update context with compacted messages
-                            *ctx.messages = new_messages;
+                            *ctx.messages = new_messages.clone();
 
                             // Update history with compacted messages
                             {
@@ -1762,19 +1827,57 @@ impl Runner {
                             // Update context state
                             self.update_context_estimate(ctx.messages).await;
 
-                            // CRITICAL: Reset CLI session after emergency compaction
-                            if provider.provider_id() == "anthropic-cli" {
-                                provider.set_cli_session_id(None).await;
-                                debug!("Cleared CLI session after emergency compaction - next call will start fresh");
+                            // CRITICAL: Reset stateful provider sessions after emergency compaction
+                            if provider.is_stateful() {
+                                provider.reset_session().await;
                             }
 
+                            // Send emergency compaction event to UI
+                            info!(
+                                messages_before = messages_before,
+                                messages_after = new_messages.len(),
+                                tokens_before = tokens_before,
+                                tokens_after = tokens_after,
+                                has_summary = !summary.is_empty(),
+                                "COMPACTION_DEBUG: Sending CompactionPerformed (emergency)"
+                            );
                             send_update(
                                 update_tx,
-                                AppUpdate::Status(format!(
-                                    "Emergency compaction complete: {} tokens, retrying...",
-                                    tokens_after
-                                )),
+                                AppUpdate::CompactionPerformed {
+                                    compaction_type: wonopcode_tui::CompactionType::Emergency,
+                                    messages_before,
+                                    messages_after: new_messages.len(),
+                                    tokens_before,
+                                    tokens_after,
+                                    summary: if !summary.is_empty() {
+                                        Some(summary.clone())
+                                    } else {
+                                        None
+                                    },
+                                },
                             );
+
+                            // Persist emergency compaction event to session
+                            if let Some(ref svc) = self.session_service {
+                                if let Err(e) = svc
+                                    .save_compaction_event(
+                                        "", // No parent message ID for emergency compaction
+                                        "emergency",
+                                        messages_before,
+                                        new_messages.len(),
+                                        tokens_before,
+                                        tokens_after,
+                                        if !summary.is_empty() {
+                                            Some(summary.clone())
+                                        } else {
+                                            None
+                                        },
+                                    )
+                                    .await
+                                {
+                                    warn!(error = %e, "Failed to persist emergency compaction event to session");
+                                }
+                            }
 
                             // Retry the prompt (loop continues)
                             continue;
@@ -2280,8 +2383,9 @@ impl Runner {
                     // Reset cancellation token for new prompt
                     self.reset_cancel_token().await;
 
-                    // Send started update
-                    send_update(&update_tx, AppUpdate::Started);
+                    // NOTE: Started event is sent inside run_prompt_via_agent_loop
+                    // AFTER pre-prompt compaction completes, so the compaction message
+                    // appears before the streaming message in the UI.
 
                     // Run the prompt with concurrent cancellation handling
                     debug!(prompt_len = text.len(), "Running prompt");
@@ -2422,8 +2526,9 @@ impl Runner {
                     // Reset cancellation token for new prompt
                     self.reset_cancel_token().await;
 
-                    // Send started update
-                    send_update(&update_tx, AppUpdate::Started);
+                    // NOTE: Started event is sent inside run_prompt_via_agent_loop_with_images
+                    // AFTER pre-prompt compaction completes, so the compaction message
+                    // appears before the streaming message in the UI.
 
                     // Run the prompt with images
                     debug!(
@@ -2580,9 +2685,8 @@ impl Runner {
                     // reset it to start fresh.
                     {
                         let provider = self.provider.read().await;
-                        if provider.provider_id() == "anthropic-cli" {
-                            provider.set_cli_session_id(None).await;
-                            debug!("Cleared CLI session for new session");
+                        if provider.is_stateful() {
+                            provider.reset_session().await;
                         }
                     }
                 }
@@ -2666,7 +2770,7 @@ impl Runner {
                     }
                 }
                 AppAction::Compact => {
-                    debug!("Compact requested");
+                    info!("COMPACTION_DEBUG: Manual compact requested via /compact command");
                     let _ =
                         update_tx.send(AppUpdate::Status("Compacting conversation...".to_string()));
 
@@ -2676,13 +2780,33 @@ impl Runner {
                         history.clone()
                     };
 
+                    info!(
+                        message_count = messages.len(),
+                        "COMPACTION_DEBUG: Current message count for manual compaction"
+                    );
+
                     if messages.len() < 4 {
+                        info!("COMPACTION_DEBUG: Not enough messages (<4), sending CompactionNotNeeded");
                         send_update(
                             &update_tx,
-                            AppUpdate::Status("Not enough messages to compact".to_string()),
+                            AppUpdate::CompactionNotNeeded,
                         );
                         continue;
                     }
+
+                    // Send CompactionStarted event so UI can show running indicator
+                    let messages_before = messages.len();
+                    info!(
+                        messages_before = messages_before,
+                        "COMPACTION_DEBUG: Sending CompactionStarted (manual)"
+                    );
+                    send_update(
+                        &update_tx,
+                        AppUpdate::CompactionStarted {
+                            compaction_type: wonopcode_tui::CompactionType::Manual,
+                            messages_before,
+                        },
+                    );
 
                     // Get context limit and estimate token usage
                     let (context_limit, estimated_tokens) = {
@@ -2706,7 +2830,7 @@ impl Runner {
                     {
                         CompactionResult::Compacted {
                             messages: new_messages,
-                            summary: _,
+                            summary,
                             messages_summarized,
                         } => {
                             let action = if messages_summarized > 0 {
@@ -2714,6 +2838,9 @@ impl Runner {
                             } else {
                                 "pruned tool outputs from"
                             };
+                            let messages_before = messages.len();
+                            let tokens_before = estimated_tokens.total();
+                            let tokens_after = compaction::estimate_messages_tokens(&new_messages);
                             debug!(
                                 action = action,
                                 messages_summarized = messages_summarized,
@@ -2724,30 +2851,71 @@ impl Runner {
                             // Update history
                             {
                                 let mut history = self.history.write().await;
-                                *history = new_messages;
+                                *history = new_messages.clone();
                             }
 
-                            let status = if messages_summarized > 0 {
-                                format!("Compacted {messages_summarized} messages")
-                            } else {
-                                "Pruned old tool outputs".to_string()
-                            };
-                            send_update(&update_tx, AppUpdate::Status(status));
-                        }
-                        CompactionResult::NotNeeded => {
-                            send_update(
-                                &update_tx,
-                                AppUpdate::Status("Compaction not needed".to_string()),
+                            // Send manual compaction event to UI
+                            info!(
+                                messages_before = messages_before,
+                                messages_after = new_messages.len(),
+                                tokens_before = tokens_before,
+                                tokens_after = tokens_after,
+                                has_summary = !summary.is_empty(),
+                                "COMPACTION_DEBUG: Sending CompactionPerformed (manual)"
                             );
-                        }
-                        CompactionResult::InsufficientMessages => {
                             send_update(
                                 &update_tx,
-                                AppUpdate::Status("Not enough messages to compact".to_string()),
+                                AppUpdate::CompactionPerformed {
+                                    compaction_type: wonopcode_tui::CompactionType::Manual,
+                                    messages_before,
+                                    messages_after: new_messages.len(),
+                                    tokens_before,
+                                    tokens_after,
+                                    summary: if !summary.is_empty() {
+                                        Some(summary.clone())
+                                    } else {
+                                        None
+                                    },
+                                },
+                            );
+
+                            // Persist manual compaction event to session
+                            if let Some(ref svc) = self.session_service {
+                                if let Err(e) = svc
+                                    .save_compaction_event(
+                                        "", // No parent message ID for manual compaction
+                                        "manual",
+                                        messages_before,
+                                        new_messages.len(),
+                                        tokens_before,
+                                        tokens_after,
+                                        if !summary.is_empty() {
+                                            Some(summary.clone())
+                                        } else {
+                                            None
+                                        },
+                                    )
+                                    .await
+                                {
+                                    warn!(error = %e, "Failed to persist manual compaction event to session");
+                                }
+                            }
+                        }
+                        CompactionResult::NotNeeded | CompactionResult::InsufficientMessages => {
+                            // Send dedicated event so UI can update the in-progress indicator
+                            send_update(
+                                &update_tx,
+                                AppUpdate::CompactionNotNeeded,
                             );
                         }
                         CompactionResult::Failed(err) => {
                             warn!(error = %err, "Compaction failed");
+                            // Send CompactionNotNeeded to reset the UI state
+                            // (this will unblock input and clear the in-progress indicator)
+                            send_update(
+                                &update_tx,
+                                AppUpdate::CompactionNotNeeded,
+                            );
                             send_update(
                                 &update_tx,
                                 AppUpdate::Error(format!("Compaction failed: {err}")),

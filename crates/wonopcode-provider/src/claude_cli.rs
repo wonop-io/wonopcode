@@ -538,7 +538,14 @@ impl ClaudeCliProvider {
     /// Clear the session ID, forcing a new session on the next call.
     /// Also resets the accumulated token usage.
     pub async fn clear_session(&self) {
-        *self.session_id.write().await = None;
+        let mut guard = self.session_id.write().await;
+        let old_value = guard.clone();
+        *guard = None;
+        drop(guard);
+        tracing::info!(
+            old_session = ?old_value,
+            "COMPACTION_DEBUG: clear_session() completed - session ID now None"
+        );
         self.accumulated_usage.write().await.reset();
     }
 
@@ -1197,6 +1204,21 @@ impl CliUsage {
 
 #[async_trait]
 impl LanguageModel for ClaudeCliProvider {
+    /// Claude CLI is stateful - it maintains conversation history via --resume.
+    /// After compaction, we must reset the session to use the new compacted history.
+    fn is_stateful(&self) -> bool {
+        true
+    }
+
+    async fn reset_session(&self) {
+        let old_session = self.session_id.read().await.clone();
+        self.clear_session().await;
+        tracing::info!(
+            old_session = ?old_session,
+            "COMPACTION_DEBUG: Reset CLI session for compaction - next call will start fresh"
+        );
+    }
+
     async fn get_cli_session_id(&self) -> Option<String> {
         self.get_session_id().await
     }
@@ -1212,6 +1234,11 @@ impl LanguageModel for ClaudeCliProvider {
     ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>> {
         // Check for existing session to resume
         let existing_session = self.session_id.read().await.clone();
+        tracing::info!(
+            existing_session = ?existing_session,
+            messages_count = messages.len(),
+            "COMPACTION_DEBUG: generate() called, checking for session to resume"
+        );
 
         // When resuming a session, Claude CLI already has the conversation history.
         // We only need to send the new user message, not the full history.
@@ -1841,8 +1868,14 @@ impl LanguageModel for ClaudeCliProvider {
             if let Some(sid) = captured_session_id {
                 let mut session_lock = session_id_handle.write().await;
                 if session_lock.is_none() {
-                    debug!(session_id = %sid, "Stored CLI session ID for resumption");
+                    tracing::info!(session_id = %sid, "COMPACTION_DEBUG: Storing CLI session ID for resumption");
                     *session_lock = Some(sid);
+                } else {
+                    tracing::info!(
+                        session_id = %sid,
+                        existing_session = ?*session_lock,
+                        "COMPACTION_DEBUG: NOT storing session ID (existing session present)"
+                    );
                 }
             }
 

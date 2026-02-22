@@ -1788,6 +1788,16 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::ContextStatus { .. } => {
                     continue;
                 }
+                // Compaction events are handled internally for TUI display
+                wonopcode_tui::AppUpdate::CompactionStarted { .. } => {
+                    continue;
+                }
+                wonopcode_tui::AppUpdate::CompactionPerformed { .. } => {
+                    continue;
+                }
+                wonopcode_tui::AppUpdate::CompactionNotNeeded => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);

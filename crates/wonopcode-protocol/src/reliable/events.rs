@@ -207,6 +207,37 @@ pub enum WorkstreamEventData {
         /// Whether allow-all mode is enabled.
         enabled: bool,
     },
+
+    // =========================================================================
+    // Context Compaction
+    // =========================================================================
+    /// Context compaction has started (show running indicator).
+    CompactionStarted {
+        /// Type of compaction: "automatic", "emergency", or "manual".
+        compaction_type: String,
+        /// Number of messages before compaction.
+        messages_before: usize,
+    },
+
+    /// Context compaction was performed (completed).
+    CompactionPerformed {
+        /// Type of compaction: "automatic", "emergency", or "manual".
+        compaction_type: String,
+        /// Number of messages before compaction.
+        messages_before: usize,
+        /// Number of messages after compaction.
+        messages_after: usize,
+        /// Token count before compaction.
+        tokens_before: u32,
+        /// Token count after compaction.
+        tokens_after: u32,
+        /// Optional summary of compacted content.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+    },
+
+    /// Context compaction was not needed (message count below threshold).
+    CompactionNotNeeded,
 }
 
 /// A part of a message (for rich reconstruction).
@@ -248,6 +279,25 @@ pub enum MessagePart {
         /// Order within the message.
         #[serde(skip_serializing_if = "Option::is_none")]
         order: Option<u32>,
+    },
+
+    /// Compaction marker indicating context was compacted.
+    Compaction {
+        /// Part ID.
+        id: String,
+        /// Type of compaction: "automatic", "emergency", or "manual".
+        compaction_type: String,
+        /// Number of messages before compaction.
+        messages_before: usize,
+        /// Number of messages after compaction.
+        messages_after: usize,
+        /// Token count before compaction.
+        tokens_before: u32,
+        /// Token count after compaction.
+        tokens_after: u32,
+        /// Optional summary of compacted content.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
     },
 }
 

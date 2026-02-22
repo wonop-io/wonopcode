@@ -311,6 +311,18 @@ pub enum ClientMessage {
         /// The raw Tera template content to preview.
         template_content: String,
     },
+
+    // =========================================================================
+    // Context Management
+    // =========================================================================
+    /// Trigger manual context compaction.
+    ///
+    /// Compacts the conversation history to reduce token usage.
+    /// A `CompactionPerformed` event will be sent when complete.
+    Compact {
+        /// Workstream ID.
+        workstream_id: String,
+    },
 }
 
 /// Topics that clients can subscribe to.

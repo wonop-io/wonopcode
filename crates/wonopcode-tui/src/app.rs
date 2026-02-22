@@ -319,6 +319,27 @@ pub struct TodoUpdate {
     pub parents: Vec<String>,
 }
 
+/// Type of compaction that was performed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompactionType {
+    /// Automatic pre-prompt compaction (triggered at 80% context usage).
+    Automatic,
+    /// Emergency compaction after context overflow from provider.
+    Emergency,
+    /// Manual compaction via /compact command.
+    Manual,
+}
+
+impl std::fmt::Display for CompactionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompactionType::Automatic => write!(f, "automatic"),
+            CompactionType::Emergency => write!(f, "emergency"),
+            CompactionType::Manual => write!(f, "manual"),
+        }
+    }
+}
+
 /// Updates that can be received by the UI.
 #[derive(Debug, Clone)]
 pub enum AppUpdate {
@@ -428,6 +449,31 @@ pub enum AppUpdate {
     /// This is sent AFTER Completed, once all messages from the turn
     /// have been saved to the session. Used to safely clear streaming state.
     TurnPersisted,
+    /// Compaction has started (show running indicator in UI).
+    CompactionStarted {
+        /// Type of compaction (automatic, emergency, or manual).
+        compaction_type: CompactionType,
+        /// Number of messages before compaction.
+        messages_before: usize,
+    },
+    /// Compaction was performed on the conversation context.
+    /// This is displayed as a system message in the chat to inform the user.
+    CompactionPerformed {
+        /// Type of compaction (automatic, emergency, or manual).
+        compaction_type: CompactionType,
+        /// Number of messages before compaction.
+        messages_before: usize,
+        /// Number of messages after compaction.
+        messages_after: usize,
+        /// Token count before compaction.
+        tokens_before: u32,
+        /// Token count after compaction.
+        tokens_after: u32,
+        /// Optional summary of compacted content.
+        summary: Option<String>,
+    },
+    /// Compaction was not needed (message count below threshold).
+    CompactionNotNeeded,
 }
 
 /// Git status update from the runner.
@@ -3633,6 +3679,84 @@ async function fetchUserData(userId) {
                 // Turn messages have been persisted to session storage.
                 // This is an internal event used by Pro server to safely clear streaming state.
                 // The TUI doesn't need to react to this - it has already handled Completed.
+            }
+            AppUpdate::CompactionStarted {
+                compaction_type,
+                messages_before,
+            } => {
+                // Show "Compacting [Running]" toast notification
+                let icon = match compaction_type {
+                    CompactionType::Emergency => "⚠️",
+                    CompactionType::Automatic => "📦",
+                    CompactionType::Manual => "✂️",
+                };
+                let type_label = match compaction_type {
+                    CompactionType::Emergency => "Emergency Compaction",
+                    CompactionType::Automatic => "Auto-Compaction",
+                    CompactionType::Manual => "Manual Compaction",
+                };
+                
+                // Show a toast indicating compaction is in progress
+                let toast = Toast::info(&format!("{} {} [Running]", icon, type_label))
+                    .with_message(format!("Summarizing {} messages...", messages_before));
+                self.toasts.push(toast);
+                
+                tracing::info!(
+                    compaction_type = %type_label,
+                    messages_before = messages_before,
+                    "COMPACTION_DEBUG: TUI App received CompactionStarted ({} messages)",
+                    messages_before
+                );
+            }
+            AppUpdate::CompactionPerformed {
+                compaction_type,
+                messages_before,
+                messages_after,
+                tokens_before,
+                tokens_after,
+                summary: _,
+            } => {
+                // Show a toast notification for completed compaction
+                let icon = match compaction_type {
+                    CompactionType::Emergency => "⚠️",
+                    CompactionType::Automatic => "📦",
+                    CompactionType::Manual => "✂️",
+                };
+                let type_label = match compaction_type {
+                    CompactionType::Emergency => "Emergency compaction",
+                    CompactionType::Automatic => "Auto-compaction",
+                    CompactionType::Manual => "Manual compaction",
+                };
+                let tokens_saved = tokens_before.saturating_sub(tokens_after);
+                let message = format!(
+                    "{} → {} messages, {} → {} tokens (saved {})",
+                    messages_before, messages_after, 
+                    tokens_before, tokens_after, tokens_saved
+                );
+                
+                // Show a toast with compaction info
+                let toast = match compaction_type {
+                    CompactionType::Emergency => Toast::error(&format!("{} {}", icon, type_label)),
+                    _ => Toast::info(&format!("{} {}", icon, type_label)),
+                };
+                self.toasts.push(toast.with_message(message));
+                
+                tracing::info!(
+                    compaction_type = %compaction_type,
+                    messages_before = messages_before,
+                    messages_after = messages_after,
+                    tokens_before = tokens_before,
+                    tokens_after = tokens_after,
+                    "COMPACTION_DEBUG: TUI App received CompactionPerformed"
+                );
+            }
+            AppUpdate::CompactionNotNeeded => {
+                // Show a toast indicating compaction was not needed
+                let toast = Toast::info("✓ Compaction Not Needed")
+                    .with_message("Message count is below threshold, no action taken.");
+                self.toasts.push(toast);
+                
+                tracing::info!("COMPACTION_DEBUG: TUI App received CompactionNotNeeded");
             }
         }
     }

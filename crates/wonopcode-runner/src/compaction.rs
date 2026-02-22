@@ -24,6 +24,14 @@ pub const PROTECTED_TOOLS: &[&str] = &["skill"];
 /// Default output token reserve.
 pub const OUTPUT_TOKEN_MAX: u32 = 16_000;
 
+/// Number of recent messages to preserve during summarization.
+/// When compacting, we keep the last N messages and summarize everything older.
+pub const PRESERVE_RECENT_MESSAGES: usize = 50;
+
+/// Threshold for triggering compaction based on message count.
+/// When message count exceeds this, compaction is triggered.
+pub const COMPACTION_MESSAGE_THRESHOLD: usize = 100;
+
 /// Configuration for compaction behavior.
 #[derive(Debug, Clone)]
 pub struct CompactionConfig {
@@ -35,9 +43,17 @@ pub struct CompactionConfig {
     /// Controlled by config.compaction.prune
     pub prune: bool,
 
-    /// Number of recent messages (user turns) to preserve.
+    /// Number of recent messages (user turns) to preserve during pruning.
     /// Default: 2 turns before considering for prune
     pub preserve_turns: usize,
+
+    /// Message count threshold for triggering compaction.
+    /// Default: 100 messages
+    pub compaction_threshold: usize,
+
+    /// Number of recent messages to preserve during summarization.
+    /// Default: 50 messages
+    pub preserve_recent_messages: usize,
 
     /// Maximum output tokens to reserve.
     pub output_reserve: u32,
@@ -49,6 +65,8 @@ impl Default for CompactionConfig {
             auto: true,
             prune: true,
             preserve_turns: 2,
+            compaction_threshold: COMPACTION_MESSAGE_THRESHOLD,
+            preserve_recent_messages: PRESERVE_RECENT_MESSAGES,
             output_reserve: OUTPUT_TOKEN_MAX,
         }
     }
@@ -306,35 +324,37 @@ Format your response as a clear, structured summary. Do not include any preamble
 
 const COMPACTION_USER_PROMPT: &str = r#"Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."#;
 
-/// Perform full compaction: prune first, then summarize if needed.
+/// Perform full compaction: prune first, then always summarize if >100 messages.
 ///
-/// 1. Prune old tool outputs
-/// 2. If still over limit, create AI summary
-/// 3. Optionally add "Continue if you have next steps" message
+/// Strategy:
+/// 1. Prune old tool outputs (mark as [compacted])
+/// 2. If message count > compaction_threshold (default: 100), summarize older messages
+/// 3. Keep the last preserve_recent_messages (default: 50) messages
+/// 4. Optionally add "Continue if you have next steps" message
+///
+/// This ensures we always produce a summary when compacting, making the behavior
+/// predictable: >100 messages triggers summarization, keeping the last 50.
 pub async fn compact(
     messages: &mut [ProviderMessage],
     provider: &BoxedLanguageModel,
     config: &CompactionConfig,
-    tokens: &TokenUsage,
-    context_limit: u32,
+    _tokens: &TokenUsage,
+    _context_limit: u32,
     auto_continue: bool,
 ) -> CompactionResult {
-    // Phase 1: Prune tool outputs
+    // Phase 1: Prune tool outputs (always do this to reduce token count)
     let pruned_tokens = prune_tool_outputs(messages, config);
 
     if pruned_tokens > 0 {
         debug!(pruned = pruned_tokens, "Pruned tool outputs");
     }
 
-    // Check if we still need compaction after pruning
-    let adjusted_tokens = TokenUsage {
-        input: tokens.input.saturating_sub(pruned_tokens),
-        output: tokens.output,
-        cache_read: tokens.cache_read,
-        cache_write: tokens.cache_write,
-    };
+    // Phase 2: Summarize if we have more messages than the compaction threshold
+    // Trigger at 100 messages, preserve last 50
+    let needs_summarization = messages.len() > config.compaction_threshold;
 
-    if !is_overflow(&adjusted_tokens, context_limit, config.output_reserve) {
+    if !needs_summarization {
+        // Not enough messages to summarize, but we may have pruned
         if pruned_tokens > 0 {
             return CompactionResult::Compacted {
                 messages: messages.to_vec(),
@@ -345,7 +365,14 @@ pub async fn compact(
         return CompactionResult::NotNeeded;
     }
 
-    // Phase 2: AI summarization
+    info!(
+        message_count = messages.len(),
+        threshold = config.compaction_threshold,
+        preserve_recent = config.preserve_recent_messages,
+        "Summarizing older messages"
+    );
+
+    // Phase 2: AI summarization - always run when we have enough messages
     let mut result = compact_with_summary(messages, provider, config).await;
 
     // Phase 3: Add auto-continue message if requested
@@ -370,19 +397,31 @@ pub async fn compact(
 ///
 /// This creates a summary of older messages using the AI, then returns
 /// a new message list with the summary replacing the old messages.
+///
+/// Strategy: Keep the last N messages (default: 50) and summarize everything older.
+/// For example, with 120 messages and preserve_recent_messages=50:
+/// - Messages 1 (first user message) - kept as-is
+/// - Messages 2-70 (69 messages) - summarized into one AI-generated summary
+/// - Messages 71-120 (last 50) - kept as-is
+/// - Result: 1 (first) + 1 (summary) + 50 (recent) = 52 messages
 pub async fn compact_with_summary(
     messages: &[ProviderMessage],
     provider: &BoxedLanguageModel,
-    _config: &CompactionConfig,
+    config: &CompactionConfig,
 ) -> CompactionResult {
-    // Need at least a few messages to summarize
-    if messages.len() < 4 {
+    let preserve_recent = config.preserve_recent_messages;
+
+    // Need more messages than we're preserving to have something to summarize
+    // Plus we need at least the first message and something to summarize
+    if messages.len() <= preserve_recent + 1 {
         return CompactionResult::InsufficientMessages;
     }
 
-    // Find the split point: keep first message, summarize middle, keep recent
-    // "Recent" = last 2 user-assistant exchanges (4 messages)
-    let preserve_recent = 4.min(messages.len() - 1);
+    // Find the split point: keep first message, summarize middle, keep recent N messages
+    // Example with 219 messages, preserve_recent=100:
+    //   - first_message = messages[0]
+    //   - messages_to_summarize = messages[1..119] (118 messages)
+    //   - recent_messages = messages[119..219] (100 messages)
     let middle_end = messages.len().saturating_sub(preserve_recent);
 
     if middle_end <= 1 {

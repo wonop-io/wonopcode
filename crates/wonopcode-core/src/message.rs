@@ -699,13 +699,33 @@ pub struct RetryPart {
     pub reason: String,
 }
 
-/// Compaction marker.
+/// Compaction marker with detailed statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionPart {
     pub id: String,
     pub session_id: String,
     pub message_id: String,
+    /// Original message ID that was compacted (for reference)
+    #[serde(default)]
     pub original_message_id: String,
+    /// Type of compaction: "automatic", "emergency", or "manual"
+    #[serde(default)]
+    pub compaction_type: String,
+    /// Number of messages before compaction
+    #[serde(default)]
+    pub messages_before: usize,
+    /// Number of messages after compaction
+    #[serde(default)]
+    pub messages_after: usize,
+    /// Token count before compaction
+    #[serde(default)]
+    pub tokens_before: u32,
+    /// Token count after compaction
+    #[serde(default)]
+    pub tokens_after: u32,
+    /// Optional summary of compacted content
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 #[cfg(test)]
