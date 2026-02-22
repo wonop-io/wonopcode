@@ -1495,6 +1495,12 @@ impl Runner {
                         "Auto-compaction failed: {}, continuing without compaction",
                         err
                     );
+                    // Send CompactionNotNeeded to reset the UI state
+                    // (this will unblock input and clear the in-progress indicator)
+                    send_update(
+                        update_tx,
+                        AppUpdate::CompactionNotNeeded,
+                    );
                     // Send warning to user
                     send_update(
                         update_tx,
@@ -1886,6 +1892,12 @@ impl Runner {
                         }
                         CompactionResult::Failed(err) => {
                             error!(error = %err, "Emergency compaction failed");
+                            // Send CompactionNotNeeded to reset the UI state
+                            // (this will unblock input and clear the in-progress indicator)
+                            send_update(
+                                update_tx,
+                                AppUpdate::CompactionNotNeeded,
+                            );
                             send_update(
                                 update_tx,
                                 AppUpdate::Status(format!("Emergency compaction failed: {}", err)),
@@ -2929,7 +2941,11 @@ impl Runner {
                 AppAction::EmulateHistory { message_pairs } => {
                     info!(
                         message_pairs = message_pairs,
-                        "EMULATE_HISTORY: Injecting test messages"
+                        "EMULATE_HISTORY: Received EmulateHistory action - starting injection"
+                    );
+                    warn!(
+                        "EMULATE_HISTORY_DEBUG: Starting test message injection with {} pairs",
+                        message_pairs
                     );
                     
                     // Generate test messages and inject them into history
@@ -2967,13 +2983,19 @@ impl Runner {
                         "EMULATE_HISTORY: Injected test messages into runner history"
                     );
                     
+                    let status_msg = format!(
+                        "Emulated {} message pairs. Runner now has {} messages. Run /compact to test compaction.",
+                        message_pairs, final_count
+                    );
+                    warn!(
+                        "EMULATE_HISTORY_DEBUG: Sending status update: {}",
+                        status_msg
+                    );
                     send_update(
                         &update_tx,
-                        AppUpdate::Status(format!(
-                            "Emulated {} message pairs. Runner now has {} messages. Run /compact to test compaction.",
-                            message_pairs, final_count
-                        )),
+                        AppUpdate::Status(status_msg),
                     );
+                    warn!("EMULATE_HISTORY_DEBUG: Status update sent successfully");
                 }
                 AppAction::RenameSession { title } => {
                     debug!(title = %title, "Rename session requested");
