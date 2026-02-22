@@ -148,6 +148,32 @@ pub struct WorkstreamStateSnapshot {
     /// Whether "allow all" mode is enabled.
     #[serde(default)]
     pub allow_all: bool,
+
+    /// Whether context compaction is currently in progress.
+    #[serde(default)]
+    pub is_compacting: bool,
+
+    /// Current compaction progress details (if compacting).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compaction_progress: Option<CompactionProgressSnapshot>,
+}
+
+/// Snapshot of current compaction progress.
+///
+/// This allows the client to restore the compaction-in-progress message
+/// with accurate details when switching workstreams.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionProgressSnapshot {
+    /// Type of compaction: "automatic", "emergency", or "manual".
+    pub compaction_type: String,
+    /// Number of messages being compacted.
+    pub messages_before: usize,
+    /// Current chunk being processed (1-indexed).
+    pub current_chunk: usize,
+    /// Total number of chunks.
+    pub total_chunks: usize,
+    /// Current phase: "summarizing" or "combining".
+    pub phase: String,
 }
 
 /// A message in conversation history.
@@ -214,6 +240,8 @@ impl Default for WorkstreamStateSnapshot {
             artifacts: Vec::new(),
             ace_phase: None,
             allow_all: false,
+            is_compacting: false,
+            compaction_progress: None,
         }
     }
 }

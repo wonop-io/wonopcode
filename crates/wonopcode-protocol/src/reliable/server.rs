@@ -487,6 +487,10 @@ pub struct WorkstreamInfo {
     /// Whether the agent is currently busy.
     #[serde(default)]
     pub agent_busy: bool,
+
+    /// Whether this workstream is currently compacting its conversation history.
+    #[serde(default)]
+    pub is_compacting: bool,
 }
 
 /// Workstream status.
