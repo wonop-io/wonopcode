@@ -867,6 +867,15 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             summary: summary.clone(),
         },
         wonopcode_tui::AppUpdate::CompactionNotNeeded => ServerPayload::CompactionNotNeeded,
+        wonopcode_tui::AppUpdate::CompactionProgress {
+            current_chunk,
+            total_chunks,
+            phase,
+        } => ServerPayload::CompactionProgress {
+            current_chunk: *current_chunk,
+            total_chunks: *total_chunks,
+            phase: phase.clone(),
+        },
     }
 }
 
@@ -1170,6 +1179,15 @@ pub fn legacy_update_to_server_payload(update: &wonopcode_protocol::Update) -> S
             summary: summary.clone(),
         },
         wonopcode_protocol::Update::CompactionNotNeeded => ServerPayload::CompactionNotNeeded,
+        wonopcode_protocol::Update::CompactionProgress {
+            current_chunk,
+            total_chunks,
+            phase,
+        } => ServerPayload::CompactionProgress {
+            current_chunk: *current_chunk,
+            total_chunks: *total_chunks,
+            phase: phase.clone(),
+        },
     }
 }
 

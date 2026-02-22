@@ -43,7 +43,7 @@ use wonopcode_tui::{
 use wonopcode_util::FileTimeState;
 
 use crate::compaction;
-use crate::compaction::{CompactionConfig, CompactionResult};
+use crate::compaction::{CompactionConfig, CompactionProgress, CompactionResult, ProgressCallback};
 
 /// Adapter that implements `PermissionChecker` for `PermissionManager`.
 ///
@@ -119,6 +119,19 @@ fn send_update(update_tx: &mpsc::UnboundedSender<AppUpdate>, update: AppUpdate) 
     if let Err(e) = update_tx.send(update) {
         warn!("Failed to send update to TUI (channel closed): {}", e);
     }
+}
+
+/// Create a progress callback that sends CompactionProgress events to the TUI.
+fn create_progress_callback(update_tx: mpsc::UnboundedSender<AppUpdate>) -> ProgressCallback {
+    Arc::new(move |progress: CompactionProgress| {
+        if let Err(e) = update_tx.send(AppUpdate::CompactionProgress {
+            current_chunk: progress.current_chunk,
+            total_chunks: progress.total_chunks,
+            phase: progress.phase,
+        }) {
+            warn!("Failed to send compaction progress update: {}", e);
+        }
+    })
 }
 
 /// Convert PhasedTodos to TUI update format.
@@ -1316,6 +1329,7 @@ impl Runner {
             );
 
             let provider = self.provider.read().await;
+            let progress_callback = create_progress_callback(update_tx.clone());
             match compaction::compact(
                 &mut messages,
                 &provider,
@@ -1323,6 +1337,7 @@ impl Runner {
                 &estimated_tokens,
                 context_limit,
                 false,
+                Some(progress_callback),
             )
             .await
             {
@@ -1795,6 +1810,7 @@ impl Runner {
                     // Perform emergency compaction
                     let provider = self.provider.read().await;
                     let estimated_tokens = compaction::estimate_token_usage(ctx.messages);
+                    let progress_callback = create_progress_callback(update_tx.clone());
 
                     match compaction::compact(
                         ctx.messages,
@@ -1803,6 +1819,7 @@ impl Runner {
                         &estimated_tokens,
                         context_limit,
                         true, // force compaction
+                        Some(progress_callback),
                     )
                     .await
                     {
@@ -2832,6 +2849,7 @@ impl Runner {
 
                     // Perform full compaction: prune first, then summarize if still needed
                     let provider = self.provider.read().await;
+                    let progress_callback = create_progress_callback(update_tx.clone());
                     match compaction::compact(
                         &mut messages,
                         &provider,
@@ -2839,6 +2857,7 @@ impl Runner {
                         &estimated_tokens,
                         context_limit,
                         false, // Don't add auto-continue for manual compaction
+                        Some(progress_callback),
                     )
                     .await
                     {

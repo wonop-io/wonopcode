@@ -150,6 +150,16 @@ pub enum Update {
 
     /// Context compaction was not needed (message count below threshold).
     CompactionNotNeeded,
+
+    /// Context compaction progress update (for chunked summarization).
+    CompactionProgress {
+        /// Current chunk being processed (1-indexed)
+        current_chunk: usize,
+        /// Total number of chunks
+        total_chunks: usize,
+        /// Phase: "summarizing" or "combining"
+        phase: String,
+    },
 }
 
 /// Session info for session list updates.
@@ -237,6 +247,7 @@ impl Update {
             Update::CompactionStarted { .. } => "compaction_started",
             Update::CompactionPerformed { .. } => "compaction_performed",
             Update::CompactionNotNeeded => "compaction_not_needed",
+            Update::CompactionProgress { .. } => "compaction_progress",
         }
     }
 }

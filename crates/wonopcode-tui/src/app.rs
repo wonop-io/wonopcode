@@ -479,6 +479,15 @@ pub enum AppUpdate {
     },
     /// Compaction was not needed (message count below threshold).
     CompactionNotNeeded,
+    /// Compaction progress update (for chunked summarization).
+    CompactionProgress {
+        /// Current chunk being processed (1-indexed).
+        current_chunk: usize,
+        /// Total number of chunks.
+        total_chunks: usize,
+        /// Phase: "summarizing" or "combining".
+        phase: String,
+    },
 }
 
 /// Git status update from the runner.
@@ -3762,6 +3771,19 @@ async function fetchUserData(userId) {
                 self.toasts.push(toast);
                 
                 tracing::info!("COMPACTION_DEBUG: TUI App received CompactionNotNeeded");
+            }
+            AppUpdate::CompactionProgress {
+                current_chunk,
+                total_chunks,
+                phase,
+            } => {
+                // Log the progress (TUI doesn't have a visible progress indicator yet)
+                tracing::info!(
+                    current_chunk = current_chunk,
+                    total_chunks = total_chunks,
+                    phase = %phase,
+                    "COMPACTION_DEBUG: TUI App received CompactionProgress"
+                );
             }
         }
     }

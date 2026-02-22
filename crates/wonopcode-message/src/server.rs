@@ -296,6 +296,16 @@ pub enum ServerPayload {
 
     /// Context compaction was not needed (message count below threshold).
     CompactionNotNeeded,
+
+    /// Context compaction progress update (for chunked summarization).
+    CompactionProgress {
+        /// Current chunk being processed (1-indexed)
+        current_chunk: usize,
+        /// Total number of chunks
+        total_chunks: usize,
+        /// Phase: "summarizing" or "combining"
+        phase: String,
+    },
 }
 
 /// Simplified model info for transmission
@@ -392,6 +402,7 @@ impl ServerPayload {
             ServerPayload::CompactionStarted { .. } => "compaction_started",
             ServerPayload::CompactionPerformed { .. } => "compaction_performed",
             ServerPayload::CompactionNotNeeded => "compaction_not_needed",
+            ServerPayload::CompactionProgress { .. } => "compaction_progress",
         }
     }
 }

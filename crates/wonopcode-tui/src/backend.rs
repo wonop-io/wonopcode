@@ -969,6 +969,21 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
             tracing::info!("COMPACTION_DEBUG: TUI backend converting CompactionNotNeeded");
             AppUpdate::CompactionNotNeeded
         }
+        Update::CompactionProgress {
+            current_chunk,
+            total_chunks,
+            phase,
+        } => {
+            tracing::info!(
+                "COMPACTION_DEBUG: TUI backend converting CompactionProgress: chunk {}/{} ({})",
+                current_chunk, total_chunks, phase
+            );
+            AppUpdate::CompactionProgress {
+                current_chunk,
+                total_chunks,
+                phase,
+            }
+        }
     }
 }
 
@@ -1557,6 +1572,7 @@ fn server_payload_to_app_updates(payload: ServerPayload) -> Vec<AppUpdate> {
         | ServerPayload::AllowAllChanged { .. }
         | ServerPayload::CompactionPerformed { .. }
         | ServerPayload::CompactionStarted { .. }
-        | ServerPayload::CompactionNotNeeded => vec![],
+        | ServerPayload::CompactionNotNeeded
+        | ServerPayload::CompactionProgress { .. } => vec![],
     }
 }

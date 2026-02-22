@@ -6,11 +6,26 @@
 //!
 
 use futures::StreamExt;
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 use wonopcode_util::truncate_to_char_boundary;
 use wonopcode_provider::{
     BoxedLanguageModel, ContentPart, GenerateOptions, Message as ProviderMessage, Role, StreamChunk,
 };
+
+/// Progress update for chunked summarization.
+#[derive(Debug, Clone)]
+pub struct CompactionProgress {
+    /// Current chunk being processed (1-indexed).
+    pub current_chunk: usize,
+    /// Total number of chunks.
+    pub total_chunks: usize,
+    /// Phase: "summarizing" or "combining".
+    pub phase: String,
+}
+
+/// Callback type for receiving compaction progress updates.
+pub type ProgressCallback = Arc<dyn Fn(CompactionProgress) + Send + Sync>;
 
 /// Minimum tokens of tool outputs to prune (20K tokens).
 pub const PRUNE_MINIMUM: u32 = 20_000;
@@ -377,6 +392,9 @@ const COMPACTION_USER_PROMPT: &str = r#"Provide a detailed prompt for continuing
 /// predictable. Summarization is triggered when either:
 /// - Message count exceeds threshold (100+)
 /// - Token count exceeds target (50K+) after pruning
+///
+/// The `progress_callback` parameter is optional and allows receiving progress
+/// updates during chunked summarization (for large conversations).
 pub async fn compact(
     messages: &mut [ProviderMessage],
     provider: &BoxedLanguageModel,
@@ -384,6 +402,7 @@ pub async fn compact(
     _tokens: &TokenUsage,
     _context_limit: u32,
     auto_continue: bool,
+    progress_callback: Option<ProgressCallback>,
 ) -> CompactionResult {
     // Phase 1: Prune tool outputs (always do this to reduce token count)
     let pruned_tokens = prune_tool_outputs(messages, config);
@@ -430,7 +449,7 @@ pub async fn compact(
     );
 
     // Phase 2: AI summarization - always run when we have enough messages
-    let mut result = compact_with_summary(messages, provider, config).await;
+    let mut result = compact_with_summary(messages, provider, config, progress_callback).await;
 
     // Phase 3: Add auto-continue message if requested
     if auto_continue {
@@ -473,6 +492,7 @@ pub async fn compact_with_summary(
     messages: &[ProviderMessage],
     provider: &BoxedLanguageModel,
     config: &CompactionConfig,
+    progress_callback: Option<ProgressCallback>,
 ) -> CompactionResult {
     // Need at least 4 messages to summarize meaningfully:
     // 1 first + at least 2 to summarize + 1 recent
@@ -523,7 +543,7 @@ pub async fn compact_with_summary(
             messages_to_summarize.len()
         );
         
-        match generate_chunked_summary(provider, messages_to_summarize, config).await {
+        match generate_chunked_summary(provider, messages_to_summarize, config, progress_callback).await {
             Ok(s) => s,
             Err(e) => {
                 warn!("COMPACTION: Chunked summarization failed: {}", e);
@@ -910,6 +930,7 @@ async fn generate_chunked_summary(
     provider: &BoxedLanguageModel,
     messages: &[ProviderMessage],
     config: &CompactionConfig,
+    progress_callback: Option<ProgressCallback>,
 ) -> Result<String, String> {
     info!(
         "CHUNKED_SUMMARIZATION: Starting chunked summarization for {} messages",
@@ -926,6 +947,14 @@ async fn generate_chunked_summary(
     if chunks.len() == 1 {
         // Only one chunk, try direct summarization
         info!("CHUNKED_SUMMARIZATION: Only one chunk, using direct summarization");
+        // Emit progress for single chunk
+        if let Some(ref cb) = progress_callback {
+            cb(CompactionProgress {
+                current_chunk: 1,
+                total_chunks: 1,
+                phase: "summarizing".to_string(),
+            });
+        }
         return summarize_chunk(provider, &chunks[0], 1, 1).await;
     }
     
@@ -934,6 +963,15 @@ async fn generate_chunked_summary(
     let total_chunks = chunks.len();
     
     for (i, chunk) in chunks.iter().enumerate() {
+        // Emit progress update
+        if let Some(ref cb) = progress_callback {
+            cb(CompactionProgress {
+                current_chunk: i + 1,
+                total_chunks,
+                phase: "summarizing".to_string(),
+            });
+        }
+        
         match summarize_chunk(provider, chunk, i + 1, total_chunks).await {
             Ok(summary) => {
                 if summary.is_empty() {
@@ -959,6 +997,15 @@ async fn generate_chunked_summary(
     }
     
     // Step 3: Combine chunk summaries
+    // Emit progress for combining phase
+    if let Some(ref cb) = progress_callback {
+        cb(CompactionProgress {
+            current_chunk: total_chunks,
+            total_chunks,
+            phase: "combining".to_string(),
+        });
+    }
+    
     combine_chunk_summaries(provider, chunk_summaries, config, 0).await
 }
 

@@ -238,6 +238,16 @@ pub enum WorkstreamEventData {
 
     /// Context compaction was not needed (message count below threshold).
     CompactionNotNeeded,
+
+    /// Context compaction progress update (for chunked summarization).
+    CompactionProgress {
+        /// Current chunk being processed (1-indexed).
+        current_chunk: usize,
+        /// Total number of chunks.
+        total_chunks: usize,
+        /// Phase: "summarizing" or "combining".
+        phase: String,
+    },
 }
 
 /// A part of a message (for rich reconstruction).
