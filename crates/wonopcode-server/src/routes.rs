@@ -1723,29 +1723,16 @@ pub struct ProviderInfo {
 }
 
 async fn list_providers() -> impl IntoResponse {
-    // Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
-    let providers = vec![
-        ProviderInfo {
-            id: "anthropic".to_string(),
-            name: "Anthropic API".to_string(),
-            env: vec!["ANTHROPIC_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "anthropic-cli".to_string(),
-            name: "Claude CLI (Subscription)".to_string(),
-            env: vec![],
-        },
-        ProviderInfo {
-            id: "openai".to_string(),
-            name: "OpenAI API".to_string(),
-            env: vec!["OPENAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "openai-codex".to_string(),
-            name: "OpenAI Codex".to_string(),
-            env: vec!["OPENAI_API_KEY".to_string()],
-        },
-    ];
+    // Use centralized provider registry
+    let providers: Vec<ProviderInfo> = wonopcode_provider::registry::PROVIDERS
+        .iter()
+        .filter(|p| p.id != "test") // Exclude test provider from UI
+        .map(|p| ProviderInfo {
+            id: p.id.to_string(),
+            name: p.name.to_string(),
+            env: p.env_vars.iter().map(|s| s.to_string()).collect(),
+        })
+        .collect();
 
     Json(providers)
 }
@@ -2597,30 +2584,17 @@ pub fn is_path_within_base(path: &std::path::Path, base: &std::path::Path) -> bo
 }
 
 /// Get the list of supported providers with their configurations.
-/// Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
+/// Uses the centralized provider registry.
 pub fn get_providers() -> Vec<ProviderInfo> {
-    vec![
-        ProviderInfo {
-            id: "anthropic".to_string(),
-            name: "Anthropic API".to_string(),
-            env: vec!["ANTHROPIC_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "anthropic-cli".to_string(),
-            name: "Claude CLI (Subscription)".to_string(),
-            env: vec![],
-        },
-        ProviderInfo {
-            id: "openai".to_string(),
-            name: "OpenAI API".to_string(),
-            env: vec!["OPENAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "openai-codex".to_string(),
-            name: "OpenAI Codex".to_string(),
-            env: vec!["OPENAI_API_KEY".to_string()],
-        },
-    ]
+    wonopcode_provider::registry::PROVIDERS
+        .iter()
+        .filter(|p| p.id != "test") // Exclude test provider
+        .map(|p| ProviderInfo {
+            id: p.id.to_string(),
+            name: p.name.to_string(),
+            env: p.env_vars.iter().map(|s| s.to_string()).collect(),
+        })
+        .collect()
 }
 
 /// Get default model ID.

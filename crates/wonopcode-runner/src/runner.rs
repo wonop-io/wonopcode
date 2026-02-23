@@ -4127,97 +4127,15 @@ fn create_provider(
 }
 
 /// Get model info for a model ID.
+/// Uses the centralized registry for all model lookups.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    // Check built-in models
-    match model_id {
-        // Anthropic - Latest (Claude 4.6)
-        "claude-opus-4-6" => wonopcode_provider::model::anthropic::claude_opus_4_6(),
-        "claude-sonnet-4-6" => wonopcode_provider::model::anthropic::claude_sonnet_4_6(),
-        // Anthropic - Current (Claude 4.5)
-        "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5" => {
-            wonopcode_provider::model::anthropic::claude_sonnet_4_5()
-        }
-        "claude-haiku-4-5-20251001" | "claude-haiku-4-5" => {
-            wonopcode_provider::model::anthropic::claude_haiku_4_5()
-        }
-        "claude-opus-4-5-20251101" | "claude-opus-4-5" => {
-            wonopcode_provider::model::anthropic::claude_opus_4_5()
-        }
-        // Anthropic - Legacy (Claude 4.x)
-        "claude-sonnet-4-20250514" | "claude-sonnet-4-0" | "claude-sonnet-4" => {
-            wonopcode_provider::model::anthropic::claude_sonnet_4()
-        }
-        "claude-opus-4-1-20250805" | "claude-opus-4-1" => {
-            wonopcode_provider::model::anthropic::claude_opus_4_1()
-        }
-        "claude-opus-4-20250514" | "claude-opus-4-0" | "claude-opus-4" => {
-            wonopcode_provider::model::anthropic::claude_opus_4()
-        }
-        // Anthropic - Legacy (Claude 3.x)
-        "claude-3-7-sonnet-20250219" | "claude-3-7-sonnet" | "claude-3-7-sonnet-latest" => {
-            wonopcode_provider::model::anthropic::claude_sonnet_3_7()
-        }
-        "claude-3-haiku-20240307" | "claude-3-haiku" => {
-            wonopcode_provider::model::anthropic::claude_haiku_3()
-        }
-        // OpenAI - GPT-5 Series
-        "gpt-5.2" => wonopcode_provider::model::openai::gpt_5_2(),
-        "gpt-5.1" => wonopcode_provider::model::openai::gpt_5_1(),
-        "gpt-5" => wonopcode_provider::model::openai::gpt_5(),
-        "gpt-5-mini" => wonopcode_provider::model::openai::gpt_5_mini(),
-        "gpt-5-nano" => wonopcode_provider::model::openai::gpt_5_nano(),
-        // OpenAI - GPT-4.1 Series
-        "gpt-4.1" => wonopcode_provider::model::openai::gpt_4_1(),
-        "gpt-4.1-mini" => wonopcode_provider::model::openai::gpt_4_1_mini(),
-        "gpt-4.1-nano" => wonopcode_provider::model::openai::gpt_4_1_nano(),
-        // OpenAI - O-Series
-        "o3" if provider != "openai-codex" => wonopcode_provider::model::openai::o3(),
-        "o3-mini" => wonopcode_provider::model::openai::o3_mini(),
-        "o4-mini" if provider != "openai-codex" => wonopcode_provider::model::openai::o4_mini(),
-        // OpenAI - Legacy
-        "gpt-4o" => wonopcode_provider::model::openai::gpt_4o(),
-        "gpt-4o-mini" => wonopcode_provider::model::openai::gpt_4o_mini(),
-        "o1" => wonopcode_provider::model::openai::o1(),
-        // OpenAI Codex (Responses API)
-        "codex" => wonopcode_provider::codex::models::codex(),
-        "o3" if provider == "openai-codex" => wonopcode_provider::codex::models::o3(),
-        "o4-mini" if provider == "openai-codex" => wonopcode_provider::codex::models::o4_mini(),
-        // Test provider
-        "test-128b" => wonopcode_provider::test::TestProvider::test_128b(),
-        _ => ModelInfo::new(model_id, provider).with_name(model_id),
-    }
+    wonopcode_provider::registry::get_model_info(model_id, provider)
 }
 
 /// Infer the provider from a model name.
+/// Uses the centralized registry for provider inference.
 fn infer_provider_from_model(model: &str) -> Option<&'static str> {
-    let model_lower = model.to_lowercase();
-
-    // OpenAI Codex models (must check before generic OpenAI)
-    if model_lower == "codex" {
-        return Some("openai-codex");
-    }
-
-    // OpenAI models
-    if model_lower.starts_with("gpt-")
-        || model_lower.starts_with("o1")
-        || model_lower.starts_with("o3")
-        || model_lower.starts_with("o4")
-        || model_lower.starts_with("chatgpt")
-    {
-        return Some("openai");
-    }
-
-    // Anthropic models
-    if model_lower.starts_with("claude") {
-        return Some("anthropic");
-    }
-
-    // Test provider
-    if model_lower.starts_with("test-") {
-        return Some("test");
-    }
-
-    None
+    Some(wonopcode_provider::registry::infer_provider(model))
 }
 
 /// Build system prompt with environment context.

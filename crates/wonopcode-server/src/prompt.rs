@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 use wonopcode_core::bus::Event;
 use wonopcode_core::Agent;
 use wonopcode_provider::{
-    model::{ModelCapabilities, ModelCost, ModelInfo, ModelLimit},
+    model::ModelInfo,
     stream::StreamChunk,
     BoxedLanguageModel, GenerateOptions, Message as ProviderMessage, ToolDefinition,
 };
@@ -559,99 +559,15 @@ pub fn create_provider_from_config(
 }
 
 /// Build model info from model ID and provider name.
+/// Uses the centralized registry for all model lookups.
 fn build_model_info(model_id: &str, provider_name: &str) -> ModelInfo {
-    // Check for known built-in models first
-    match model_id {
-        // Anthropic - Latest (Claude 4.6)
-        "claude-opus-4-6" => return wonopcode_provider::model::anthropic::claude_opus_4_6(),
-        "claude-sonnet-4-6" => return wonopcode_provider::model::anthropic::claude_sonnet_4_6(),
-        // Anthropic - Current (Claude 4.5)
-        "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5" => {
-            return wonopcode_provider::model::anthropic::claude_sonnet_4_5()
-        }
-        "claude-haiku-4-5-20251001" | "claude-haiku-4-5" => {
-            return wonopcode_provider::model::anthropic::claude_haiku_4_5()
-        }
-        "claude-opus-4-5-20251101" | "claude-opus-4-5" => {
-            return wonopcode_provider::model::anthropic::claude_opus_4_5()
-        }
-        // Anthropic - Legacy (Claude 4.x)
-        "claude-sonnet-4-20250514" | "claude-sonnet-4-0" | "claude-sonnet-4" => {
-            return wonopcode_provider::model::anthropic::claude_sonnet_4()
-        }
-        "claude-opus-4-1-20250805" | "claude-opus-4-1" => {
-            return wonopcode_provider::model::anthropic::claude_opus_4_1()
-        }
-        "claude-opus-4-20250514" | "claude-opus-4-0" | "claude-opus-4" => {
-            return wonopcode_provider::model::anthropic::claude_opus_4()
-        }
-        // Anthropic - Legacy (Claude 3.x)
-        "claude-3-7-sonnet-20250219" | "claude-3-7-sonnet" | "claude-3-7-sonnet-latest" => {
-            return wonopcode_provider::model::anthropic::claude_sonnet_3_7()
-        }
-        "claude-3-haiku-20240307" | "claude-3-haiku" => {
-            return wonopcode_provider::model::anthropic::claude_haiku_3()
-        }
-        // OpenAI - GPT-5 Series
-        "gpt-5.2" => return wonopcode_provider::model::openai::gpt_5_2(),
-        "gpt-5.1" => return wonopcode_provider::model::openai::gpt_5_1(),
-        "gpt-5" => return wonopcode_provider::model::openai::gpt_5(),
-        "gpt-5-mini" => return wonopcode_provider::model::openai::gpt_5_mini(),
-        "gpt-5-nano" => return wonopcode_provider::model::openai::gpt_5_nano(),
-        // OpenAI - GPT-4.1 Series
-        "gpt-4.1" => return wonopcode_provider::model::openai::gpt_4_1(),
-        "gpt-4.1-mini" => return wonopcode_provider::model::openai::gpt_4_1_mini(),
-        "gpt-4.1-nano" => return wonopcode_provider::model::openai::gpt_4_1_nano(),
-        // OpenAI - O-Series
-        "o3" => return wonopcode_provider::model::openai::o3(),
-        "o3-mini" => return wonopcode_provider::model::openai::o3_mini(),
-        "o4-mini" => return wonopcode_provider::model::openai::o4_mini(),
-        // OpenAI - Legacy
-        "gpt-4o" => return wonopcode_provider::model::openai::gpt_4o(),
-        "gpt-4o-mini" => return wonopcode_provider::model::openai::gpt_4o_mini(),
-        "o1" => return wonopcode_provider::model::openai::o1(),
-        // OpenAI Codex (Responses API)
-        "codex" => return wonopcode_provider::codex::models::codex(),
-        _ => {}
-    }
-
-    // Build a reasonable default for unknown models
-    let (context, output) = match provider_name {
-        "anthropic" => (200_000, 8_192),
-        "openai" | "openai-codex" => (128_000, 16_384),
-        _ => (32_000, 4_096),
-    };
-
-    ModelInfo {
-        id: model_id.to_string(),
-        provider_id: provider_name.to_string(),
-        name: model_id.to_string(),
-        family: None,
-        capabilities: ModelCapabilities::default(),
-        cost: ModelCost::default(),
-        limit: ModelLimit { context, output },
-        status: wonopcode_provider::model::ModelStatus::Active,
-    }
+    wonopcode_provider::registry::get_model_info(model_id, provider_name)
 }
 
 /// Infer provider from model name.
+/// Uses the centralized registry for provider inference.
 pub fn infer_provider(model_id: &str) -> &'static str {
-    // OpenAI Codex models
-    if model_id == "codex" {
-        return "openai-codex";
-    }
-    // Anthropic models
-    if model_id.starts_with("claude") {
-        "anthropic"
-    } else if model_id.starts_with("gpt")
-        || model_id.starts_with("o1")
-        || model_id.starts_with("o3")
-        || model_id.starts_with("o4")
-    {
-        "openai"
-    } else {
-        "anthropic" // Default
-    }
+    wonopcode_provider::registry::infer_provider(model_id)
 }
 
 #[cfg(test)]

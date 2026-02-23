@@ -4,10 +4,28 @@
 //! - Anthropic (Claude) - API and subscription access
 //! - OpenAI - API access
 //! - OpenAI Codex (Responses API) - API and subscription access
+//!
+//! ## Provider Registry
+//!
+//! The [`registry`] module provides a centralized source of truth for all supported
+//! providers and models. Use it instead of hardcoding provider/model information.
+//!
+//! ```rust
+//! use wonopcode_provider::registry::{get_provider, get_model_info, PROVIDERS};
+//!
+//! // Get all providers
+//! for provider in PROVIDERS.iter() {
+//!     println!("{}: {}", provider.id, provider.name);
+//! }
+//!
+//! // Get model info
+//! let model = get_model_info("claude-sonnet-4-5", "anthropic");
+//! ```
 
 pub mod error;
 pub mod message;
 pub mod model;
+pub mod registry;
 pub mod stream;
 
 // Core providers (always enabled)
