@@ -1,49 +1,25 @@
 //! AI provider abstraction for wonopcode.
 //!
 //! This crate provides a unified interface for interacting with different AI providers:
-//! - Anthropic (Claude)
-//! - OpenAI
-//! - Google (Gemini)
-//! - Google Vertex AI
-//! - OpenRouter
-//! - Amazon Bedrock
-//! - Azure OpenAI
-//! - GitHub Copilot
-//! - xAI (Grok)
-//! - Mistral
-//! - Groq
-//! - CompoundCoder
-//! - DeepInfra
-//! - Together AI
-//! - OpenAI-compatible custom providers
+//! - Anthropic (Claude) - API and subscription access
+//! - OpenAI - API access
+//! - OpenAI Codex (Responses API) - API and subscription access
 
 pub mod error;
 pub mod message;
 pub mod model;
 pub mod stream;
 
+// Core providers (always enabled)
 pub mod anthropic;
-pub mod google;
+pub mod codex;
 pub mod openai;
-pub mod openai_compatible;
-pub mod openrouter;
-
-// Enterprise/Cloud providers
-pub mod azure;
-pub mod bedrock;
-pub mod copilot;
-pub mod vertex;
-
-// Additional providers (OpenAI-compatible)
-pub mod compoundcoder;
-pub mod deepinfra;
-pub mod groq;
-pub mod mistral;
-pub mod together;
-pub mod xai;
 
 // CLI-based providers (subscription access)
 pub mod claude_cli;
+
+// OpenAI-compatible base (required by openai and codex)
+pub mod openai_compatible;
 
 // Dynamic model fetching
 pub mod models_dev;
@@ -52,6 +28,30 @@ pub mod models_dev;
 #[cfg(test)]
 pub mod mock;
 pub mod test;
+
+// ============================================================================
+// Disabled providers (uncomment to re-enable)
+// ============================================================================
+
+// Google (Gemini)
+// pub mod google;
+
+// Enterprise/Cloud providers
+// pub mod azure;
+// pub mod bedrock;
+// pub mod copilot;
+// pub mod vertex;
+
+// OpenRouter
+// pub mod openrouter;
+
+// Additional providers (OpenAI-compatible)
+// pub mod compoundcoder;
+// pub mod deepinfra;
+// pub mod groq;
+// pub mod mistral;
+// pub mod together;
+// pub mod xai;
 
 pub use error::{ProviderError, ProviderResult};
 pub use message::{ContentPart, Message, Role};

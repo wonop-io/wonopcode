@@ -291,6 +291,8 @@ mod tests {
             artifacts: vec![],
             ace_phase: Some("implementation".to_string()),
             allow_all: false,
+            is_compacting: false,
+            compaction_progress: None,
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();

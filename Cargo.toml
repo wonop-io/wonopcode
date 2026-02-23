@@ -71,6 +71,8 @@ wonopcode-git = { path = "crates/wonopcode-git" }
 
 # External workspace crates
 wonop-memory = { path = "../../../crates/wonop-memory" }
+wonop-codex-auth = { path = "../../../crates/wonop-codex-auth" }
+wonop-codex-client = { path = "../../../crates/wonop-codex-client" }
 
 # TUI sub-crates
 wonopcode-tui-core = { path = "crates/wonopcode-tui-core" }

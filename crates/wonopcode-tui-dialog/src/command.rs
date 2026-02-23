@@ -126,57 +126,36 @@ impl ModelDialog {
     /// # Arguments
     /// * `show_test_models` - Whether to show test models (only when test_model_enabled is true in settings)
     pub fn with_options(show_test_models: bool) -> Self {
+        // Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
         let mut items = vec![
             // ══════════════════════════════════════════════════════════════
-            // Anthropic
+            // Anthropic (API & CLI)
             // ══════════════════════════════════════════════════════════════
-            // Claude 4.5 (Latest)
-            DialogItem::new("anthropic/claude-sonnet-4-5-20250929", "Claude Sonnet 4.5")
+            // Claude 4.6 (Latest)
+            DialogItem::new("anthropic/claude-sonnet-4-6-20260115", "Claude Sonnet 4.6")
                 .with_description("Recommended - smart & fast")
                 .with_category("Anthropic"),
-            DialogItem::new("anthropic/claude-haiku-4-5-20251001", "Claude Haiku 4.5")
-                .with_description("Fastest model")
+            DialogItem::new("anthropic/claude-opus-4-6-20260115", "Claude Opus 4.6")
+                .with_description("Most intelligent")
+                .with_category("Anthropic"),
+            // Claude 4.5 (Previous)
+            DialogItem::new("anthropic/claude-sonnet-4-5-20250929", "Claude Sonnet 4.5")
+                .with_description("Previous Sonnet")
                 .with_category("Anthropic"),
             DialogItem::new("anthropic/claude-opus-4-5-20251101", "Claude Opus 4.5")
-                .with_description("Most intelligent")
+                .with_description("Previous Opus")
                 .with_category("Anthropic"),
             // Claude 4.x (Legacy)
             DialogItem::new("anthropic/claude-sonnet-4-20250514", "Claude Sonnet 4")
                 .with_description("Legacy Sonnet")
                 .with_category("Anthropic"),
-            DialogItem::new("anthropic/claude-opus-4-1-20250805", "Claude Opus 4.1")
-                .with_description("Legacy Opus 4.1")
-                .with_category("Anthropic"),
             DialogItem::new("anthropic/claude-opus-4-20250514", "Claude Opus 4")
                 .with_description("Legacy Opus")
                 .with_category("Anthropic"),
-            // Claude 3.x (Legacy)
-            DialogItem::new("anthropic/claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet")
-                .with_description("Extended thinking")
-                .with_category("Anthropic"),
-            DialogItem::new("anthropic/claude-3-haiku-20240307", "Claude 3 Haiku")
-                .with_description("Fast, economical")
-                .with_category("Anthropic"),
             // ══════════════════════════════════════════════════════════════
-            // OpenAI
+            // OpenAI (API & Codex)
             // ══════════════════════════════════════════════════════════════
-            // GPT-5 Series (Latest)
-            DialogItem::new("openai/gpt-5.2", "GPT-5.2")
-                .with_description("Best for coding & agents")
-                .with_category("OpenAI"),
-            DialogItem::new("openai/gpt-5.1", "GPT-5.1")
-                .with_description("Configurable reasoning")
-                .with_category("OpenAI"),
-            DialogItem::new("openai/gpt-5", "GPT-5")
-                .with_description("Intelligent reasoning")
-                .with_category("OpenAI"),
-            DialogItem::new("openai/gpt-5-mini", "GPT-5 mini")
-                .with_description("Fast, cost-efficient")
-                .with_category("OpenAI"),
-            DialogItem::new("openai/gpt-5-nano", "GPT-5 nano")
-                .with_description("Fastest, cheapest")
-                .with_category("OpenAI"),
-            // GPT-4.1 Series
+            // GPT-4.1 Series (Latest)
             DialogItem::new("openai/gpt-4.1", "GPT-4.1")
                 .with_description("Smartest non-reasoning")
                 .with_category("OpenAI"),
@@ -190,9 +169,6 @@ impl ModelDialog {
             DialogItem::new("openai/o3", "o3")
                 .with_description("Reasoning model")
                 .with_category("OpenAI"),
-            DialogItem::new("openai/o3-mini", "o3-mini")
-                .with_description("Fast reasoning")
-                .with_category("OpenAI"),
             DialogItem::new("openai/o4-mini", "o4-mini")
                 .with_description("Cost-efficient reasoning")
                 .with_category("OpenAI"),
@@ -203,141 +179,6 @@ impl ModelDialog {
             DialogItem::new("openai/gpt-4o-mini", "GPT-4o mini")
                 .with_description("Fast, affordable")
                 .with_category("OpenAI"),
-            DialogItem::new("openai/o1", "o1")
-                .with_description("Legacy reasoning")
-                .with_category("OpenAI"),
-            // ══════════════════════════════════════════════════════════════
-            // Google
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("google/gemini-2.0-flash", "Gemini 2.0 Flash")
-                .with_description("Latest, fast, multimodal")
-                .with_category("Google"),
-            DialogItem::new("google/gemini-1.5-pro", "Gemini 1.5 Pro")
-                .with_description("2M context window")
-                .with_category("Google"),
-            DialogItem::new("google/gemini-1.5-flash", "Gemini 1.5 Flash")
-                .with_description("Fast and affordable")
-                .with_category("Google"),
-            // ══════════════════════════════════════════════════════════════
-            // xAI (Grok)
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("xai/grok-3", "Grok 3")
-                .with_description("Latest Grok model")
-                .with_category("xAI"),
-            DialogItem::new("xai/grok-3-mini", "Grok 3 Mini")
-                .with_description("Compact Grok model")
-                .with_category("xAI"),
-            DialogItem::new("xai/grok-2", "Grok 2")
-                .with_description("Previous generation")
-                .with_category("xAI"),
-            // ══════════════════════════════════════════════════════════════
-            // Mistral
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("mistral/mistral-large-latest", "Mistral Large")
-                .with_description("Flagship model")
-                .with_category("Mistral"),
-            DialogItem::new("mistral/mistral-small-latest", "Mistral Small")
-                .with_description("Fast and efficient")
-                .with_category("Mistral"),
-            DialogItem::new("mistral/codestral-latest", "Codestral")
-                .with_description("Code-specialized")
-                .with_category("Mistral"),
-            DialogItem::new("mistral/pixtral-large-latest", "Pixtral Large")
-                .with_description("Vision model")
-                .with_category("Mistral"),
-            // ══════════════════════════════════════════════════════════════
-            // Groq (Fast inference)
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("groq/llama-3.3-70b-versatile", "Llama 3.3 70B")
-                .with_description("Fast Llama inference")
-                .with_category("Groq"),
-            DialogItem::new("groq/llama-3.1-8b-instant", "Llama 3.1 8B Instant")
-                .with_description("Ultra-fast small model")
-                .with_category("Groq"),
-            DialogItem::new("groq/mixtral-8x7b-32768", "Mixtral 8x7B")
-                .with_description("MoE model")
-                .with_category("Groq"),
-            DialogItem::new("groq/gemma2-9b-it", "Gemma 2 9B")
-                .with_description("Google's Gemma")
-                .with_category("Groq"),
-            DialogItem::new("groq/deepseek-r1-distill-llama-70b", "DeepSeek R1 Distill")
-                .with_description("Reasoning model")
-                .with_category("Groq"),
-            // ══════════════════════════════════════════════════════════════
-            // DeepInfra
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("deepinfra/deepseek-ai/DeepSeek-V3", "DeepSeek V3")
-                .with_description("Latest DeepSeek")
-                .with_category("DeepInfra"),
-            DialogItem::new("deepinfra/deepseek-ai/DeepSeek-R1", "DeepSeek R1")
-                .with_description("Reasoning model")
-                .with_category("DeepInfra"),
-            DialogItem::new("deepinfra/Qwen/Qwen2.5-72B-Instruct", "Qwen 2.5 72B")
-                .with_description("Alibaba's flagship")
-                .with_category("DeepInfra"),
-            DialogItem::new(
-                "deepinfra/meta-llama/Meta-Llama-3.1-405B-Instruct",
-                "Llama 3.1 405B",
-            )
-            .with_description("Largest Llama")
-            .with_category("DeepInfra"),
-            // ══════════════════════════════════════════════════════════════
-            // Together AI
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("together/deepseek-ai/DeepSeek-V3", "DeepSeek V3")
-                .with_description("Latest DeepSeek")
-                .with_category("Together"),
-            DialogItem::new("together/deepseek-ai/DeepSeek-R1", "DeepSeek R1")
-                .with_description("Reasoning model")
-                .with_category("Together"),
-            DialogItem::new(
-                "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                "Llama 3.3 70B Turbo",
-            )
-            .with_description("Fast Llama")
-            .with_category("Together"),
-            DialogItem::new(
-                "together/Qwen/Qwen2.5-72B-Instruct-Turbo",
-                "Qwen 2.5 72B Turbo",
-            )
-            .with_description("Fast Qwen")
-            .with_category("Together"),
-            DialogItem::new(
-                "together/Qwen/Qwen2.5-Coder-32B-Instruct",
-                "Qwen 2.5 Coder 32B",
-            )
-            .with_description("Code-specialized")
-            .with_category("Together"),
-            // ══════════════════════════════════════════════════════════════
-            // CompoundCoder
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new("compoundcoder/wonop/gpt", "Wonop GPT")
-                .with_description("Wonop GPT via CompoundCoder API")
-                .with_category("CompoundCoder"),
-            DialogItem::new("compoundcoder/wonop/qwen", "Wonop Qwen")
-                .with_description("Wonop Qwen via CompoundCoder API")
-                .with_category("CompoundCoder"),
-            DialogItem::new("compoundcoder/wonop/devstral2", "Wonop Devstral2")
-                .with_description("Wonop Devstral2 via CompoundCoder API")
-                .with_category("CompoundCoder"),
-            // ══════════════════════════════════════════════════════════════
-            // OpenRouter (Multi-provider gateway)
-            // ══════════════════════════════════════════════════════════════
-            DialogItem::new(
-                "openrouter/anthropic/claude-3.5-sonnet",
-                "Claude 3.5 Sonnet",
-            )
-            .with_description("Via OpenRouter")
-            .with_category("OpenRouter"),
-            DialogItem::new(
-                "openrouter/meta-llama/llama-3.1-405b-instruct",
-                "Llama 3.1 405B",
-            )
-            .with_description("Largest Llama")
-            .with_category("OpenRouter"),
-            DialogItem::new("openrouter/google/gemini-pro-1.5", "Gemini Pro 1.5")
-                .with_description("Google via OR")
-                .with_category("OpenRouter"),
         ];
 
         // Add test models if enabled

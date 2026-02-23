@@ -272,10 +272,6 @@ pub struct AuthSettingsChanges {
     pub anthropic_key: Option<String>,
     /// OpenAI API key (only if changed).
     pub openai_key: Option<String>,
-    /// OpenRouter API key (only if changed).
-    pub openrouter_key: Option<String>,
-    /// Google API key (only if changed).
-    pub google_key: Option<String>,
 }
 
 impl AuthSettingsChanges {
@@ -309,16 +305,6 @@ impl AuthSettingsChanges {
         if let Some(key) = &self.openai_key {
             manager
                 .set_api_key("openai", key)
-                .map_err(|e| e.to_string())?;
-        }
-        if let Some(key) = &self.openrouter_key {
-            manager
-                .set_api_key("openrouter", key)
-                .map_err(|e| e.to_string())?;
-        }
-        if let Some(key) = &self.google_key {
-            manager
-                .set_api_key("google", key)
                 .map_err(|e| e.to_string())?;
         }
 
@@ -510,18 +496,6 @@ impl SettingsDialog {
                     "auth.openai_key",
                     "OpenAI API Key",
                     "API key for OpenAI (sk-...)",
-                    SettingValue::String(String::new()),
-                ),
-                SettingItem::new(
-                    "auth.openrouter_key",
-                    "OpenRouter API Key",
-                    "API key for OpenRouter (sk-or-...)",
-                    SettingValue::String(String::new()),
-                ),
-                SettingItem::new(
-                    "auth.google_key",
-                    "Google API Key",
-                    "API key for Google Gemini",
                     SettingValue::String(String::new()),
                 ),
             ],
@@ -1229,26 +1203,6 @@ impl SettingsDialog {
                                 update_item(item, SettingValue::String(masked));
                             }
                         }
-                        "auth.openrouter_key" => {
-                            if let Some(key) = creds_manager.get_api_key("openrouter") {
-                                let masked = if key.len() > 10 {
-                                    format!("{}•••••••••", &key[..7])
-                                } else {
-                                    "•••••••••".to_string()
-                                };
-                                update_item(item, SettingValue::String(masked));
-                            }
-                        }
-                        "auth.google_key" => {
-                            if let Some(key) = creds_manager.get_api_key("google") {
-                                let masked = if key.len() > 10 {
-                                    format!("{}•••••••••", &key[..7])
-                                } else {
-                                    "•••••••••".to_string()
-                                };
-                                update_item(item, SettingValue::String(masked));
-                            }
-                        }
                         _ => {}
                     }
                 }
@@ -1882,22 +1836,6 @@ impl SettingsDialog {
                         if let SettingValue::String(s) = &item.value {
                             if !s.is_empty() && !s.contains('•') {
                                 changes.openai_key = Some(s.clone());
-                                has_any_changes = true;
-                            }
-                        }
-                    }
-                    "auth.openrouter_key" => {
-                        if let SettingValue::String(s) = &item.value {
-                            if !s.is_empty() && !s.contains('•') {
-                                changes.openrouter_key = Some(s.clone());
-                                has_any_changes = true;
-                            }
-                        }
-                    }
-                    "auth.google_key" => {
-                        if let SettingValue::String(s) = &item.value {
-                            if !s.is_empty() && !s.contains('•') {
-                                changes.google_key = Some(s.clone());
                                 has_any_changes = true;
                             }
                         }

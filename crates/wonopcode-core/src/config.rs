@@ -1800,6 +1800,7 @@ impl CredentialsManager {
         let env_var = match provider {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openai" => "OPENAI_API_KEY",
+            "openai-codex" => "OPENAI_API_KEY", // Codex uses the same API key as OpenAI
             "openrouter" => "OPENROUTER_API_KEY",
             "google" => "GOOGLE_API_KEY",
             "xai" => "XAI_API_KEY",
@@ -1898,6 +1899,11 @@ pub struct AppSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_cli_path: Option<String>,
 
+    /// Custom path to the Codex CLI binary.
+    /// If set, this path will be used instead of searching PATH.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_cli_path: Option<String>,
+
     /// Default provider to use (e.g., "anthropic", "openai").
     /// If not set, uses the first available provider.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1979,6 +1985,17 @@ impl AppSettingsManager {
     /// Set the Claude CLI path.
     pub fn set_claude_cli_path(&mut self, path: Option<String>) -> CoreResult<()> {
         self.settings.claude_cli_path = path;
+        self.save()
+    }
+
+    /// Get the Codex CLI path.
+    pub fn get_codex_cli_path(&self) -> Option<&str> {
+        self.settings.codex_cli_path.as_deref()
+    }
+
+    /// Set the Codex CLI path.
+    pub fn set_codex_cli_path(&mut self, path: Option<String>) -> CoreResult<()> {
+        self.settings.codex_cli_path = path;
         self.save()
     }
 

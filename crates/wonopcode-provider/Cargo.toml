@@ -30,6 +30,10 @@ hmac = "0.12"
 hex = "0.4"
 urlencoding = "2.1"
 
+# OpenAI Codex support
+wonop-codex-auth.workspace = true
+wonop-codex-client.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

@@ -194,7 +194,87 @@ impl ModelInfo {
 pub mod anthropic {
     use super::*;
 
-    // ==================== Latest Models (Claude 4.5) ====================
+    // ==================== Latest Models (Claude 4.6) ====================
+
+    /// Claude Opus 4.6 - Most intelligent model for building agents and coding.
+    pub fn claude_opus_4_6() -> ModelInfo {
+        ModelInfo {
+            id: "claude-opus-4-6".to_string(),
+            provider_id: "anthropic".to_string(),
+            name: "Claude Opus 4.6".to_string(),
+            family: Some("claude-4.6".to_string()),
+            capabilities: ModelCapabilities {
+                temperature: true,
+                reasoning: true,
+                attachment: true,
+                tool_call: true,
+                input: ModalitySupport {
+                    text: true,
+                    image: true,
+                    audio: false,
+                    video: false,
+                    pdf: true,
+                },
+                output: ModalitySupport {
+                    text: true,
+                    ..Default::default()
+                },
+                interleaved: true,
+            },
+            cost: ModelCost {
+                input: 5.0,
+                output: 25.0,
+                cache_read: 0.5,
+                cache_write: 6.25,
+            },
+            limit: ModelLimit {
+                context: 200_000, // 1M available with beta header
+                output: 128_000,
+            },
+            status: ModelStatus::Active,
+        }
+    }
+
+    /// Claude Sonnet 4.6 - Best combination of speed and intelligence.
+    pub fn claude_sonnet_4_6() -> ModelInfo {
+        ModelInfo {
+            id: "claude-sonnet-4-6".to_string(),
+            provider_id: "anthropic".to_string(),
+            name: "Claude Sonnet 4.6".to_string(),
+            family: Some("claude-4.6".to_string()),
+            capabilities: ModelCapabilities {
+                temperature: true,
+                reasoning: true,
+                attachment: true,
+                tool_call: true,
+                input: ModalitySupport {
+                    text: true,
+                    image: true,
+                    audio: false,
+                    video: false,
+                    pdf: true,
+                },
+                output: ModalitySupport {
+                    text: true,
+                    ..Default::default()
+                },
+                interleaved: true,
+            },
+            cost: ModelCost {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.3,
+                cache_write: 3.75,
+            },
+            limit: ModelLimit {
+                context: 200_000, // 1M available with beta header
+                output: 64_000,
+            },
+            status: ModelStatus::Active,
+        }
+    }
+
+    // ==================== Current Models (Claude 4.5) ====================
 
     /// Claude Sonnet 4.5 - Smart model for complex agents and coding.
     pub fn claude_sonnet_4_5() -> ModelInfo {

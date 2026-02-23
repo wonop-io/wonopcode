@@ -386,7 +386,7 @@ impl Processor {
             let provider = self.provider.read().await;
             provider.provider_id().to_string()
         };
-        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic" {
+        let cli_session_id = if old_provider_id == "anthropic-cli" && provider_name == "anthropic-cli" {
             // Staying with Claude CLI provider - preserve session
             let provider = self.provider.read().await;
             provider.get_cli_session_id().await
@@ -605,46 +605,40 @@ fn create_provider(
 ) -> Result<BoxedLanguageModel, Box<dyn std::error::Error + Send + Sync>> {
     use wonopcode_provider::anthropic::AnthropicProvider;
     use wonopcode_provider::claude_cli::ClaudeCliProvider;
-    use wonopcode_provider::google::GoogleProvider;
+    use wonopcode_provider::codex::CodexProvider;
     use wonopcode_provider::openai::OpenAIProvider;
-    use wonopcode_provider::openrouter::OpenRouterProvider;
-    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
 
     let model_info = get_model_info(&config.model_id, &config.provider);
 
     let provider: BoxedLanguageModel = match config.provider.as_str() {
         "anthropic" => {
-            // Priority: API key > Claude CLI subscription
+            // Anthropic API provider - requires API key
             if !config.api_key.is_empty() {
                 Arc::new(AnthropicProvider::new(&config.api_key, model_info)?)
-            } else if ClaudeCliProvider::is_available() && ClaudeCliProvider::is_authenticated() {
-                Arc::new(wonopcode_provider::claude_cli::with_subscription_pricing(
-                    model_info,
-                )?)
             } else {
                 return Err(
-                    "No Anthropic API key provided and Claude CLI not authenticated.".into(),
+                    "No Anthropic API key provided. Use 'anthropic-cli' provider for subscription access.".into(),
                 );
             }
         }
+        "anthropic-cli" => {
+            // Anthropic CLI provider - requires Claude CLI to be installed and authenticated
+            if !ClaudeCliProvider::is_available() {
+                return Err(
+                    "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code".into(),
+                );
+            }
+            if !ClaudeCliProvider::is_authenticated() {
+                return Err(
+                    "Claude CLI not authenticated. Run 'claude login' to authenticate.".into(),
+                );
+            }
+            Arc::new(wonopcode_provider::claude_cli::with_subscription_pricing(
+                model_info,
+            )?)
+        }
         "openai" => Arc::new(OpenAIProvider::new(&config.api_key, model_info)?),
-        "google" | "gemini" => Arc::new(GoogleProvider::new(&config.api_key, model_info)?),
-        "openrouter" => Arc::new(OpenRouterProvider::new(&config.api_key, model_info)?),
-        "xai" => Arc::new(xai::XaiProvider::new(&config.api_key, model_info)?),
-        "mistral" => Arc::new(mistral::MistralProvider::new(&config.api_key, model_info)?),
-        "groq" => Arc::new(groq::GroqProvider::new(&config.api_key, model_info)?),
-        "deepinfra" => Arc::new(deepinfra::DeepInfraProvider::new(
-            &config.api_key,
-            model_info,
-        )?),
-        "together" => Arc::new(together::TogetherProvider::new(
-            &config.api_key,
-            model_info,
-        )?),
-        "compoundcoder" => Arc::new(compoundcoder::CompoundCoderProvider::new(
-            &config.api_key,
-            model_info,
-        )?),
+        "openai-codex" | "codex" => Arc::new(CodexProvider::new(model_info)?),
         _ => {
             return Err(format!("Unknown provider: {}", config.provider).into());
         }
@@ -655,11 +649,12 @@ fn create_provider(
 
 /// Get model info for a model ID.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
-
     // Check built-in models
     match model_id {
-        // Anthropic - Latest (Claude 4.5)
+        // Anthropic - Latest (Claude 4.6)
+        "claude-opus-4-6" => wonopcode_provider::model::anthropic::claude_opus_4_6(),
+        "claude-sonnet-4-6" => wonopcode_provider::model::anthropic::claude_sonnet_4_6(),
+        // Anthropic - Claude 4.5
         "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5" => {
             wonopcode_provider::model::anthropic::claude_sonnet_4_5()
         }
@@ -704,46 +699,8 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
         "gpt-4o" => wonopcode_provider::model::openai::gpt_4o(),
         "gpt-4o-mini" => wonopcode_provider::model::openai::gpt_4o_mini(),
         "o1" => wonopcode_provider::model::openai::o1(),
-        // Google
-        "gemini-2.0-flash" | "gemini-2.0-flash-exp" => {
-            wonopcode_provider::model::google::gemini_2_flash()
-        }
-        "gemini-1.5-pro" | "gemini-1.5-pro-latest" => {
-            wonopcode_provider::model::google::gemini_1_5_pro()
-        }
-        "gemini-1.5-flash" | "gemini-1.5-flash-latest" => {
-            wonopcode_provider::model::google::gemini_1_5_flash()
-        }
-        // xAI (Grok)
-        "grok-3" => xai::models::grok_3(),
-        "grok-3-mini" => xai::models::grok_3_mini(),
-        "grok-2" | "grok-2-1212" => xai::models::grok_2(),
-        // Mistral
-        "mistral-large" | "mistral-large-latest" => mistral::models::mistral_large(),
-        "mistral-small" | "mistral-small-latest" => mistral::models::mistral_small(),
-        "codestral" | "codestral-latest" => mistral::models::codestral(),
-        "pixtral-large" | "pixtral-large-latest" => mistral::models::pixtral_large(),
-        // Groq
-        "llama-3.3-70b-versatile" => groq::models::llama_3_3_70b(),
-        "llama-3.1-8b-instant" => groq::models::llama_3_1_8b(),
-        "mixtral-8x7b-32768" => groq::models::mixtral_8x7b(),
-        "gemma2-9b-it" => groq::models::gemma_2_9b(),
-        "deepseek-r1-distill-llama-70b" => groq::models::deepseek_r1_distill(),
-        // DeepInfra
-        "deepseek-ai/DeepSeek-V3" if provider == "deepinfra" => deepinfra::models::deepseek_v3(),
-        "deepseek-ai/DeepSeek-R1" if provider == "deepinfra" => deepinfra::models::deepseek_r1(),
-        "Qwen/Qwen2.5-72B-Instruct" => deepinfra::models::qwen_2_5_72b(),
-        "meta-llama/Meta-Llama-3.1-405B-Instruct" => deepinfra::models::llama_3_1_405b(),
-        // Together
-        "deepseek-ai/DeepSeek-V3" if provider == "together" => together::models::deepseek_v3(),
-        "deepseek-ai/DeepSeek-R1" if provider == "together" => together::models::deepseek_r1(),
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo" => together::models::llama_3_3_70b(),
-        "Qwen/Qwen2.5-72B-Instruct-Turbo" => together::models::qwen_2_5_72b(),
-        "Qwen/Qwen2.5-Coder-32B-Instruct" => together::models::qwen_2_5_coder(),
-        // CompoundCoder
-        "wonop/gpt" => compoundcoder::models::wonop_gpt(),
-        "wonop/qwen" => compoundcoder::models::wonop_qwen(),
-        "wonop/devstral2" => compoundcoder::models::wonop_devstral2(),
+        // OpenAI Codex
+        "codex" | "codex-mini" => wonopcode_provider::codex::models::codex(),
         // Fallback for unknown models
         _ => ModelInfo::new(model_id, provider).with_name(model_id),
     }
@@ -752,13 +709,16 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
 /// Load API key from environment or credentials file.
 #[allow(clippy::missing_panics_doc)]
 pub fn load_api_key(provider: &str) -> Option<String> {
+    // anthropic-cli doesn't use API key - it uses Claude CLI auth
+    if provider == "anthropic-cli" {
+        return None;
+    }
+
     // Try environment variable first
     let env_var = match provider {
         "anthropic" => "ANTHROPIC_API_KEY",
         "openai" => "OPENAI_API_KEY",
-        "google" | "gemini" => "GOOGLE_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "xai" | "grok" => "XAI_API_KEY",
+        "openai-codex" | "codex" => "OPENAI_API_KEY",
         _ => return None,
     };
 
@@ -934,20 +894,11 @@ mod tests {
     }
 
     #[test]
-    fn test_load_api_key_google_env_var_name() {
-        // Google uses GOOGLE_API_KEY
-        std::env::set_var("GOOGLE_API_KEY", "google-key");
-        let key = load_api_key("google");
-        assert_eq!(key, Some("google-key".to_string()));
-        std::env::remove_var("GOOGLE_API_KEY");
-    }
-
-    #[test]
-    fn test_load_api_key_xai_env_var_name() {
-        // xAI uses XAI_API_KEY
-        std::env::set_var("XAI_API_KEY", "xai-key");
-        let key = load_api_key("xai");
-        assert_eq!(key, Some("xai-key".to_string()));
-        std::env::remove_var("XAI_API_KEY");
+    fn test_load_api_key_codex_env_var_name() {
+        // OpenAI Codex uses OPENAI_API_KEY
+        std::env::set_var("OPENAI_API_KEY", "codex-key");
+        let key = load_api_key("openai-codex");
+        assert_eq!(key, Some("codex-key".to_string()));
+        std::env::remove_var("OPENAI_API_KEY");
     }
 }

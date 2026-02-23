@@ -612,6 +612,7 @@ mod tests {
             sandbox_state: SandboxState::Stopped,
             base_branch: Some("main".to_string()),
             agent_busy: false,
+            is_compacting: false,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("feature/login"));

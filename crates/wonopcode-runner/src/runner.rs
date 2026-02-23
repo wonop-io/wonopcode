@@ -28,9 +28,8 @@ use wonopcode_core::Instance;
 use wonopcode_core::SessionService;
 use wonopcode_mcp::{McpClient, ServerConfig as McpServerConfig};
 use wonopcode_provider::{
-    anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider, google::GoogleProvider,
-    model::ModelInfo, openai::OpenAIProvider, openrouter::OpenRouterProvider, BoxedLanguageModel,
-    Message as ProviderMessage, ToolDefinition,
+    anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider, model::ModelInfo,
+    openai::OpenAIProvider, BoxedLanguageModel, Message as ProviderMessage, ToolDefinition,
 };
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
@@ -2110,6 +2109,11 @@ impl Runner {
                 && ClaudeCliProvider::is_authenticated()
             {
                 info!("Using Claude CLI subscription for model change");
+            } else if provider_name == "openai-codex"
+                && wonopcode_provider::codex::CodexProvider::has_credentials()
+            {
+                // Codex supports both API key and ChatGPT subscription via `codex login`
+                info!("Using Codex authentication (API key or subscription) for model change");
             } else if provider_name == "test" {
                 // Test provider doesn't need an API key
                 info!("Using test provider (no API key required)");
@@ -2167,7 +2171,7 @@ impl Runner {
             )
         };
         let cli_session_id = if old_provider_id == "anthropic-cli"
-            && provider_name == "anthropic"
+            && provider_name == "anthropic-cli"
             && old_model_id == model_id
         {
             // Staying with same Claude CLI provider AND same model - preserve session
@@ -4005,132 +4009,112 @@ fn create_provider(
     _sandbox_enabled: Option<bool>,
     _allow_all: bool,
 ) -> Result<BoxedLanguageModel, Box<dyn std::error::Error + Send + Sync>> {
-    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
-
     let model_info = get_model_info(&config.model_id, &config.provider);
 
     match config.provider.as_str() {
         "anthropic" => {
-            // Priority:
-            // 1. If API key is provided, use direct API
-            // 2. If Claude CLI is available and authenticated, use subscription with custom tools
-            // 3. Return error
+            // Anthropic API provider - requires API key
             if !config.api_key.is_empty() {
-                info!("Using Anthropic API key");
+                info!("Using Anthropic API with provided key");
                 let provider = AnthropicProvider::new(&config.api_key, model_info)?;
                 Ok(Arc::new(provider))
             } else {
-                let cli_available = ClaudeCliProvider::is_available();
-                debug!(
-                    cli_available = cli_available,
-                    "Checking Claude CLI availability"
+                Err("No Anthropic API key provided. Set ANTHROPIC_API_KEY or use 'anthropic-cli' provider for subscription access.".into())
+            }
+        }
+        "anthropic-cli" => {
+            // Anthropic CLI provider - requires Claude CLI to be installed and authenticated
+            let cli_available = ClaudeCliProvider::is_available();
+            debug!(
+                cli_available = cli_available,
+                "Checking Claude CLI availability"
+            );
+
+            if !cli_available {
+                return Err("Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code".into());
+            }
+
+            let cli_authenticated = ClaudeCliProvider::is_authenticated();
+            debug!(
+                cli_authenticated = cli_authenticated,
+                "Checking Claude CLI authentication"
+            );
+
+            if !cli_authenticated {
+                return Err("Claude CLI not authenticated. Run 'claude login' to authenticate.".into());
+            }
+
+            info!("Using Claude CLI for subscription-based access with custom tools");
+            // MCP requires HTTP transport - mcp_url must be provided
+            if let Some(ref mcp_url) = config.mcp_url {
+                info!(
+                    mcp_url = %mcp_url,
+                    has_secret = config.mcp_secret.is_some(),
+                    external_servers = config.external_mcp_servers.len(),
+                    "Using MCP HTTP transport"
                 );
 
-                if cli_available {
-                    let cli_authenticated = ClaudeCliProvider::is_authenticated();
-                    debug!(
-                        cli_authenticated = cli_authenticated,
-                        "Checking Claude CLI authentication"
-                    );
-
-                    if cli_authenticated {
-                        info!("Using Claude CLI for subscription-based access with custom tools");
-                        // MCP requires HTTP transport - mcp_url must be provided
-                        if let Some(ref mcp_url) = config.mcp_url {
-                            info!(
-                                mcp_url = %mcp_url,
-                                has_secret = config.mcp_secret.is_some(),
-                                external_servers = config.external_mcp_servers.len(),
-                                "Using MCP HTTP transport"
-                            );
-
-                            // Build MCP config with external servers
-                            let mut mcp_config = if let Some(ref secret) = config.mcp_secret {
-                                wonopcode_provider::claude_cli::McpCliConfig::with_secret(
-                                    mcp_url.clone(),
-                                    secret.clone(),
-                                )
-                            } else {
-                                wonopcode_provider::claude_cli::McpCliConfig::new(mcp_url.clone())
-                            };
-
-                            // Add external MCP servers (local/stdio servers from .mcp.json)
-                            for (name, (command_args, env)) in &config.external_mcp_servers {
-                                if let Some((command, args)) = command_args.split_first() {
-                                    let external_server =
-                                        wonopcode_provider::claude_cli::ExternalMcpServer {
-                                            command: command.clone(),
-                                            args: args.to_vec(),
-                                            env: env.clone(),
-                                        };
-                                    mcp_config =
-                                        mcp_config.with_external_server(name, external_server);
-                                    info!(server = %name, "Added external MCP server");
-                                }
-                            }
-
-                            let mut provider =
-                                wonopcode_provider::claude_cli::ClaudeCliProvider::with_mcp_config(
-                                    model_info, mcp_config,
-                                )?;
-                            // Set working directory if configured
-                            if let Some(ref workdir) = config.working_directory {
-                                provider.set_working_directory(workdir.clone());
-                            }
-                            Ok(Arc::new(provider))
-                        } else {
-                            // No MCP URL provided - use Claude CLI without custom tools
-                            info!("No MCP URL provided, using Claude CLI without custom tools");
-                            let mut provider =
-                                wonopcode_provider::claude_cli::ClaudeCliProvider::new(model_info)?;
-                            // Set working directory if configured
-                            if let Some(ref workdir) = config.working_directory {
-                                provider.set_working_directory(workdir.clone());
-                            }
-                            Ok(Arc::new(provider))
-                        }
-                    } else {
-                        Err("Claude CLI found but not authenticated. Run 'wonopcode auth login anthropic' to authenticate.".into())
-                    }
+                // Build MCP config with external servers
+                let mut mcp_config = if let Some(ref secret) = config.mcp_secret {
+                    wonopcode_provider::claude_cli::McpCliConfig::with_secret(
+                        mcp_url.clone(),
+                        secret.clone(),
+                    )
                 } else {
-                    Err("No Anthropic API key provided. Set ANTHROPIC_API_KEY or install Claude CLI for subscription access.".into())
+                    wonopcode_provider::claude_cli::McpCliConfig::new(mcp_url.clone())
+                };
+
+                // Add external MCP servers (local/stdio servers from .mcp.json)
+                for (name, (command_args, env)) in &config.external_mcp_servers {
+                    if let Some((command, args)) = command_args.split_first() {
+                        let external_server =
+                            wonopcode_provider::claude_cli::ExternalMcpServer {
+                                command: command.clone(),
+                                args: args.to_vec(),
+                                env: env.clone(),
+                            };
+                        mcp_config =
+                            mcp_config.with_external_server(name, external_server);
+                        info!(server = %name, "Added external MCP server");
+                    }
                 }
+
+                let mut provider =
+                    wonopcode_provider::claude_cli::ClaudeCliProvider::with_mcp_config(
+                        model_info, mcp_config,
+                    )?;
+                // Set working directory if configured
+                if let Some(ref workdir) = config.working_directory {
+                    provider.set_working_directory(workdir.clone());
+                }
+                Ok(Arc::new(provider))
+            } else {
+                // No MCP URL provided - use Claude CLI without custom tools
+                info!("No MCP URL provided, using Claude CLI without custom tools");
+                let mut provider =
+                    wonopcode_provider::claude_cli::ClaudeCliProvider::new(model_info)?;
+                // Set working directory if configured
+                if let Some(ref workdir) = config.working_directory {
+                    provider.set_working_directory(workdir.clone());
+                }
+                Ok(Arc::new(provider))
             }
         }
         "openai" => {
             let provider = OpenAIProvider::new(&config.api_key, model_info)?;
             Ok(Arc::new(provider))
         }
-        "openrouter" => {
-            let provider = OpenRouterProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "google" => {
-            let provider = GoogleProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "xai" => {
-            let provider = xai::XaiProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "mistral" => {
-            let provider = mistral::MistralProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "groq" => {
-            let provider = groq::GroqProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "deepinfra" => {
-            let provider = deepinfra::DeepInfraProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "together" => {
-            let provider = together::TogetherProvider::new(&config.api_key, model_info)?;
-            Ok(Arc::new(provider))
-        }
-        "compoundcoder" => {
-            let provider = compoundcoder::CompoundCoderProvider::new(&config.api_key, model_info)?;
+        "openai-codex" => {
+            // OpenAI Codex using the Responses API
+            // Supports both API key and ChatGPT subscription authentication
+            use wonopcode_provider::codex::CodexProvider;
+            let provider = if config.api_key.is_empty() {
+                // No API key - try to use existing credentials or ChatGPT subscription
+                CodexProvider::new(model_info)?
+            } else {
+                // Use provided API key
+                CodexProvider::with_api_key(&config.api_key, model_info)?
+            };
             Ok(Arc::new(provider))
         }
         "test" => {
@@ -4144,11 +4128,12 @@ fn create_provider(
 
 /// Get model info for a model ID.
 fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
-    use wonopcode_provider::{compoundcoder, deepinfra, groq, mistral, together, xai};
-
     // Check built-in models
     match model_id {
-        // Anthropic - Latest (Claude 4.5)
+        // Anthropic - Latest (Claude 4.6)
+        "claude-opus-4-6" => wonopcode_provider::model::anthropic::claude_opus_4_6(),
+        "claude-sonnet-4-6" => wonopcode_provider::model::anthropic::claude_sonnet_4_6(),
+        // Anthropic - Current (Claude 4.5)
         "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5" => {
             wonopcode_provider::model::anthropic::claude_sonnet_4_5()
         }
@@ -4186,53 +4171,17 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
         "gpt-4.1-mini" => wonopcode_provider::model::openai::gpt_4_1_mini(),
         "gpt-4.1-nano" => wonopcode_provider::model::openai::gpt_4_1_nano(),
         // OpenAI - O-Series
-        "o3" => wonopcode_provider::model::openai::o3(),
+        "o3" if provider != "openai-codex" => wonopcode_provider::model::openai::o3(),
         "o3-mini" => wonopcode_provider::model::openai::o3_mini(),
-        "o4-mini" => wonopcode_provider::model::openai::o4_mini(),
+        "o4-mini" if provider != "openai-codex" => wonopcode_provider::model::openai::o4_mini(),
         // OpenAI - Legacy
         "gpt-4o" => wonopcode_provider::model::openai::gpt_4o(),
         "gpt-4o-mini" => wonopcode_provider::model::openai::gpt_4o_mini(),
         "o1" => wonopcode_provider::model::openai::o1(),
-        // Google
-        "gemini-2.0-flash" | "gemini-2.0-flash-exp" => {
-            wonopcode_provider::model::google::gemini_2_flash()
-        }
-        "gemini-1.5-pro" | "gemini-1.5-pro-latest" => {
-            wonopcode_provider::model::google::gemini_1_5_pro()
-        }
-        "gemini-1.5-flash" | "gemini-1.5-flash-latest" => {
-            wonopcode_provider::model::google::gemini_1_5_flash()
-        }
-        // xAI (Grok)
-        "grok-3" => xai::models::grok_3(),
-        "grok-3-mini" => xai::models::grok_3_mini(),
-        "grok-2" | "grok-2-1212" => xai::models::grok_2(),
-        // Mistral
-        "mistral-large" | "mistral-large-latest" => mistral::models::mistral_large(),
-        "mistral-small" | "mistral-small-latest" => mistral::models::mistral_small(),
-        "codestral" | "codestral-latest" => mistral::models::codestral(),
-        "pixtral-large" | "pixtral-large-latest" => mistral::models::pixtral_large(),
-        // Groq
-        "llama-3.3-70b-versatile" => groq::models::llama_3_3_70b(),
-        "llama-3.1-8b-instant" => groq::models::llama_3_1_8b(),
-        "mixtral-8x7b-32768" => groq::models::mixtral_8x7b(),
-        "gemma2-9b-it" => groq::models::gemma_2_9b(),
-        "deepseek-r1-distill-llama-70b" => groq::models::deepseek_r1_distill(),
-        // DeepInfra
-        "deepseek-ai/DeepSeek-V3" if provider == "deepinfra" => deepinfra::models::deepseek_v3(),
-        "deepseek-ai/DeepSeek-R1" if provider == "deepinfra" => deepinfra::models::deepseek_r1(),
-        "Qwen/Qwen2.5-72B-Instruct" => deepinfra::models::qwen_2_5_72b(),
-        "meta-llama/Meta-Llama-3.1-405B-Instruct" => deepinfra::models::llama_3_1_405b(),
-        // Together
-        "deepseek-ai/DeepSeek-V3" if provider == "together" => together::models::deepseek_v3(),
-        "deepseek-ai/DeepSeek-R1" if provider == "together" => together::models::deepseek_r1(),
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo" => together::models::llama_3_3_70b(),
-        "Qwen/Qwen2.5-72B-Instruct-Turbo" => together::models::qwen_2_5_72b(),
-        "Qwen/Qwen2.5-Coder-32B-Instruct" => together::models::qwen_2_5_coder(),
-        // CompoundCoder
-        "wonop/gpt" => compoundcoder::models::wonop_gpt(),
-        "wonop/qwen" => compoundcoder::models::wonop_qwen(),
-        "wonop/devstral2" => compoundcoder::models::wonop_devstral2(),
+        // OpenAI Codex (Responses API)
+        "codex" => wonopcode_provider::codex::models::codex(),
+        "o3" if provider == "openai-codex" => wonopcode_provider::codex::models::o3(),
+        "o4-mini" if provider == "openai-codex" => wonopcode_provider::codex::models::o4_mini(),
         // Test provider
         "test-128b" => wonopcode_provider::test::TestProvider::test_128b(),
         _ => ModelInfo::new(model_id, provider).with_name(model_id),
@@ -4243,10 +4192,16 @@ fn get_model_info(model_id: &str, provider: &str) -> ModelInfo {
 fn infer_provider_from_model(model: &str) -> Option<&'static str> {
     let model_lower = model.to_lowercase();
 
+    // OpenAI Codex models (must check before generic OpenAI)
+    if model_lower == "codex" {
+        return Some("openai-codex");
+    }
+
     // OpenAI models
     if model_lower.starts_with("gpt-")
         || model_lower.starts_with("o1")
         || model_lower.starts_with("o3")
+        || model_lower.starts_with("o4")
         || model_lower.starts_with("chatgpt")
     {
         return Some("openai");
@@ -4255,29 +4210,6 @@ fn infer_provider_from_model(model: &str) -> Option<&'static str> {
     // Anthropic models
     if model_lower.starts_with("claude") {
         return Some("anthropic");
-    }
-
-    // Google models
-    if model_lower.starts_with("gemini") {
-        return Some("google");
-    }
-
-    // xAI (Grok) models
-    if model_lower.starts_with("grok") {
-        return Some("xai");
-    }
-
-    // Mistral models
-    if model_lower.starts_with("mistral")
-        || model_lower.starts_with("codestral")
-        || model_lower.starts_with("pixtral")
-    {
-        return Some("mistral");
-    }
-
-    // Groq-hosted models (Llama, Mixtral on Groq)
-    if model_lower.contains("groq") {
-        return Some("groq");
     }
 
     // Test provider
@@ -4441,16 +4373,12 @@ pub fn load_api_key(provider: &str) -> Option<String> {
     }
 
     // Fallback to direct env var check if CredentialsManager fails
+    // Note: anthropic-cli doesn't use an API key, it uses Claude CLI auth
     let env_var = match provider {
         "anthropic" => "ANTHROPIC_API_KEY",
+        "anthropic-cli" => return None, // CLI provider doesn't use API key
         "openai" => "OPENAI_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "google" => "GOOGLE_API_KEY",
-        "xai" => "XAI_API_KEY",
-        "mistral" => "MISTRAL_API_KEY",
-        "groq" => "GROQ_API_KEY",
-        "deepinfra" => "DEEPINFRA_API_KEY",
-        "together" => "TOGETHER_API_KEY",
+        "openai-codex" => "OPENAI_API_KEY", // Codex uses the same API key as OpenAI
         _ => return None,
     };
 
@@ -4487,6 +4415,7 @@ pub fn get_server_config(repo_path: &std::path::Path) -> wonopcode_core::ServerI
 /// Returns status for a provider including availability and configured auth method.
 pub fn get_provider_status(provider: &str) -> wonopcode_core::ProviderStatus {
     use wonopcode_provider::claude_cli::ClaudeCliProvider;
+    use wonopcode_provider::codex::CodexProvider;
 
     let creds_manager = wonopcode_core::CredentialsManager::new();
     let has_api_key = creds_manager
@@ -4497,20 +4426,27 @@ pub fn get_provider_status(provider: &str) -> wonopcode_core::ProviderStatus {
         .as_ref()
         .and_then(|cm| cm.get_auth_method(provider));
 
-    // Check CLI availability for anthropic
-    let (cli_available, cli_authenticated) = if provider == "anthropic" {
-        (
+    // Check CLI availability for anthropic-cli and openai-codex
+    let (cli_available, cli_authenticated) = match provider {
+        "anthropic-cli" => (
             ClaudeCliProvider::is_available(),
             ClaudeCliProvider::is_authenticated(),
-        )
-    } else {
-        (false, false)
+        ),
+        "openai-codex" => (
+            CodexProvider::is_available(),
+            CodexProvider::has_credentials(),
+        ),
+        _ => (false, false),
     };
 
-    // Provider is available if it has an API key OR (for anthropic) has CLI auth
-    let available = has_api_key
-        || (provider == "anthropic" && cli_authenticated)
-        || auth_method == Some(wonopcode_core::AuthMethod::ClaudeCli);
+    // Provider is available based on its auth mechanism
+    let available = match provider {
+        "anthropic" => has_api_key, // API provider requires API key
+        "anthropic-cli" => cli_available && cli_authenticated, // CLI provider requires CLI auth
+        "openai" => has_api_key, // API provider requires API key
+        "openai-codex" => has_api_key || cli_authenticated, // Codex can use either
+        _ => has_api_key,
+    };
 
     wonopcode_core::ProviderStatus {
         id: provider.to_string(),
@@ -4526,15 +4462,10 @@ pub fn get_provider_status(provider: &str) -> wonopcode_core::ProviderStatus {
 /// Get display name for a provider.
 fn provider_display_name(provider: &str) -> String {
     match provider {
-        "anthropic" => "Anthropic".to_string(),
-        "openai" => "OpenAI".to_string(),
-        "openrouter" => "OpenRouter".to_string(),
-        "google" => "Google".to_string(),
-        "xai" => "xAI".to_string(),
-        "mistral" => "Mistral".to_string(),
-        "groq" => "Groq".to_string(),
-        "deepinfra" => "DeepInfra".to_string(),
-        "together" => "Together".to_string(),
+        "anthropic" => "Anthropic API".to_string(),
+        "anthropic-cli" => "Claude CLI (Subscription)".to_string(),
+        "openai" => "OpenAI API".to_string(),
+        "openai-codex" => "OpenAI Codex".to_string(),
         _ => provider.to_string(),
     }
 }

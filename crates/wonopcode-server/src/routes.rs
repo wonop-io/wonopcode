@@ -1701,20 +1701,12 @@ async fn config_update(
 
 async fn config_providers() -> impl IntoResponse {
     // Return provider configurations
+    // Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
     Json(serde_json::json!({
-        "anthropic": { "name": "Anthropic", "env": ["ANTHROPIC_API_KEY"] },
-        "openai": { "name": "OpenAI", "env": ["OPENAI_API_KEY"] },
-        "openrouter": { "name": "OpenRouter", "env": ["OPENROUTER_API_KEY"] },
-        "google": { "name": "Google", "env": ["GOOGLE_API_KEY", "GEMINI_API_KEY"] },
-        "vertex": { "name": "Google Vertex", "env": ["GOOGLE_APPLICATION_CREDENTIALS"] },
-        "bedrock": { "name": "Amazon Bedrock", "env": ["AWS_ACCESS_KEY_ID"] },
-        "azure": { "name": "Azure OpenAI", "env": ["AZURE_OPENAI_API_KEY"] },
-        "xai": { "name": "xAI", "env": ["XAI_API_KEY"] },
-        "mistral": { "name": "Mistral", "env": ["MISTRAL_API_KEY"] },
-        "groq": { "name": "Groq", "env": ["GROQ_API_KEY"] },
-        "deepinfra": { "name": "DeepInfra", "env": ["DEEPINFRA_API_KEY"] },
-        "together": { "name": "Together AI", "env": ["TOGETHER_API_KEY"] },
-        "copilot": { "name": "GitHub Copilot", "env": ["GITHUB_TOKEN"] }
+        "anthropic": { "name": "Anthropic API", "env": ["ANTHROPIC_API_KEY"] },
+        "anthropic-cli": { "name": "Claude CLI (Subscription)", "env": [] },
+        "openai": { "name": "OpenAI API", "env": ["OPENAI_API_KEY"] },
+        "openai-codex": { "name": "OpenAI Codex", "env": ["OPENAI_API_KEY"] }
     }))
 }
 
@@ -1731,71 +1723,27 @@ pub struct ProviderInfo {
 }
 
 async fn list_providers() -> impl IntoResponse {
+    // Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
     let providers = vec![
         ProviderInfo {
             id: "anthropic".to_string(),
-            name: "Anthropic".to_string(),
+            name: "Anthropic API".to_string(),
             env: vec!["ANTHROPIC_API_KEY".to_string()],
         },
         ProviderInfo {
+            id: "anthropic-cli".to_string(),
+            name: "Claude CLI (Subscription)".to_string(),
+            env: vec![],
+        },
+        ProviderInfo {
             id: "openai".to_string(),
-            name: "OpenAI".to_string(),
+            name: "OpenAI API".to_string(),
             env: vec!["OPENAI_API_KEY".to_string()],
         },
         ProviderInfo {
-            id: "google".to_string(),
-            name: "Google".to_string(),
-            env: vec!["GOOGLE_API_KEY".to_string(), "GEMINI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "vertex".to_string(),
-            name: "Google Vertex".to_string(),
-            env: vec!["GOOGLE_APPLICATION_CREDENTIALS".to_string()],
-        },
-        ProviderInfo {
-            id: "openrouter".to_string(),
-            name: "OpenRouter".to_string(),
-            env: vec!["OPENROUTER_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "bedrock".to_string(),
-            name: "Amazon Bedrock".to_string(),
-            env: vec!["AWS_ACCESS_KEY_ID".to_string()],
-        },
-        ProviderInfo {
-            id: "azure".to_string(),
-            name: "Azure OpenAI".to_string(),
-            env: vec!["AZURE_OPENAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "xai".to_string(),
-            name: "xAI".to_string(),
-            env: vec!["XAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "mistral".to_string(),
-            name: "Mistral".to_string(),
-            env: vec!["MISTRAL_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "groq".to_string(),
-            name: "Groq".to_string(),
-            env: vec!["GROQ_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "deepinfra".to_string(),
-            name: "DeepInfra".to_string(),
-            env: vec!["DEEPINFRA_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "together".to_string(),
-            name: "Together AI".to_string(),
-            env: vec!["TOGETHER_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "copilot".to_string(),
-            name: "GitHub Copilot".to_string(),
-            env: vec!["GITHUB_TOKEN".to_string()],
+            id: "openai-codex".to_string(),
+            name: "OpenAI Codex".to_string(),
+            env: vec!["OPENAI_API_KEY".to_string()],
         },
     ];
 
@@ -2649,77 +2597,28 @@ pub fn is_path_within_base(path: &std::path::Path, base: &std::path::Path) -> bo
 }
 
 /// Get the list of supported providers with their configurations.
+/// Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
 pub fn get_providers() -> Vec<ProviderInfo> {
     vec![
         ProviderInfo {
             id: "anthropic".to_string(),
-            name: "Anthropic".to_string(),
+            name: "Anthropic API".to_string(),
             env: vec!["ANTHROPIC_API_KEY".to_string()],
         },
         ProviderInfo {
+            id: "anthropic-cli".to_string(),
+            name: "Claude CLI (Subscription)".to_string(),
+            env: vec![],
+        },
+        ProviderInfo {
             id: "openai".to_string(),
-            name: "OpenAI".to_string(),
+            name: "OpenAI API".to_string(),
             env: vec!["OPENAI_API_KEY".to_string()],
         },
         ProviderInfo {
-            id: "google".to_string(),
-            name: "Google".to_string(),
-            env: vec!["GOOGLE_API_KEY".to_string(), "GEMINI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "vertex".to_string(),
-            name: "Google Vertex".to_string(),
-            env: vec!["GOOGLE_APPLICATION_CREDENTIALS".to_string()],
-        },
-        ProviderInfo {
-            id: "openrouter".to_string(),
-            name: "OpenRouter".to_string(),
-            env: vec!["OPENROUTER_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "bedrock".to_string(),
-            name: "Amazon Bedrock".to_string(),
-            env: vec!["AWS_ACCESS_KEY_ID".to_string()],
-        },
-        ProviderInfo {
-            id: "azure".to_string(),
-            name: "Azure OpenAI".to_string(),
-            env: vec!["AZURE_OPENAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "xai".to_string(),
-            name: "xAI".to_string(),
-            env: vec!["XAI_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "mistral".to_string(),
-            name: "Mistral".to_string(),
-            env: vec!["MISTRAL_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "groq".to_string(),
-            name: "Groq".to_string(),
-            env: vec!["GROQ_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "deepinfra".to_string(),
-            name: "DeepInfra".to_string(),
-            env: vec!["DEEPINFRA_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "together".to_string(),
-            name: "Together AI".to_string(),
-            env: vec!["TOGETHER_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "compoundcoder".to_string(),
-            name: "CompoundCoder".to_string(),
-            env: vec!["COMPOUNDCODER_API_KEY".to_string()],
-        },
-        ProviderInfo {
-            id: "copilot".to_string(),
-            name: "GitHub Copilot".to_string(),
-            env: vec!["GITHUB_TOKEN".to_string()],
+            id: "openai-codex".to_string(),
+            name: "OpenAI Codex".to_string(),
+            env: vec!["OPENAI_API_KEY".to_string()],
         },
     ]
 }
@@ -4079,7 +3978,8 @@ mod tests {
     #[test]
     fn test_get_providers_returns_all() {
         let providers = get_providers();
-        assert!(providers.len() >= 10);
+        // Now we have 4 core providers: anthropic, anthropic-cli, openai, openai-codex
+        assert_eq!(providers.len(), 4);
     }
 
     #[test]
@@ -4087,7 +3987,7 @@ mod tests {
         let providers = get_providers();
         let anthropic = providers.iter().find(|p| p.id == "anthropic");
         assert!(anthropic.is_some());
-        assert_eq!(anthropic.unwrap().name, "Anthropic");
+        assert_eq!(anthropic.unwrap().name, "Anthropic API");
         assert!(anthropic
             .unwrap()
             .env
@@ -4099,16 +3999,16 @@ mod tests {
         let providers = get_providers();
         let openai = providers.iter().find(|p| p.id == "openai");
         assert!(openai.is_some());
-        assert_eq!(openai.unwrap().name, "OpenAI");
+        assert_eq!(openai.unwrap().name, "OpenAI API");
     }
 
     #[test]
-    fn test_get_providers_has_google() {
+    fn test_get_providers_has_openai_codex() {
         let providers = get_providers();
-        let google = providers.iter().find(|p| p.id == "google");
-        assert!(google.is_some());
-        // Google has multiple env vars
-        assert!(google.unwrap().env.len() >= 2);
+        let codex = providers.iter().find(|p| p.id == "openai-codex");
+        assert!(codex.is_some());
+        assert_eq!(codex.unwrap().name, "OpenAI Codex");
+        assert!(codex.unwrap().env.contains(&"OPENAI_API_KEY".to_string()));
     }
 
     // === get_default_model tests ===

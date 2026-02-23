@@ -512,14 +512,7 @@ pub fn create_provider_from_config(
     // Try to load API key from environment
     let api_key = match provider_name {
         "anthropic" => std::env::var("ANTHROPIC_API_KEY").ok(),
-        "openai" => std::env::var("OPENAI_API_KEY").ok(),
-        "openrouter" => std::env::var("OPENROUTER_API_KEY").ok(),
-        "google" => std::env::var("GOOGLE_API_KEY")
-            .or_else(|_| std::env::var("GEMINI_API_KEY"))
-            .ok(),
-        "xai" => std::env::var("XAI_API_KEY").ok(),
-        "mistral" => std::env::var("MISTRAL_API_KEY").ok(),
-        "groq" => std::env::var("GROQ_API_KEY").ok(),
+        "openai" | "openai-codex" => std::env::var("OPENAI_API_KEY").ok(),
         _ => None,
     };
 
@@ -552,15 +545,13 @@ pub fn create_provider_from_config(
                 .map_err(|e| e.to_string())?;
             Ok(Arc::new(provider) as BoxedLanguageModel)
         }
-        "openrouter" => {
-            let provider =
-                wonopcode_provider::openrouter::OpenRouterProvider::new(&api_key, model_info)
-                    .map_err(|e| e.to_string())?;
-            Ok(Arc::new(provider) as BoxedLanguageModel)
-        }
-        "google" => {
-            let provider = wonopcode_provider::google::GoogleProvider::new(&api_key, model_info)
-                .map_err(|e| e.to_string())?;
+        "openai-codex" => {
+            use wonopcode_provider::codex::CodexProvider;
+            let provider = if api_key.is_empty() {
+                CodexProvider::new(model_info).map_err(|e| e.to_string())?
+            } else {
+                CodexProvider::with_api_key(&api_key, model_info).map_err(|e| e.to_string())?
+            };
             Ok(Arc::new(provider) as BoxedLanguageModel)
         }
         _ => Err(format!("Unsupported provider: {provider_name}")),
@@ -571,7 +562,10 @@ pub fn create_provider_from_config(
 fn build_model_info(model_id: &str, provider_name: &str) -> ModelInfo {
     // Check for known built-in models first
     match model_id {
-        // Anthropic - Latest (Claude 4.5)
+        // Anthropic - Latest (Claude 4.6)
+        "claude-opus-4-6" => return wonopcode_provider::model::anthropic::claude_opus_4_6(),
+        "claude-sonnet-4-6" => return wonopcode_provider::model::anthropic::claude_sonnet_4_6(),
+        // Anthropic - Current (Claude 4.5)
         "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5" => {
             return wonopcode_provider::model::anthropic::claude_sonnet_4_5()
         }
@@ -616,19 +610,15 @@ fn build_model_info(model_id: &str, provider_name: &str) -> ModelInfo {
         "gpt-4o" => return wonopcode_provider::model::openai::gpt_4o(),
         "gpt-4o-mini" => return wonopcode_provider::model::openai::gpt_4o_mini(),
         "o1" => return wonopcode_provider::model::openai::o1(),
-        // Google
-        "gemini-2.0-flash" => return wonopcode_provider::model::google::gemini_2_flash(),
-        "gemini-1.5-pro" => return wonopcode_provider::model::google::gemini_1_5_pro(),
-        "gemini-1.5-flash" => return wonopcode_provider::model::google::gemini_1_5_flash(),
+        // OpenAI Codex (Responses API)
+        "codex" => return wonopcode_provider::codex::models::codex(),
         _ => {}
     }
 
     // Build a reasonable default for unknown models
     let (context, output) = match provider_name {
         "anthropic" => (200_000, 8_192),
-        "openai" => (128_000, 16_384),
-        "google" => (1_000_000, 8_192),
-        "openrouter" => (128_000, 8_192),
+        "openai" | "openai-codex" => (128_000, 16_384),
         _ => (32_000, 4_096),
     };
 
@@ -646,6 +636,11 @@ fn build_model_info(model_id: &str, provider_name: &str) -> ModelInfo {
 
 /// Infer provider from model name.
 pub fn infer_provider(model_id: &str) -> &'static str {
+    // OpenAI Codex models
+    if model_id == "codex" {
+        return "openai-codex";
+    }
+    // Anthropic models
     if model_id.starts_with("claude") {
         "anthropic"
     } else if model_id.starts_with("gpt")
@@ -654,15 +649,6 @@ pub fn infer_provider(model_id: &str) -> &'static str {
         || model_id.starts_with("o4")
     {
         "openai"
-    } else if model_id.starts_with("gemini") {
-        "google"
-    } else if model_id.starts_with("grok") {
-        "xai"
-    } else if model_id.starts_with("mistral") || model_id.starts_with("codestral") {
-        "mistral"
-    } else if model_id.contains("/") {
-        // OpenRouter format: provider/model
-        "openrouter"
     } else {
         "anthropic" // Default
     }
@@ -699,29 +685,8 @@ mod tests {
     }
 
     #[test]
-    fn user_gets_google_for_gemini_models() {
-        assert_eq!(infer_provider("gemini-2.0-flash"), "google");
-        assert_eq!(infer_provider("gemini-1.5-pro"), "google");
-        assert_eq!(infer_provider("gemini-1.5-flash"), "google");
-    }
-
-    #[test]
-    fn user_gets_xai_for_grok_models() {
-        assert_eq!(infer_provider("grok-1"), "xai");
-        assert_eq!(infer_provider("grok-beta"), "xai");
-    }
-
-    #[test]
-    fn user_gets_mistral_for_mistral_and_codestral() {
-        assert_eq!(infer_provider("mistral-large"), "mistral");
-        assert_eq!(infer_provider("mistral-small"), "mistral");
-        assert_eq!(infer_provider("codestral-latest"), "mistral");
-    }
-
-    #[test]
-    fn user_gets_openrouter_for_slash_format() {
-        assert_eq!(infer_provider("anthropic/claude-3-opus"), "openrouter");
-        assert_eq!(infer_provider("meta-llama/llama-3-70b"), "openrouter");
+    fn user_gets_codex_for_codex_model() {
+        assert_eq!(infer_provider("codex"), "openai-codex");
     }
 
     #[test]
@@ -761,8 +726,8 @@ mod tests {
         let openai = build_model_info("unknown", "openai");
         assert_eq!(openai.limit.context, 128_000);
 
-        let google = build_model_info("unknown", "google");
-        assert_eq!(google.limit.context, 1_000_000);
+        let codex = build_model_info("unknown", "openai-codex");
+        assert_eq!(codex.limit.context, 128_000);
 
         let other = build_model_info("unknown", "other");
         assert_eq!(other.limit.context, 32_000);
@@ -1087,20 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn model_info_gemini_flash_has_correct_limits() {
-        let info = build_model_info("gemini-2.0-flash", "google");
-        assert_eq!(info.limit.context, 1_000_000);
-        assert_eq!(info.limit.output, 8_192);
-    }
-
-    #[test]
-    fn model_info_gemini_pro_has_higher_output() {
-        let info = build_model_info("gemini-1.5-pro", "google");
-        assert_eq!(info.limit.context, 2_000_000);
-        assert!(info.limit.output > 8_000); // Pro has higher output
-    }
-
-    #[test]
     fn model_info_gpt4o_has_correct_limits() {
         let info = build_model_info("gpt-4o", "openai");
         assert_eq!(info.limit.context, 128_000);
@@ -1142,10 +1093,9 @@ mod tests {
     }
 
     #[test]
-    fn model_info_openrouter_fallback() {
-        let info = build_model_info("some-model", "openrouter");
-        assert_eq!(info.limit.context, 128_000);
-        assert_eq!(info.limit.output, 8_192);
+    fn model_info_codex_has_correct_limits() {
+        let info = build_model_info("codex", "openai-codex");
+        assert!(info.limit.context > 0);
     }
 
     // === PromptEvent Debug tests ===
@@ -1258,13 +1208,9 @@ mod tests {
     }
 
     #[test]
-    fn infer_provider_llama_openrouter() {
-        assert_eq!(infer_provider("meta-llama/llama-3.1-70b"), "openrouter");
-    }
-
-    #[test]
-    fn infer_provider_anthropic_openrouter() {
-        assert_eq!(infer_provider("anthropic/claude-3-opus"), "openrouter");
+    fn infer_provider_unknown_defaults_to_anthropic() {
+        // Unknown models with slash format default to anthropic now
+        assert_eq!(infer_provider("meta-llama/llama-3.1-70b"), "anthropic");
     }
 
     // === Additional build_model_info tests for all model branches ===
@@ -1422,44 +1368,15 @@ mod tests {
         assert!(info.id.contains("o4"));
     }
 
-    // Google Gemini
-    #[test]
-    fn model_info_gemini_2_flash() {
-        let info = build_model_info("gemini-2.0-flash", "google");
-        assert!(info.id.contains("gemini"));
-    }
-
-    #[test]
-    fn model_info_gemini_1_5_pro() {
-        let info = build_model_info("gemini-1.5-pro", "google");
-        assert!(info.id.contains("gemini"));
-    }
-
-    #[test]
-    fn model_info_gemini_1_5_flash() {
-        let info = build_model_info("gemini-1.5-flash", "google");
-        assert!(info.id.contains("gemini"));
-    }
-
     // === infer_provider additional tests ===
-
-    #[test]
-    fn infer_provider_grok() {
-        assert_eq!(infer_provider("grok-beta"), "xai");
-    }
-
-    #[test]
-    fn infer_provider_codestral() {
-        assert_eq!(infer_provider("codestral-latest"), "mistral");
-    }
-
-    #[test]
-    fn infer_provider_mistral_large() {
-        assert_eq!(infer_provider("mistral-large-latest"), "mistral");
-    }
 
     #[test]
     fn infer_provider_o4_mini() {
         assert_eq!(infer_provider("o4-mini"), "openai");
+    }
+
+    #[test]
+    fn infer_provider_codex() {
+        assert_eq!(infer_provider("codex"), "openai-codex");
     }
 }
