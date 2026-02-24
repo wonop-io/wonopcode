@@ -196,6 +196,10 @@ impl Tool for AceReadArtifactTool {
         let args: ReadArtifactArgs = serde_json::from_value(args)
             .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
 
+        // Load state to get current ticket ID
+        let state = WorkstreamState::ensure_initialized(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
+
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
@@ -205,6 +209,15 @@ impl Tool for AceReadArtifactTool {
             .ok_or_else(|| {
                 ToolError::execution_failed(format!("Artifact not found: {}", args.id))
             })?;
+
+        // Verify the artifact belongs to the current workstream's ticket
+        if !artifact.belongs_to_ticket(&state.ticket_id) {
+            return Err(ToolError::execution_failed(format!(
+                "Artifact {} does not belong to the current workstream (ticket: {}).\n\n\
+                 This artifact belongs to a different ticket. Use artifacts from the current workstream only.",
+                args.id, state.ticket_id
+            )));
+        }
 
         let output = format!(
             "---\n\

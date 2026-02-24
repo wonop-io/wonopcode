@@ -327,6 +327,79 @@ pub struct Artifact {
     pub path: PathBuf,
 }
 
+impl Artifact {
+    /// Extract the ticket ID from this artifact's ID.
+    ///
+    /// Artifact IDs follow the pattern `{TYPE}-{TICKET_ID}-{SEQUENCE}` where:
+    /// - TYPE: UC, REQ, DES, TC, TASK
+    /// - TICKET_ID: e.g., WON-125, PROJ-42, or just 413
+    /// - SEQUENCE: 3-digit number (001, 002, etc.)
+    ///
+    /// Examples:
+    /// - `TASK-WON-157-006` → `WON-157`
+    /// - `UC-413-001` → `413`
+    /// - `REQ-WON-123-001` → `WON-123`
+    pub fn ticket_id(&self) -> Option<String> {
+        extract_ticket_id_from_artifact_id(&self.metadata.id)
+    }
+
+    /// Check if this artifact belongs to the given ticket.
+    pub fn belongs_to_ticket(&self, ticket_id: &str) -> bool {
+        self.ticket_id()
+            .map(|id| id.eq_ignore_ascii_case(ticket_id))
+            .unwrap_or(false)
+    }
+}
+
+/// Extract the ticket ID from an artifact ID string.
+///
+/// Artifact IDs follow the pattern `{TYPE}-{TICKET_ID}-{SEQUENCE}` where:
+/// - TYPE: UC, REQ, DES, TC, TASK
+/// - TICKET_ID: e.g., WON-125, PROJ-42, or just 413
+/// - SEQUENCE: 3-digit number (001, 002, etc.)
+///
+/// Examples:
+/// - `TASK-WON-157-006` → `WON-157`
+/// - `UC-413-001` → `413`
+/// - `REQ-WON-123-001` → `WON-123`
+pub fn extract_ticket_id_from_artifact_id(artifact_id: &str) -> Option<String> {
+    // The artifact ID format is: {PREFIX}-{TICKET_ID}-{3-DIGIT-SEQUENCE}
+    // We need to:
+    // 1. Remove the 3-digit sequence at the end (and its preceding dash)
+    // 2. Remove the prefix (UC, REQ, DES, TC, TASK)
+    // 3. What remains is the ticket ID
+
+    // Must have at least PREFIX-X-NNN (minimum 8 chars: "UC-1-001")
+    if artifact_id.len() < 8 {
+        return None;
+    }
+
+    // Check that it ends with a 3-digit sequence
+    let parts: Vec<&str> = artifact_id.rsplitn(2, '-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let sequence = parts[0];
+    if sequence.len() != 3 || !sequence.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    let without_sequence = parts[1]; // e.g., "TASK-WON-157" or "UC-413"
+
+    // Now strip the prefix
+    let prefixes = ["TASK-", "UC-", "REQ-", "DES-", "TC-"];
+    for prefix in prefixes {
+        if let Some(ticket_id) = without_sequence.strip_prefix(prefix) {
+            if !ticket_id.is_empty() {
+                return Some(ticket_id.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +483,46 @@ mod tests {
             Some(WorkflowPhase::Deployment)
         );
         assert_eq!(WorkflowPhase::Deployment.next(), None);
+    }
+
+    #[test]
+    fn test_extract_ticket_id_from_artifact_id() {
+        // Standard project-number format
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("TASK-WON-157-006"),
+            Some("WON-157".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("UC-WON-123-001"),
+            Some("WON-123".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("REQ-WON-123-002"),
+            Some("WON-123".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("DES-PROJ-42-001"),
+            Some("PROJ-42".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("TC-ABC-999-003"),
+            Some("ABC-999".to_string())
+        );
+
+        // Numeric-only ticket ID
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("UC-413-001"),
+            Some("413".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("TASK-413-005"),
+            Some("413".to_string())
+        );
+
+        // Invalid formats
+        assert_eq!(extract_ticket_id_from_artifact_id("invalid"), None);
+        assert_eq!(extract_ticket_id_from_artifact_id("UC-123"), None); // No sequence
+        assert_eq!(extract_ticket_id_from_artifact_id("TASK--001"), None); // Empty ticket ID
+        assert_eq!(extract_ticket_id_from_artifact_id("XX-WON-123-001"), None); // Invalid prefix
     }
 }

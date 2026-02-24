@@ -65,9 +65,10 @@ impl Tool for AceWhatNowTool {
         output.push_str("## Recommended Next Steps\n\n");
 
         let phase = state.workflow.current_phase;
+        let ticket_id = &state.ticket_id;
         match phase {
             WorkflowPhase::Requirements => {
-                recommend_requirements_phase(&store, &config, &mut output)?;
+                recommend_requirements_phase(&store, &config, ticket_id, &mut output)?;
             }
             WorkflowPhase::Analysis => {
                 output.push_str("### Analysis Phase\n\n");
@@ -77,13 +78,13 @@ impl Tool for AceWhatNowTool {
                 output.push_str("When ready, the workflow will advance to the Design phase.\n");
             }
             WorkflowPhase::Design => {
-                recommend_design_phase(&store, &config, &mut output)?;
+                recommend_design_phase(&store, &config, ticket_id, &mut output)?;
             }
             WorkflowPhase::Implementation => {
-                recommend_implementation_phase(&store, &state, &mut output)?;
+                recommend_implementation_phase(&store, &state, ticket_id, &mut output)?;
             }
             WorkflowPhase::Verification => {
-                recommend_verification_phase(&store, &mut output)?;
+                recommend_verification_phase(&store, ticket_id, &mut output)?;
             }
             WorkflowPhase::Deployment => {
                 output.push_str("### Deployment Phase\n\n");
@@ -91,7 +92,7 @@ impl Tool for AceWhatNowTool {
             }
         }
 
-        // Artifact summary
+        // Artifact summary - filtered by ticket ID
         output.push_str("\n---\n\n## Artifact Summary\n\n");
         output.push_str("| Type | Total | Done | In Progress |\n");
         output.push_str("|------|-------|------|-------------|\n");
@@ -103,7 +104,7 @@ impl Tool for AceWhatNowTool {
             ArtifactType::TestCase,
             ArtifactType::Task,
         ] {
-            let artifacts = store.list_artifacts(artifact_type).unwrap_or_default();
+            let artifacts = store.list_artifacts_for_ticket(artifact_type, &state.ticket_id).unwrap_or_default();
             let done = artifacts
                 .iter()
                 .filter(|a| a.metadata.progress.is_terminal())
@@ -135,13 +136,14 @@ impl Tool for AceWhatNowTool {
 fn recommend_requirements_phase(
     store: &ArtifactStore,
     config: &WonopCodeConfig,
+    ticket_id: &str,
     output: &mut String,
 ) -> Result<(), ToolError> {
     let use_cases = store
-        .list_artifacts(ArtifactType::UseCase)
+        .list_artifacts_for_ticket(ArtifactType::UseCase, ticket_id)
         .unwrap_or_default();
     let requirements = store
-        .list_artifacts(ArtifactType::Requirement)
+        .list_artifacts_for_ticket(ArtifactType::Requirement, ticket_id)
         .unwrap_or_default();
 
     output.push_str("### Requirements Phase\n\n");
@@ -194,16 +196,17 @@ fn recommend_requirements_phase(
 fn recommend_design_phase(
     store: &ArtifactStore,
     config: &WonopCodeConfig,
+    ticket_id: &str,
     output: &mut String,
 ) -> Result<(), ToolError> {
     let requirements = store
-        .list_artifacts(ArtifactType::Requirement)
+        .list_artifacts_for_ticket(ArtifactType::Requirement, ticket_id)
         .unwrap_or_default();
     let designs = store
-        .list_artifacts(ArtifactType::Design)
+        .list_artifacts_for_ticket(ArtifactType::Design, ticket_id)
         .unwrap_or_default();
     let test_cases = store
-        .list_artifacts(ArtifactType::TestCase)
+        .list_artifacts_for_ticket(ArtifactType::TestCase, ticket_id)
         .unwrap_or_default();
 
     output.push_str("### Design Phase\n\n");
@@ -315,17 +318,18 @@ fn recommend_design_phase(
 fn recommend_implementation_phase(
     store: &ArtifactStore,
     state: &WorkstreamState,
+    ticket_id: &str,
     output: &mut String,
 ) -> Result<(), ToolError> {
-    let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
+    let tasks = store.list_artifacts_for_ticket(ArtifactType::Task, ticket_id).unwrap_or_default();
     let designs = store
-        .list_artifacts(ArtifactType::Design)
+        .list_artifacts_for_ticket(ArtifactType::Design, ticket_id)
         .unwrap_or_default();
     let test_cases = store
-        .list_artifacts(ArtifactType::TestCase)
+        .list_artifacts_for_ticket(ArtifactType::TestCase, ticket_id)
         .unwrap_or_default();
     let requirements = store
-        .list_artifacts(ArtifactType::Requirement)
+        .list_artifacts_for_ticket(ArtifactType::Requirement, ticket_id)
         .unwrap_or_default();
 
     let pending_tasks: Vec<_> = tasks
@@ -455,12 +459,13 @@ fn recommend_implementation_phase(
 
 fn recommend_verification_phase(
     store: &ArtifactStore,
+    ticket_id: &str,
     output: &mut String,
 ) -> Result<(), ToolError> {
     let test_cases = store
-        .list_artifacts(ArtifactType::TestCase)
+        .list_artifacts_for_ticket(ArtifactType::TestCase, ticket_id)
         .unwrap_or_default();
-    let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
+    let tasks = store.list_artifacts_for_ticket(ArtifactType::Task, ticket_id).unwrap_or_default();
 
     let done_tasks = tasks
         .iter()
@@ -585,10 +590,10 @@ plan approved BEFORE writing any code."#
                 match args.checkpoint.as_str() {
                     "requirements" => {
                         let use_cases = store
-                            .list_artifacts(ArtifactType::UseCase)
+                            .list_artifacts_for_ticket(ArtifactType::UseCase, &state.ticket_id)
                             .unwrap_or_default();
                         let requirements = store
-                            .list_artifacts(ArtifactType::Requirement)
+                            .list_artifacts_for_ticket(ArtifactType::Requirement, &state.ticket_id)
                             .unwrap_or_default();
 
                         summary.push_str("### Use Cases\n\n");
@@ -619,13 +624,13 @@ plan approved BEFORE writing any code."#
                     }
                     "design" => {
                         let requirements = store
-                            .list_artifacts(ArtifactType::Requirement)
+                            .list_artifacts_for_ticket(ArtifactType::Requirement, &state.ticket_id)
                             .unwrap_or_default();
                         let designs = store
-                            .list_artifacts(ArtifactType::Design)
+                            .list_artifacts_for_ticket(ArtifactType::Design, &state.ticket_id)
                             .unwrap_or_default();
                         let test_cases = store
-                            .list_artifacts(ArtifactType::TestCase)
+                            .list_artifacts_for_ticket(ArtifactType::TestCase, &state.ticket_id)
                             .unwrap_or_default();
 
                         // Validate: require at least one test case if there are requirements
@@ -695,18 +700,18 @@ plan approved BEFORE writing any code."#
                         summary.push('\n');
                     }
                     "implementation_plan" => {
-                        let tasks = store.list_artifacts(ArtifactType::Task).unwrap_or_default();
+                        let tasks = store.list_artifacts_for_ticket(ArtifactType::Task, &state.ticket_id).unwrap_or_default();
                         let designs = store
-                            .list_artifacts(ArtifactType::Design)
+                            .list_artifacts_for_ticket(ArtifactType::Design, &state.ticket_id)
                             .unwrap_or_default();
                         let requirements = store
-                            .list_artifacts(ArtifactType::Requirement)
+                            .list_artifacts_for_ticket(ArtifactType::Requirement, &state.ticket_id)
                             .unwrap_or_default();
                         let use_cases = store
-                            .list_artifacts(ArtifactType::UseCase)
+                            .list_artifacts_for_ticket(ArtifactType::UseCase, &state.ticket_id)
                             .unwrap_or_default();
                         let test_cases = store
-                            .list_artifacts(ArtifactType::TestCase)
+                            .list_artifacts_for_ticket(ArtifactType::TestCase, &state.ticket_id)
                             .unwrap_or_default();
 
                         // Validate: require at least one task
@@ -832,7 +837,7 @@ plan approved BEFORE writing any code."#
                     }
                     "verification" => {
                         let test_cases = store
-                            .list_artifacts(ArtifactType::TestCase)
+                            .list_artifacts_for_ticket(ArtifactType::TestCase, &state.ticket_id)
                             .unwrap_or_default();
 
                         summary.push_str("### Test Cases\n\n");
@@ -911,11 +916,12 @@ plan approved BEFORE writing any code."#
 
                 // Generate next steps based on the new phase
                 let mut next_steps = String::new();
+                let ticket_id = &state.ticket_id;
                 if let Some(new) = new_phase {
                     next_steps.push_str("\n\n---\n\n## Next Steps\n\n");
                     match new {
                         WorkflowPhase::Requirements => {
-                            recommend_requirements_phase(&store, &config, &mut next_steps)?;
+                            recommend_requirements_phase(&store, &config, ticket_id, &mut next_steps)?;
                         }
                         WorkflowPhase::Analysis => {
                             next_steps.push_str("### Analysis Phase\n\n");
@@ -927,13 +933,13 @@ plan approved BEFORE writing any code."#
                             );
                         }
                         WorkflowPhase::Design => {
-                            recommend_design_phase(&store, &config, &mut next_steps)?;
+                            recommend_design_phase(&store, &config, ticket_id, &mut next_steps)?;
                         }
                         WorkflowPhase::Implementation => {
-                            recommend_implementation_phase(&store, &state, &mut next_steps)?;
+                            recommend_implementation_phase(&store, &state, ticket_id, &mut next_steps)?;
                         }
                         WorkflowPhase::Verification => {
-                            recommend_verification_phase(&store, &mut next_steps)?;
+                            recommend_verification_phase(&store, ticket_id, &mut next_steps)?;
                         }
                         WorkflowPhase::Deployment => {
                             next_steps.push_str("### Deployment Phase\n\n");

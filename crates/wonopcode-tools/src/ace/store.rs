@@ -67,8 +67,8 @@ impl ArtifactStore {
         priority: Priority,
         staging: bool,
     ) -> Result<Artifact> {
-        // Validate parents
-        self.validate_parents(&artifact_type, &parents)?;
+        // Validate parents (including ticket ID check)
+        self.validate_parents(&artifact_type, &parents, &state.ticket_id)?;
 
         // Generate ID
         let seq = state.next_sequence(artifact_type.directory());
@@ -154,6 +154,9 @@ impl ArtifactStore {
     }
 
     /// List all artifacts of a given type.
+    ///
+    /// **Note**: This returns ALL artifacts of the type, regardless of ticket ID.
+    /// For workstream-scoped queries, use `list_artifacts_for_ticket()` instead.
     pub fn list_artifacts(&self, artifact_type: ArtifactType) -> Result<Vec<Artifact>> {
         let mut artifacts = Vec::new();
 
@@ -185,7 +188,26 @@ impl ArtifactStore {
         Ok(artifacts)
     }
 
+    /// List artifacts of a given type that belong to a specific ticket.
+    ///
+    /// This filters artifacts by extracting the ticket ID from their artifact ID
+    /// and comparing it to the provided ticket ID (case-insensitive).
+    pub fn list_artifacts_for_ticket(
+        &self,
+        artifact_type: ArtifactType,
+        ticket_id: &str,
+    ) -> Result<Vec<Artifact>> {
+        let all_artifacts = self.list_artifacts(artifact_type)?;
+        Ok(all_artifacts
+            .into_iter()
+            .filter(|a| a.belongs_to_ticket(ticket_id))
+            .collect())
+    }
+
     /// List all artifacts of all types.
+    ///
+    /// **Note**: This returns ALL artifacts regardless of ticket ID.
+    /// For workstream-scoped queries, use `list_all_artifacts_for_ticket()` instead.
     pub fn list_all_artifacts(&self) -> Result<Vec<Artifact>> {
         let mut artifacts = Vec::new();
 
@@ -197,6 +219,23 @@ impl ArtifactStore {
             ArtifactType::Task,
         ] {
             artifacts.extend(self.list_artifacts(artifact_type)?);
+        }
+
+        Ok(artifacts)
+    }
+
+    /// List all artifacts of all types that belong to a specific ticket.
+    pub fn list_all_artifacts_for_ticket(&self, ticket_id: &str) -> Result<Vec<Artifact>> {
+        let mut artifacts = Vec::new();
+
+        for artifact_type in [
+            ArtifactType::UseCase,
+            ArtifactType::Requirement,
+            ArtifactType::Design,
+            ArtifactType::TestCase,
+            ArtifactType::Task,
+        ] {
+            artifacts.extend(self.list_artifacts_for_ticket(artifact_type, ticket_id)?);
         }
 
         Ok(artifacts)
@@ -337,8 +376,13 @@ impl ArtifactStore {
             .contains("/workspace/staging/")
     }
 
-    /// Validate that parents are valid for the given artifact type.
-    fn validate_parents(&self, artifact_type: &ArtifactType, parents: &[String]) -> Result<()> {
+    /// Validate that parents are valid for the given artifact type and belong to the same ticket.
+    fn validate_parents(
+        &self,
+        artifact_type: &ArtifactType,
+        parents: &[String],
+        ticket_id: &str,
+    ) -> Result<()> {
         let valid_types = artifact_type.valid_parent_types();
 
         if artifact_type.requires_parent() && parents.is_empty() {
@@ -369,8 +413,18 @@ impl ArtifactStore {
             }
 
             // Verify parent exists
-            if self.read_artifact(parent_id)?.is_none() {
-                bail!("Parent artifact not found: {}", parent_id);
+            let parent_artifact = self
+                .read_artifact(parent_id)?
+                .ok_or_else(|| anyhow::anyhow!("Parent artifact not found: {}", parent_id))?;
+
+            // Verify parent belongs to the same ticket
+            if !parent_artifact.belongs_to_ticket(ticket_id) {
+                bail!(
+                    "Parent artifact {} does not belong to the current workstream (ticket: {}).\n\
+                     Parent artifacts must be from the same ticket.",
+                    parent_id,
+                    ticket_id
+                );
             }
         }
 

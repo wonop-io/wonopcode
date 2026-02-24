@@ -66,17 +66,18 @@ fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
     phased_todos
 }
 
-/// Emit TodosUpdated event with all current tasks.
+/// Emit TodosUpdated event with tasks for the current workstream's ticket.
 ///
-/// This reads all tasks from the artifact store and emits a `ToolEvent::TodosUpdated`
-/// so the Plan View in the desktop UI updates immediately.
-fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore) {
+/// This reads tasks that belong to the current ticket from the artifact store
+/// and emits a `ToolEvent::TodosUpdated` so the Plan View in the desktop UI updates immediately.
+fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore, ticket_id: &str) {
     if let Some(ref event_tx) = ctx.event_tx {
-        tracing::info!("emit_todos_updated: event_tx is available, reading tasks...");
-        if let Ok(tasks) = store.list_artifacts(ArtifactType::Task) {
+        tracing::info!("emit_todos_updated: event_tx is available, reading tasks for ticket {}...", ticket_id);
+        if let Ok(tasks) = store.list_artifacts_for_ticket(ArtifactType::Task, ticket_id) {
             tracing::info!(
-                "emit_todos_updated: found {} tasks, building phased todos",
-                tasks.len()
+                "emit_todos_updated: found {} tasks for ticket {}, building phased todos",
+                tasks.len(),
+                ticket_id
             );
             let phased_todos = build_phased_todos_from_tasks(&tasks);
             tracing::info!(
@@ -127,8 +128,9 @@ impl Tool for AceTodoReadTool {
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
+        // Filter tasks to only those belonging to the current workstream's ticket
         let tasks = store
-            .list_artifacts(ArtifactType::Task)
+            .list_artifacts_for_ticket(ArtifactType::Task, &state.ticket_id)
             .map_err(|e| ToolError::execution_failed(format!("Failed to list tasks: {e}")))?;
 
         if tasks.is_empty() {
@@ -295,6 +297,15 @@ Use 'parked' or 'done' on the current active task first."#
                 ToolError::execution_failed(format!("Artifact not found: {}", args.node_id))
             })?;
 
+        // Verify the artifact belongs to the current workstream's ticket
+        if !old_artifact.belongs_to_ticket(&state.ticket_id) {
+            return Err(ToolError::execution_failed(format!(
+                "Artifact {} does not belong to the current workstream (ticket: {}).\n\n\
+                 This artifact belongs to a different ticket. Use artifacts from the current workstream only.",
+                args.node_id, state.ticket_id
+            )));
+        }
+
         let old_status = old_artifact.metadata.progress.as_str().to_string();
 
         // Enforce single active task constraint
@@ -335,7 +346,7 @@ Use 'parked' or 'done' on the current active task first."#
         }
 
         // Emit TodosUpdated so Plan View updates immediately
-        emit_todos_updated(ctx, &store);
+        emit_todos_updated(ctx, &store, &state.ticket_id);
 
         let active_info = if progress == Progress::InProgress {
             format!("\n\n**Active task:** `{}`", args.node_id)
@@ -512,7 +523,7 @@ Example:
             .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
 
         // Emit TodosUpdated so Plan View updates immediately
-        emit_todos_updated(ctx, &store);
+        emit_todos_updated(ctx, &store, &state.ticket_id);
 
         let output = format!(
             "Created {} task(s):\n\n{}",
