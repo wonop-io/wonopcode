@@ -76,6 +76,10 @@ impl AnthropicProvider {
     /// 2. Every `tool_result` must have a corresponding `tool_use` in the previous assistant message
     ///
     /// This function removes orphaned tool_use/tool_result blocks to prevent API errors.
+    /// 
+    /// Note: Tool results may be split across multiple consecutive Tool messages (this is how
+    /// StandardLoop produces them). This function looks ahead through all consecutive Tool/User
+    /// messages to find all tool_results that correspond to a set of tool_use blocks.
     fn sanitize_messages(&self, messages: &[Message]) -> Vec<Message> {
         use crate::message::{ContentPart, Role};
         use std::collections::HashSet;
@@ -100,21 +104,27 @@ impl AnthropicProvider {
                         // No tool_use, keep as-is
                         sanitized.push(msg.clone());
                     } else {
-                        // Check if next message has all the tool_results
-                        let next_msg = messages.get(i + 1);
-                        let next_tool_result_ids: HashSet<String> = next_msg
-                            .map(|m| {
-                                m.content.iter()
-                                    .filter_map(|part| {
-                                        if let ContentPart::ToolResult { tool_use_id, .. } = part {
-                                            Some(tool_use_id.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        // Look ahead through ALL consecutive Tool messages to find all tool_results
+                        // This handles the case where StandardLoop produces separate Tool messages
+                        // for each tool result
+                        let mut next_tool_result_ids: HashSet<String> = HashSet::new();
+                        let mut j = i + 1;
+                        while j < messages.len() {
+                            let next_msg = &messages[j];
+                            // Stop if we hit an Assistant message (new turn)
+                            if next_msg.role == Role::Assistant {
+                                break;
+                            }
+                            // Collect tool_result IDs from Tool or User messages
+                            if next_msg.role == Role::Tool || next_msg.role == Role::User {
+                                for part in &next_msg.content {
+                                    if let ContentPart::ToolResult { tool_use_id, .. } = part {
+                                        next_tool_result_ids.insert(tool_use_id.clone());
+                                    }
+                                }
+                            }
+                            j += 1;
+                        }
                         
                         // Find tool_use IDs that don't have matching tool_results
                         let orphaned_ids: HashSet<&String> = tool_use_ids
@@ -177,21 +187,24 @@ impl AnthropicProvider {
                         // No tool_results, keep as-is
                         sanitized.push(msg.clone());
                     } else {
-                        // Check if previous message has all the tool_use
-                        let prev_tool_use_ids: HashSet<String> = sanitized.last()
-                            .filter(|m| m.role == Role::Assistant)
-                            .map(|m| {
-                                m.content.iter()
-                                    .filter_map(|part| {
-                                        if let ContentPart::ToolUse { id, .. } = part {
-                                            Some(id.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        // Look back to find the most recent Assistant message with tool_use blocks
+                        // We need to find the assistant message that these tool_results belong to
+                        let mut prev_tool_use_ids: HashSet<String> = HashSet::new();
+                        for prev_msg in sanitized.iter().rev() {
+                            if prev_msg.role == Role::Assistant {
+                                // Found the assistant message - collect its tool_use IDs
+                                for part in &prev_msg.content {
+                                    if let ContentPart::ToolUse { id, .. } = part {
+                                        prev_tool_use_ids.insert(id.clone());
+                                    }
+                                }
+                                break;
+                            }
+                            // Skip over other Tool messages (they're part of the same tool result batch)
+                            if prev_msg.role != Role::Tool {
+                                break;
+                            }
+                        }
                         
                         // Find tool_result IDs that don't have matching tool_use
                         let orphaned_ids: HashSet<&String> = tool_result_ids
@@ -248,16 +261,30 @@ impl AnthropicProvider {
     }
 
     /// Convert messages to Anthropic format.
+    /// 
+    /// The Anthropic API requires that all `tool_result` blocks for a given set of
+    /// `tool_use` blocks must be in a single user message immediately following
+    /// the assistant message. This function merges consecutive Tool messages into
+    /// a single user message to satisfy this requirement.
     fn convert_messages(&self, messages: &[Message]) -> (Option<String>, Vec<AnthropicMessage>) {
         // First sanitize messages to fix any broken tool pairs
         let messages = self.sanitize_messages(messages);
         
         let mut system = None;
         let mut converted = Vec::new();
+        // Buffer for accumulating tool results that need to be merged
+        let mut pending_tool_results: Vec<serde_json::Value> = Vec::new();
 
         for msg in &messages {
             match msg.role {
                 crate::message::Role::System => {
+                    // Flush any pending tool results before system message
+                    if !pending_tool_results.is_empty() {
+                        converted.push(AnthropicMessage {
+                            role: "user".to_string(),
+                            content: std::mem::take(&mut pending_tool_results),
+                        });
+                    }
                     // Collect system messages
                     match system {
                         None => system = Some(msg.text()),
@@ -267,25 +294,45 @@ impl AnthropicProvider {
                     }
                 }
                 crate::message::Role::User => {
+                    // Flush any pending tool results before user message
+                    if !pending_tool_results.is_empty() {
+                        converted.push(AnthropicMessage {
+                            role: "user".to_string(),
+                            content: std::mem::take(&mut pending_tool_results),
+                        });
+                    }
                     converted.push(AnthropicMessage {
                         role: "user".to_string(),
                         content: self.convert_content(&msg.content),
                     });
                 }
                 crate::message::Role::Assistant => {
+                    // Flush any pending tool results before assistant message
+                    if !pending_tool_results.is_empty() {
+                        converted.push(AnthropicMessage {
+                            role: "user".to_string(),
+                            content: std::mem::take(&mut pending_tool_results),
+                        });
+                    }
                     converted.push(AnthropicMessage {
                         role: "assistant".to_string(),
                         content: self.convert_content(&msg.content),
                     });
                 }
                 crate::message::Role::Tool => {
-                    // Tool results go to user messages in Anthropic format
-                    converted.push(AnthropicMessage {
-                        role: "user".to_string(),
-                        content: self.convert_content(&msg.content),
-                    });
+                    // Accumulate tool results - they will be merged into a single user message
+                    // when we encounter a non-Tool message or reach the end
+                    pending_tool_results.extend(self.convert_content(&msg.content));
                 }
             }
+        }
+
+        // Flush any remaining pending tool results at the end
+        if !pending_tool_results.is_empty() {
+            converted.push(AnthropicMessage {
+                role: "user".to_string(),
+                content: pending_tool_results,
+            });
         }
 
         (system, converted)
@@ -1022,5 +1069,152 @@ mod tests {
         assert_eq!(converted.len(), 1);
         let input = &converted[0]["input"];
         assert!(input.is_object());
+    }
+
+    #[test]
+    fn test_convert_messages_merges_consecutive_tool_results() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Simulate a conversation with multiple tool calls that get separate tool result messages
+        // This is the pattern that was causing the "tool_use ids were found without tool_result blocks" error
+        let messages = vec![
+            Message::user("Hello"),
+            // Assistant message with multiple tool_use blocks
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "toolu_1".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({"path": "/file1"}),
+                    },
+                    ContentPart::ToolUse {
+                        id: "toolu_2".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({"path": "/file2"}),
+                    },
+                    ContentPart::ToolUse {
+                        id: "toolu_3".to_string(),
+                        name: "list".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            // Three separate tool result messages (this is what StandardLoop produces)
+            Message::tool_result("toolu_1", "content of file1"),
+            Message::tool_result("toolu_2", "content of file2"),
+            Message::tool_result("toolu_3", "file1\nfile2\nfile3"),
+            // Final assistant response
+            Message::assistant("I found the files"),
+        ];
+
+        let (_, converted) = provider.convert_messages(&messages);
+
+        // Should have: user, assistant (with tool_use), user (with ALL tool_results merged), assistant
+        assert_eq!(converted.len(), 4, "Should have 4 messages after merging tool results");
+        
+        // First message is user
+        assert_eq!(converted[0].role, "user");
+        
+        // Second message is assistant with tool_use
+        assert_eq!(converted[1].role, "assistant");
+        assert_eq!(converted[1].content.len(), 3, "Assistant should have 3 tool_use blocks");
+        
+        // Third message should be user with ALL THREE tool_results merged
+        assert_eq!(converted[2].role, "user");
+        assert_eq!(converted[2].content.len(), 3, "User message should have all 3 tool_results merged");
+        
+        // Verify all three tool_result IDs are present
+        let tool_result_ids: Vec<&str> = converted[2].content.iter()
+            .filter_map(|c| c.get("tool_use_id").and_then(|v| v.as_str()))
+            .collect();
+        assert!(tool_result_ids.contains(&"toolu_1"), "Should contain toolu_1");
+        assert!(tool_result_ids.contains(&"toolu_2"), "Should contain toolu_2");
+        assert!(tool_result_ids.contains(&"toolu_3"), "Should contain toolu_3");
+        
+        // Fourth message is assistant
+        assert_eq!(converted[3].role, "assistant");
+    }
+
+    #[test]
+    fn test_convert_messages_handles_single_tool_result() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Single tool call and result
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "toolu_1".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({"path": "/file1"}),
+                    },
+                ],
+            },
+            Message::tool_result("toolu_1", "content of file1"),
+            Message::assistant("Done"),
+        ];
+
+        let (_, converted) = provider.convert_messages(&messages);
+
+        // Should have: user, assistant (with tool_use), user (with tool_result), assistant
+        assert_eq!(converted.len(), 4);
+        assert_eq!(converted[2].role, "user");
+        assert_eq!(converted[2].content.len(), 1, "Single tool result should work correctly");
+    }
+
+    #[test]
+    fn test_convert_messages_tool_results_at_end() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Messages ending with tool results (before assistant responds)
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "toolu_1".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                    ContentPart::ToolUse {
+                        id: "toolu_2".to_string(),
+                        name: "write".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            Message::tool_result("toolu_1", "result1"),
+            Message::tool_result("toolu_2", "result2"),
+            // No assistant response yet - tool results are at the end
+        ];
+
+        let (_, converted) = provider.convert_messages(&messages);
+
+        // Should have: user, assistant, user (with both tool_results)
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[2].role, "user");
+        assert_eq!(converted[2].content.len(), 2, "Tool results at end should be merged");
     }
 }
