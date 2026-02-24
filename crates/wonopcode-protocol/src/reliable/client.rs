@@ -242,6 +242,19 @@ pub enum ClientMessage {
         mode: String,
     },
 
+    /// Search for files in the repository (for @file: references).
+    ///
+    /// Uses fuzzy matching against file paths. Results are limited to `limit` items.
+    SearchFiles {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Search query (matched against file paths).
+        query: String,
+        /// Maximum number of results to return.
+        #[serde(default = "default_search_limit")]
+        limit: usize,
+    },
+
     /// Get list of available models.
     GetAvailableModels,
 
@@ -426,6 +439,11 @@ pub enum InputResponseData {
         /// Reason for cancellation.
         reason: String,
     },
+}
+
+/// Default limit for file search results.
+fn default_search_limit() -> usize {
+    20
 }
 
 #[cfg(test)]

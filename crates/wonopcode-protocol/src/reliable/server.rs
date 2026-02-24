@@ -295,6 +295,14 @@ pub enum ResponseData {
         lines: Vec<DiffLine>,
     },
 
+    /// Response to SearchFiles.
+    FileSearchResults {
+        /// The search query.
+        query: String,
+        /// Matching files.
+        files: Vec<FileSearchResultItem>,
+    },
+
     /// Response to GetAvailableModels.
     AvailableModels {
         /// List of available models.
@@ -405,6 +413,18 @@ pub struct DiffLine {
     pub new_line_num: Option<usize>,
     /// Line content.
     pub content: String,
+}
+
+/// File search result item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileSearchResultItem {
+    /// File path relative to repository root.
+    pub path: String,
+    /// File name (last component of path).
+    pub name: String,
+    /// Directory containing the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
 }
 
 /// Model info.
