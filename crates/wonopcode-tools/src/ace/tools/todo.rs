@@ -120,29 +120,10 @@ impl Tool for AceTodoReadTool {
     }
 
     async fn execute(&self, _args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
-        let state = WorkstreamState::load(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?;
+        // Auto-initialize workstream if needed
+        let state = WorkstreamState::ensure_initialized(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
 
-        // Return early if no workstream is initialized
-        if state.is_none() {
-            return Ok(ToolOutput::new(
-                "No workstream initialized - STOP",
-                "## ⛔ No Workstream Initialized\n\n\
-                 **STOP: You cannot proceed without a workstream.**\n\n\
-                 This worktree does not have an active workstream. The workstream must be \
-                 initialized by Wonop Code Desktop before any work can begin.\n\n\
-                 **⚠️ DO NOT:**\n\
-                 - Create `.wonopcode/` directory or files\n\
-                 - Create `state.yaml` manually\n\
-                 - Use `todowrite` or other tools to track work\n\
-                 - Start implementing code\n\n\
-                 **✅ Tell the user:**\n\
-                 \"This worktree needs to be initialized. Please open Wonop Code Desktop \
-                 and select or create a workstream for this worktree, then try again.\"",
-            ));
-        }
-
-        let state = state.unwrap();
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
@@ -302,15 +283,9 @@ Use 'parked' or 'done' on the current active task first."#
         let store = ArtifactStore::new(&ctx.root_dir)
             .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
 
-        // Load state (managed by Wonop Code Desktop, not by the agent)
-        let mut state = WorkstreamState::load(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| {
-                ToolError::execution_failed(
-                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                 Tell the user to open Wonop Code Desktop and initialize this worktree first.",
-                )
-            })?;
+        // Load state (auto-initializing if needed)
+        let mut state = WorkstreamState::ensure_initialized(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
 
         // Get old status for event
         let old_artifact = store
@@ -481,14 +456,9 @@ Example:
             ToolError::execution_failed(format!("Failed to create directories: {e}"))
         })?;
 
-        let mut state = WorkstreamState::load(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| {
-                ToolError::execution_failed(
-                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                 Tell the user to open Wonop Code Desktop and initialize this worktree first.",
-                )
-            })?;
+        // Load state (auto-initializing if needed)
+        let mut state = WorkstreamState::ensure_initialized(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
 
         let mut created_ids = Vec::new();
 
@@ -593,13 +563,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let ctx = test_context(dir.path().to_path_buf());
 
-        // No state created - should return info message, not error
+        // No state created - should auto-initialize and return empty tasks
         let tool = AceTodoReadTool;
         let result = tool.execute(json!({}), &ctx).await.unwrap();
 
-        assert!(result.output.contains("No Workstream Initialized"));
-        assert!(result.output.contains("DO NOT"));
-        assert!(result.output.contains("Wonop Code Desktop"));
+        // Should auto-initialize and show no tasks
+        assert!(result.output.contains("No tasks"));
+
+        // State file should now exist
+        let state_path = dir.path().join(".wonopcode").join("state.yaml");
+        assert!(state_path.exists());
     }
 
     #[tokio::test]

@@ -166,6 +166,74 @@ impl WorkstreamState {
         Ok(None)
     }
 
+    /// Ensure a workstream is initialized, creating one if necessary.
+    ///
+    /// This is called by ACE tools to auto-initialize the workstream when needed.
+    /// Unlike `load()`, this will always return a state - creating a default one
+    /// if no state exists and no ticket ID can be inferred from the directory name.
+    ///
+    /// The default ticket ID is generated from the directory name using a short hash.
+    pub fn ensure_initialized(root_dir: &Path) -> Result<Self> {
+        // First try normal load (which may auto-create from directory name)
+        if let Some(state) = Self::load(root_dir)? {
+            return Ok(state);
+        }
+
+        // No state exists and couldn't infer ticket ID - create a default workstream
+        let ticket_id = Self::generate_default_ticket_id(root_dir);
+        let mut state = Self::new(&ticket_id);
+
+        // Try to extract a title from the directory name
+        if let Some(dir_name) = root_dir.file_name().and_then(|n| n.to_str()) {
+            state.ticket_title = Some(Self::humanize_directory_name(dir_name));
+        }
+
+        // Save the state so it persists
+        state.save(root_dir)?;
+
+        Ok(state)
+    }
+
+    /// Generate a default ticket ID from the directory path.
+    ///
+    /// Creates an ID like "WS-abc123" where abc123 is a short hash of the directory name.
+    fn generate_default_ticket_id(root_dir: &Path) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let dir_name = root_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace");
+
+        let mut hasher = DefaultHasher::new();
+        dir_name.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        // Use first 6 hex chars of hash for a short but unique ID
+        format!("WS-{:06x}", hash & 0xFFFFFF)
+    }
+
+    /// Convert a directory name to a human-readable title.
+    ///
+    /// Examples:
+    /// - "my-project" -> "My Project"
+    /// - "some_feature_branch" -> "Some Feature Branch"
+    fn humanize_directory_name(dir_name: &str) -> String {
+        dir_name
+            .split(|c| c == '-' || c == '_')
+            .filter(|s| !s.is_empty())
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().chain(chars).collect(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// Extract ticket ID from a worktree directory name.
     ///
     /// Supports patterns like:
@@ -459,5 +527,103 @@ mod tests {
         let next = state.advance_phase();
         assert!(next.is_none());
         assert_eq!(state.workflow.current_phase, WorkflowPhase::Deployment);
+    }
+
+    #[test]
+    fn test_ensure_initialized_with_existing_state() {
+        let dir = tempdir().unwrap();
+
+        // Create existing state
+        let mut state = WorkstreamState::new("EXISTING-123");
+        state.ticket_title = Some("Existing State".to_string());
+        state.save(dir.path()).unwrap();
+
+        // ensure_initialized should return existing state
+        let loaded = WorkstreamState::ensure_initialized(dir.path()).unwrap();
+        assert_eq!(loaded.ticket_id, "EXISTING-123");
+        assert_eq!(loaded.ticket_title, Some("Existing State".to_string()));
+    }
+
+    #[test]
+    fn test_ensure_initialized_with_ticket_directory() {
+        // Create a temp dir with a ticket-style name
+        let parent = tempdir().unwrap();
+        let worktree_dir = parent.path().join("feature-WON-888--ensure-test");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        // ensure_initialized should auto-create from directory name
+        let state = WorkstreamState::ensure_initialized(&worktree_dir).unwrap();
+        assert_eq!(state.ticket_id, "WON-888");
+        assert_eq!(state.ticket_title, Some("Ensure Test".to_string()));
+
+        // State file should exist
+        let state_path = worktree_dir.join(".wonopcode").join("state.yaml");
+        assert!(state_path.exists());
+    }
+
+    #[test]
+    fn test_ensure_initialized_creates_default() {
+        // A temp dir has a random name, so no ticket ID can be inferred
+        let dir = tempdir().unwrap();
+
+        // ensure_initialized should create a default workstream
+        let state = WorkstreamState::ensure_initialized(dir.path()).unwrap();
+
+        // Should have a WS- prefixed ID
+        assert!(state.ticket_id.starts_with("WS-"));
+
+        // Should have a title derived from the directory name
+        assert!(state.ticket_title.is_some());
+
+        // State file should exist
+        let state_path = dir.path().join(".wonopcode").join("state.yaml");
+        assert!(state_path.exists());
+    }
+
+    #[test]
+    fn test_generate_default_ticket_id() {
+        let parent = tempdir().unwrap();
+        let dir1 = parent.path().join("my-project");
+        let dir2 = parent.path().join("another-project");
+        std::fs::create_dir_all(&dir1).unwrap();
+        std::fs::create_dir_all(&dir2).unwrap();
+
+        let id1 = WorkstreamState::generate_default_ticket_id(&dir1);
+        let id2 = WorkstreamState::generate_default_ticket_id(&dir2);
+
+        // Both should start with WS-
+        assert!(id1.starts_with("WS-"));
+        assert!(id2.starts_with("WS-"));
+
+        // Different directories should have different IDs
+        assert_ne!(id1, id2);
+
+        // Same directory should produce same ID
+        let id1_again = WorkstreamState::generate_default_ticket_id(&dir1);
+        assert_eq!(id1, id1_again);
+    }
+
+    #[test]
+    fn test_humanize_directory_name() {
+        assert_eq!(
+            WorkstreamState::humanize_directory_name("my-project"),
+            "My Project"
+        );
+        assert_eq!(
+            WorkstreamState::humanize_directory_name("some_feature_branch"),
+            "Some Feature Branch"
+        );
+        assert_eq!(
+            WorkstreamState::humanize_directory_name("mixed-style_name"),
+            "Mixed Style Name"
+        );
+        assert_eq!(
+            WorkstreamState::humanize_directory_name("simple"),
+            "Simple"
+        );
+        assert_eq!(
+            WorkstreamState::humanize_directory_name("a-b-c"),
+            "A B C"
+        );
     }
 }

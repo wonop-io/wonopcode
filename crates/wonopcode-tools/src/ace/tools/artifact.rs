@@ -96,15 +96,9 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
             .and_then(Priority::parse)
             .unwrap_or(Priority::Medium);
 
-        // Load state (managed by Wonop Code Desktop, not by the agent)
-        let mut state = WorkstreamState::load(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to load state: {e}")))?
-            .ok_or_else(|| {
-                ToolError::execution_failed(
-                    "STOP: No workstream initialized. DO NOT create .wonopcode/ files manually. \
-                     Tell the user to open Wonop Code Desktop and initialize this worktree first.",
-                )
-            })?;
+        // Load state (auto-initializing if needed)
+        let mut state = WorkstreamState::ensure_initialized(&ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
 
         // Create artifact
         let store = ArtifactStore::new(&ctx.root_dir)
