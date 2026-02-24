@@ -240,6 +240,8 @@ impl WorkstreamState {
     /// - `feature-WON-125--description` → `WON-125`
     /// - `feature/won-125--description` → `WON-125`
     /// - `bugfix-PROJ-42--fix-thing` → `PROJ-42`
+    /// - `feature-409--description` → `409` (numeric-only ticket ID)
+    /// - `409--description` → `409` (numeric-only ticket ID)
     fn extract_ticket_id(dir_name: &str) -> Option<String> {
         // Common prefixes to strip
         let prefixes = [
@@ -254,15 +256,35 @@ impl WorkstreamState {
             }
         }
 
-        // Look for ticket pattern: {PROJECT}-{NUMBER} (e.g., WON-125, PROJ-42)
-        // The pattern is: letters/numbers, dash, numbers, optionally followed by -- or -
+        // Try to match ticket patterns in order of specificity:
+        // 1. {PROJECT}-{NUMBER} (e.g., WON-125, PROJ-42)
+        // 2. {NUMBER} only (e.g., 409) - for numeric-only ticket IDs
         use std::sync::OnceLock;
-        static RE: OnceLock<regex::Regex> = OnceLock::new();
-        let re = RE.get_or_init(|| regex::Regex::new(r"^([A-Za-z0-9]+-\d+)").unwrap());
 
-        re.captures(name)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_uppercase())
+        // Pattern 1: Letters/numbers followed by dash and digits (e.g., WON-125)
+        static RE_PROJECT: OnceLock<regex::Regex> = OnceLock::new();
+        let re_project =
+            RE_PROJECT.get_or_init(|| regex::Regex::new(r"^([A-Za-z][A-Za-z0-9]*-\d+)").unwrap());
+
+        if let Some(captures) = re_project.captures(name) {
+            if let Some(m) = captures.get(1) {
+                return Some(m.as_str().to_uppercase());
+            }
+        }
+
+        // Pattern 2: Numeric-only ticket ID (e.g., 409)
+        // Only matches when followed by -- (the description separator) to avoid
+        // ambiguity with branch names like "feature-123" which may not be ticket IDs
+        static RE_NUMERIC: OnceLock<regex::Regex> = OnceLock::new();
+        let re_numeric = RE_NUMERIC.get_or_init(|| regex::Regex::new(r"^(\d+)--").unwrap());
+
+        if let Some(captures) = re_numeric.captures(name) {
+            if let Some(m) = captures.get(1) {
+                return Some(m.as_str().to_string());
+            }
+        }
+
+        None
     }
 
     /// Extract a human-readable title from the directory name.
@@ -452,13 +474,31 @@ mod tests {
             Some("ABC-123".to_string())
         );
 
+        // Numeric-only ticket ID with feature prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("feature-409--description"),
+            Some("409".to_string())
+        );
+
+        // Numeric-only ticket ID with slash prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("feature/409--description"),
+            Some("409".to_string())
+        );
+
+        // Numeric-only ticket ID without prefix
+        assert_eq!(
+            WorkstreamState::extract_ticket_id("409--some-feature"),
+            Some("409".to_string())
+        );
+
         // No ticket ID
         assert_eq!(
             WorkstreamState::extract_ticket_id("some-random-directory"),
             None
         );
 
-        // Just numbers (not a valid ticket)
+        // Just numbers without description separator (ambiguous, returns None)
         assert_eq!(WorkstreamState::extract_ticket_id("feature-123"), None);
     }
 
