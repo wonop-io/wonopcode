@@ -1776,18 +1776,26 @@ impl CredentialsManager {
     /// Checks in order:
     /// 1. Environment variables
     /// 2. Stored credentials
+    ///
+    /// Note: API keys are trimmed of whitespace to handle copy/paste errors.
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
         // 1. Check environment variables first
         if let Some(key) = self.get_api_key_from_env(provider) {
-            debug!(provider = %provider, source = "env", "Found API key");
-            return Some(key);
+            let trimmed = key.trim().to_string();
+            if !trimmed.is_empty() {
+                debug!(provider = %provider, source = "env", "Found API key");
+                return Some(trimmed);
+            }
         }
 
         // 2. Check stored credentials
         if let Some(cred) = self.credentials.get(provider) {
             if let Some(key) = cred.api_key() {
-                debug!(provider = %provider, source = "file", "Found API key");
-                return Some(key.to_string());
+                let trimmed = key.trim().to_string();
+                if !trimmed.is_empty() {
+                    debug!(provider = %provider, source = "file", "Found API key");
+                    return Some(trimmed);
+                }
             }
         }
 
@@ -1815,12 +1823,18 @@ impl CredentialsManager {
     }
 
     /// Set API key for a provider.
+    ///
+    /// Note: API keys are trimmed of whitespace to handle copy/paste errors.
     pub fn set_api_key(&mut self, provider: &str, key: &str) -> CoreResult<()> {
+        let trimmed_key = key.trim().to_string();
+        if trimmed_key.is_empty() {
+            return Err(crate::error::CoreError::Config(ConfigError::Validation {
+                message: "API key cannot be empty".to_string(),
+            }));
+        }
         self.credentials.insert(
             provider.to_string(),
-            ProviderCredential::ApiKey {
-                key: key.to_string(),
-            },
+            ProviderCredential::ApiKey { key: trimmed_key },
         );
         self.save()
     }
@@ -3590,5 +3604,102 @@ mod tests {
 
         let blacklist = openai.blacklist.as_ref().unwrap();
         assert!(blacklist.contains(&"gpt-3.5-turbo".to_string()));
+    }
+
+    // =========================================================================
+    // Credentials Manager Tests
+    // =========================================================================
+
+    #[test]
+    fn credentials_manager_parses_structured_format() {
+        // Test that credentials in structured format (with type tag) are parsed correctly
+        let json = r#"{
+            "anthropic": {
+                "type": "api_key",
+                "key": "sk-ant-test-key-123"
+            }
+        }"#;
+
+        let parsed: HashMap<String, ProviderCredential> = serde_json::from_str(json).unwrap();
+        
+        let cred = parsed.get("anthropic").expect("Should have anthropic key");
+        match cred {
+            ProviderCredential::ApiKey { key } => {
+                assert_eq!(key, "sk-ant-test-key-123");
+            }
+            _ => panic!("Expected ApiKey variant"),
+        }
+    }
+
+    #[test]
+    fn credentials_manager_parses_claude_cli_format() {
+        // Test that Claude CLI credentials are parsed correctly
+        let json = r#"{
+            "anthropic": {
+                "type": "claude_cli"
+            }
+        }"#;
+
+        let parsed: HashMap<String, ProviderCredential> = serde_json::from_str(json).unwrap();
+        
+        let cred = parsed.get("anthropic").expect("Should have anthropic key");
+        match cred {
+            ProviderCredential::ClaudeCli => {
+                // Success
+            }
+            _ => panic!("Expected ClaudeCli variant"),
+        }
+    }
+
+    #[test]
+    fn credentials_file_with_flatten_works() {
+        // Test that CredentialsFile with #[serde(flatten)] parses correctly
+        let json = r#"{
+            "anthropic": {
+                "type": "api_key",
+                "key": "sk-ant-test-key-456"
+            },
+            "openai": {
+                "type": "api_key",
+                "key": "sk-openai-test-key"
+            }
+        }"#;
+
+        let creds_file: CredentialsFile = serde_json::from_str(json).unwrap();
+        
+        assert_eq!(creds_file.credentials.len(), 2);
+        
+        let anthropic = creds_file.credentials.get("anthropic").expect("Should have anthropic");
+        assert_eq!(anthropic.api_key(), Some("sk-ant-test-key-456"));
+        
+        let openai = creds_file.credentials.get("openai").expect("Should have openai");
+        assert_eq!(openai.api_key(), Some("sk-openai-test-key"));
+    }
+
+    #[test]
+    fn credentials_manager_get_api_key_works() {
+        use tempfile::tempdir;
+        
+        let temp_dir = tempdir().unwrap();
+        let creds_path = temp_dir.path().join("credentials.json");
+        
+        // Create a credentials file
+        let json = r#"{
+            "anthropic": {
+                "type": "api_key",
+                "key": "sk-ant-test-key-789"
+            }
+        }"#;
+        std::fs::write(&creds_path, json).unwrap();
+        
+        // Load with CredentialsManager
+        let manager = CredentialsManager::with_path(creds_path);
+        
+        let api_key = manager.get_api_key("anthropic");
+        assert_eq!(api_key, Some("sk-ant-test-key-789".to_string()));
+        
+        // Non-existent provider should return None
+        let no_key = manager.get_api_key("nonexistent");
+        assert!(no_key.is_none());
     }
 }

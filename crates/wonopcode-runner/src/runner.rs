@@ -2103,12 +2103,21 @@ impl Runner {
 
         // Check if we have authentication
         if api_key.is_empty() {
-            // For Anthropic, allow CLI-based subscription auth
-            if provider_name == "anthropic"
+            // For anthropic-cli, use Claude CLI authentication (no API key needed)
+            if provider_name == "anthropic-cli" {
+                if !ClaudeCliProvider::is_available() {
+                    return Err("Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code".into());
+                }
+                if !ClaudeCliProvider::is_authenticated() {
+                    return Err("Claude CLI not authenticated. Run 'claude login' to authenticate.".into());
+                }
+                info!("Using Claude CLI subscription for model change");
+            } else if provider_name == "anthropic"
                 && ClaudeCliProvider::is_available()
                 && ClaudeCliProvider::is_authenticated()
             {
-                info!("Using Claude CLI subscription for model change");
+                // For "anthropic" provider without API key, allow CLI-based subscription auth as fallback
+                info!("Using Claude CLI subscription for model change (fallback from anthropic provider)");
             } else if provider_name == "openai-codex"
                 && wonopcode_provider::codex::CodexProvider::has_credentials()
             {

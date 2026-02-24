@@ -332,7 +332,10 @@ impl ServerPromptRunner {
                 StreamChunk::TextEnd => {}
                 StreamChunk::ToolCallStart { id, name } => {
                     debug!(id = %id, name = %name, "Tool call started");
-                    tool_calls.push((id.clone(), name.clone(), String::new()));
+                    // Only add if not already present (avoid duplicates)
+                    if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                        tool_calls.push((id.clone(), name.clone(), String::new()));
+                    }
                 }
                 StreamChunk::ToolCallDelta { delta, .. } => {
                     if let Some(call) = tool_calls.last_mut() {
@@ -539,6 +542,21 @@ pub fn create_provider_from_config(
             } else {
                 Err("No Anthropic API key provided and Claude CLI not authenticated.".to_string())
             }
+        }
+        "anthropic-cli" => {
+            use wonopcode_provider::claude_cli::ClaudeCliProvider;
+
+            // anthropic-cli always uses Claude CLI subscription (no API key)
+            if !ClaudeCliProvider::is_available() {
+                return Err("Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code".to_string());
+            }
+            if !ClaudeCliProvider::is_authenticated() {
+                return Err("Claude CLI not authenticated. Run 'claude login' to authenticate.".to_string());
+            }
+            let provider =
+                wonopcode_provider::claude_cli::with_subscription_pricing(model_info)
+                    .map_err(|e| e.to_string())?;
+            Ok(Arc::new(provider) as BoxedLanguageModel)
         }
         "openai" => {
             let provider = wonopcode_provider::openai::OpenAIProvider::new(&api_key, model_info)

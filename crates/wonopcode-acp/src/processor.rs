@@ -218,7 +218,10 @@ impl Processor {
                         })
                         .await;
 
-                    tool_calls.push((id, name, args));
+                    // Only add if not already present (avoid duplicates)
+                    if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                        tool_calls.push((id, name, args));
+                    }
                 }
                 Ok(StreamChunk::ReasoningDelta(text)) => {
                     // Send reasoning chunk
@@ -253,7 +256,10 @@ impl Processor {
                             })
                             .await;
 
-                        tool_calls.push((id, name, args));
+                        // Only add if not already present (avoid duplicates)
+                        if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                            tool_calls.push((id, name, args));
+                        }
                         current_tool_args.clear();
                     }
                 }
@@ -685,8 +691,8 @@ pub fn load_api_key(provider: &str) -> Option<String> {
         }
     }
 
-    // Try credentials file
-    let path = dirs::data_dir()?.join("wonopcode").join("credentials.json");
+    // Try credentials file - use config dir (same as where auth saves credentials)
+    let path = dirs::config_dir()?.join("wonopcode").join("credentials.json");
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
             // Try parsing as simple HashMap<String, String> first (legacy format)

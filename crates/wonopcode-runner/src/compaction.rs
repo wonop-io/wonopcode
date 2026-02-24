@@ -356,6 +356,99 @@ fn find_tool_name(messages: &[ProviderMessage], tool_use_id: &str) -> Option<Str
     None
 }
 
+/// Check if a message contains tool_result content blocks.
+fn has_tool_results(msg: &ProviderMessage) -> bool {
+    msg.content.iter().any(|part| {
+        matches!(part, ContentPart::ToolResult { .. })
+    })
+}
+
+/// Check if a message contains tool_use content blocks.
+fn has_tool_use(msg: &ProviderMessage) -> bool {
+    msg.content.iter().any(|part| {
+        matches!(part, ContentPart::ToolUse { .. })
+    })
+}
+
+/// Find a safe split point that doesn't break tool_use/tool_result pairs.
+/// 
+/// The Anthropic API requires:
+/// 1. Every `tool_result` block must have a corresponding `tool_use` in the previous message
+/// 2. Every `tool_use` block must have a corresponding `tool_result` in the next message
+///
+/// If we split between a tool_use and its tool_result, the API will reject the request.
+///
+/// This function takes a proposed split point and adjusts it to ensure:
+/// - The first message of the "recent" portion doesn't have orphaned tool_results
+/// - The last message of the "summarized" portion doesn't have orphaned tool_use
+///
+/// Strategy:
+/// 1. If message at split point has tool_results -> move backward (to include tool_use)
+/// 2. If message just before split has tool_use -> also move backward (to include tool_results)
+/// 3. Keep iterating until we find a clean boundary
+fn find_safe_split_point(messages: &[ProviderMessage], proposed_split: usize, min_split: usize) -> usize {
+    let mut split_point = proposed_split;
+    
+    // Ensure we don't go below the minimum (need at least some messages to summarize)
+    while split_point > min_split {
+        let mut needs_adjustment = false;
+        
+        // Check 1: Message at split point has tool_results
+        // These tool_results need their tool_use from the previous message
+        if split_point < messages.len() && has_tool_results(&messages[split_point]) {
+            debug!(
+                "COMPACTION: Split point {} has tool_results, needs adjustment",
+                split_point
+            );
+            needs_adjustment = true;
+        }
+        
+        // Check 2: Message just before split point has tool_use
+        // These tool_use blocks need their tool_results in the next message
+        // If we summarize the tool_use but keep the tool_results, the results become orphaned
+        let prev_idx = split_point.saturating_sub(1);
+        if prev_idx >= 1 && has_tool_use(&messages[prev_idx]) {
+            debug!(
+                "COMPACTION: Message {} (just before split) has tool_use, needs adjustment",
+                prev_idx
+            );
+            needs_adjustment = true;
+        }
+        
+        if needs_adjustment {
+            split_point = split_point.saturating_sub(1);
+            debug!(
+                "COMPACTION: Moving split point backward to {}",
+                split_point
+            );
+        } else {
+            // Found a safe split point
+            break;
+        }
+    }
+    
+    // If we've reached minimum and still have issues, log a warning
+    if split_point == min_split && split_point < messages.len() {
+        if has_tool_results(&messages[split_point]) {
+            warn!(
+                "COMPACTION: Could not find safe split point without tool_results, using min_split={}. \
+                 This may cause API errors with some providers.",
+                min_split
+            );
+        }
+        let prev_idx = split_point.saturating_sub(1);
+        if prev_idx >= 1 && has_tool_use(&messages[prev_idx]) {
+            warn!(
+                "COMPACTION: Could not find safe split point without tool_use at boundary, using min_split={}. \
+                 This may cause API errors with some providers.",
+                min_split
+            );
+        }
+    }
+    
+    split_point
+}
+
 /// Estimate token count for text (roughly 4 chars per token).
 fn estimate_tokens(text: &str) -> u32 {
     (text.len() / 4).max(1) as u32
@@ -548,10 +641,27 @@ pub async fn compact_with_summary(
     //   - first_message = messages[0]
     //   - messages_to_summarize = messages[1..169] (168 messages)
     //   - recent_messages = messages[169..219] (50 messages)
-    let middle_end = messages.len().saturating_sub(preserve_recent);
+    let proposed_middle_end = messages.len().saturating_sub(preserve_recent);
 
+    if proposed_middle_end <= 1 {
+        return CompactionResult::InsufficientMessages;
+    }
+
+    // Find a safe split point that doesn't break tool_use/tool_result pairs.
+    // The Anthropic API requires tool_result blocks to have their corresponding
+    // tool_use in the previous assistant message.
+    // min_split = 2 ensures we have at least 1 message to summarize (index 1)
+    let middle_end = find_safe_split_point(messages, proposed_middle_end, 2);
+    
     if middle_end <= 1 {
         return CompactionResult::InsufficientMessages;
+    }
+    
+    if middle_end != proposed_middle_end {
+        info!(
+            "COMPACTION: Adjusted split point from {} to {} to preserve tool_use/tool_result pairs",
+            proposed_middle_end, middle_end
+        );
     }
 
     let first_message = &messages[0];
@@ -756,8 +866,10 @@ fn needs_chunked_summarization(messages: &[ProviderMessage], config: &Compaction
 /// 
 /// Strategy:
 /// 1. Target ~30K tokens per chunk (to stay well within context limits)
-/// 2. Try to split at conversation boundaries (user messages)
-/// 3. Never split in the middle of a tool call/result pair
+/// 2. Try to split at conversation boundaries (user messages without tool_results)
+/// 3. Never split in the middle of a tool call/result pair - this means:
+///    - NOT split right before a message that contains tool_results
+///    - NOT split right after a message that contains tool_use
 fn chunk_messages_for_summarization(
     messages: &[ProviderMessage],
     target_tokens_per_chunk: u32,
@@ -773,15 +885,25 @@ fn chunk_messages_for_summarization(
         // Check if adding this message would exceed chunk target
         let would_exceed = current_chunk_tokens + msg_tokens > target_tokens_per_chunk;
         
-        // Determine if this is a good split point (prefer user messages)
-        let is_good_split_point = msg.role == Role::User && !current_chunk_messages.is_empty();
+        // Check if the previous message (last in current chunk) has tool_use
+        // If so, we can't split here because the tool_results would be orphaned
+        let prev_has_tool_use = current_chunk_messages.last()
+            .map(|m| has_tool_use(m))
+            .unwrap_or(false);
         
-        // Split if we'd exceed AND we have a reasonable chunk AND this is a good split point
-        // OR if we'd exceed by a lot (>50% over target)
-        let should_split = would_exceed && (
-            is_good_split_point || 
-            current_chunk_tokens > target_tokens_per_chunk / 2
-        );
+        // Determine if this is a good split point:
+        // - Must be a user message (natural conversation boundary)
+        // - Must NOT have tool_results (would break tool_use/tool_result pairing)
+        // - Previous message must NOT have tool_use (would orphan tool_use)
+        // - Must have some messages in current chunk already
+        let is_safe_split_point = msg.role == Role::User 
+            && !has_tool_results(msg)
+            && !prev_has_tool_use
+            && !current_chunk_messages.is_empty();
+        
+        // Split if we'd exceed AND we have a reasonable chunk AND this is a safe split point
+        // Note: We're more conservative now - only split at truly safe points
+        let should_split = would_exceed && is_safe_split_point;
         
         if should_split && !current_chunk_messages.is_empty() {
             // Save current chunk
@@ -1313,6 +1435,314 @@ mod tests {
                 "Chunk has {} tokens, expected < 25K",
                 chunk.estimated_tokens
             );
+        }
+    }
+
+    #[test]
+    fn test_has_tool_results() {
+        // Message without tool results
+        let normal_msg = ProviderMessage::user("Hello");
+        assert!(!has_tool_results(&normal_msg));
+
+        // Message with tool results
+        let tool_result_msg = ProviderMessage {
+            role: Role::User,
+            content: vec![ContentPart::ToolResult {
+                tool_use_id: "tool_123".to_string(),
+                content: "Result".to_string(),
+                is_error: None,
+            }],
+        };
+        assert!(has_tool_results(&tool_result_msg));
+
+        // Message with tool use (not tool result)
+        let tool_use_msg = ProviderMessage {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolUse {
+                id: "tool_123".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+            }],
+        };
+        assert!(!has_tool_results(&tool_use_msg));
+    }
+
+    #[test]
+    fn test_find_safe_split_point_no_tool_results() {
+        // Create simple messages without tool results
+        let messages = vec![
+            ProviderMessage::user("First"),
+            ProviderMessage::assistant("Response 1"),
+            ProviderMessage::user("Second"),
+            ProviderMessage::assistant("Response 2"),
+            ProviderMessage::user("Third"),
+        ];
+
+        // Proposed split at index 3 should be accepted (no tool results there)
+        let split = find_safe_split_point(&messages, 3, 2);
+        assert_eq!(split, 3);
+    }
+
+    #[test]
+    fn test_find_safe_split_point_with_tool_results() {
+        // Create messages with tool_use followed by tool_result
+        let messages = vec![
+            ProviderMessage::user("First"),                       // 0
+            ProviderMessage::assistant("Response 1"),             // 1
+            ProviderMessage {                                     // 2 - tool_use
+                role: Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ProviderMessage {                                     // 3 - tool_result
+                role: Role::User,
+                content: vec![ContentPart::ToolResult {
+                    tool_use_id: "tool_123".to_string(),
+                    content: "Result".to_string(),
+                    is_error: None,
+                }],
+            },
+            ProviderMessage::user("After tool"),                  // 4
+            ProviderMessage::assistant("Final response"),         // 5
+        ];
+
+        // If we try to split at index 3 (tool_result), it should move back to 2
+        let split = find_safe_split_point(&messages, 3, 2);
+        assert_eq!(split, 2, "Should move split back to avoid orphaned tool_result");
+
+        // If we try to split at index 4, it should stay there (no tool_result)
+        let split = find_safe_split_point(&messages, 4, 2);
+        assert_eq!(split, 4, "Should stay at index 4 since it has no tool_results");
+    }
+
+    #[test]
+    fn test_find_safe_split_point_consecutive_tool_results() {
+        // Create messages with multiple consecutive tool results
+        // This simulates a message that has multiple tool results in sequence
+        let messages = vec![
+            ProviderMessage::user("First"),                       // 0
+            ProviderMessage {                                     // 1 - tool_uses
+                role: Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "tool_1".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                    ContentPart::ToolUse {
+                        id: "tool_2".to_string(),
+                        name: "write".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            ProviderMessage {                                     // 2 - tool_results
+                role: Role::User,
+                content: vec![
+                    ContentPart::ToolResult {
+                        tool_use_id: "tool_1".to_string(),
+                        content: "Result 1".to_string(),
+                        is_error: None,
+                    },
+                    ContentPart::ToolResult {
+                        tool_use_id: "tool_2".to_string(),
+                        content: "Result 2".to_string(),
+                        is_error: None,
+                    },
+                ],
+            },
+            ProviderMessage::user("After tools"),                 // 3
+        ];
+
+        // If we try to split at index 2 (tool_results), it should move back to 1
+        let split = find_safe_split_point(&messages, 2, 1);
+        assert_eq!(split, 1, "Should move split back past all tool_results");
+    }
+
+    #[test]
+    fn test_chunk_messages_respects_tool_pairs() {
+        // Create messages where tool_use is followed by tool_result
+        let messages: Vec<ProviderMessage> = vec![
+            ProviderMessage::user(&"x".repeat(10000)),            // 0 - ~2.5K tokens
+            ProviderMessage::assistant(&"y".repeat(10000)),       // 1
+            ProviderMessage::user(&"z".repeat(10000)),            // 2
+            ProviderMessage {                                     // 3 - tool_use
+                role: Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ProviderMessage {                                     // 4 - tool_result
+                role: Role::User,
+                content: vec![ContentPart::ToolResult {
+                    tool_use_id: "tool_123".to_string(),
+                    content: "x".repeat(10000),
+                    is_error: None,
+                }],
+            },
+            ProviderMessage::user(&"a".repeat(10000)),            // 5 - next user message
+            ProviderMessage::assistant(&"b".repeat(10000)),       // 6
+        ];
+
+        // Target small chunks to force splitting
+        let chunks = chunk_messages_for_summarization(&messages, 5_000);
+
+        // Verify that no chunk starts with a tool_result
+        for (i, chunk) in chunks.iter().enumerate() {
+            if let Some(first_msg) = chunk.messages.first() {
+                assert!(
+                    !has_tool_results(first_msg),
+                    "Chunk {} starts with a tool_result message which would break Anthropic API",
+                    i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_has_tool_use() {
+        // Message without tool use
+        let normal_msg = ProviderMessage::assistant("Hello");
+        assert!(!has_tool_use(&normal_msg));
+
+        // Message with tool use
+        let tool_use_msg = ProviderMessage {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolUse {
+                id: "tool_123".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+            }],
+        };
+        assert!(has_tool_use(&tool_use_msg));
+
+        // Message with tool result (not tool use)
+        let tool_result_msg = ProviderMessage {
+            role: Role::User,
+            content: vec![ContentPart::ToolResult {
+                tool_use_id: "tool_123".to_string(),
+                content: "Result".to_string(),
+                is_error: None,
+            }],
+        };
+        assert!(!has_tool_use(&tool_result_msg));
+    }
+
+    #[test]
+    fn test_find_safe_split_point_with_tool_use_before_split() {
+        // Test that we don't split right after a tool_use message
+        // (because the tool_results would be orphaned in the recent portion)
+        let messages = vec![
+            ProviderMessage::user("First"),                       // 0
+            ProviderMessage::assistant("Response 1"),             // 1
+            ProviderMessage {                                     // 2 - tool_use
+                role: Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ProviderMessage {                                     // 3 - tool_result
+                role: Role::User,
+                content: vec![ContentPart::ToolResult {
+                    tool_use_id: "tool_123".to_string(),
+                    content: "Result".to_string(),
+                    is_error: None,
+                }],
+            },
+            ProviderMessage::user("After tool"),                  // 4
+            ProviderMessage::assistant("Final response"),         // 5
+        ];
+
+        // If we try to split at index 3 (right after tool_use at 2),
+        // we should move back because:
+        // 1. Index 3 has tool_result
+        // 2. Index 2 (prev) has tool_use
+        // Both conditions require moving backward
+        let split = find_safe_split_point(&messages, 3, 1);
+        assert!(split <= 2, "Should move split back to avoid orphaned tool pairs, got {}", split);
+
+        // If we try to split at index 4, it should stay there
+        // because index 4 has no tool_results AND index 3 has no tool_use
+        let split = find_safe_split_point(&messages, 4, 1);
+        assert_eq!(split, 4, "Should stay at index 4 since boundary is clean");
+    }
+
+    #[test]
+    fn test_find_safe_split_point_tool_use_at_boundary_no_result() {
+        // Edge case: tool_use exists but no tool_result follows
+        // (conversation was interrupted)
+        let messages = vec![
+            ProviderMessage::user("First"),                       // 0
+            ProviderMessage::assistant("Response 1"),             // 1
+            ProviderMessage {                                     // 2 - tool_use
+                role: Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ProviderMessage::user("Interrupted - no tool_result"),// 3 - user message, no tool_result
+            ProviderMessage::assistant("Continuing"),             // 4
+        ];
+
+        // If we try to split at index 3, the prev message (2) has tool_use
+        // We should move backward to avoid orphaning the tool_use
+        let split = find_safe_split_point(&messages, 3, 1);
+        assert!(split <= 2, "Should move back because prev message has tool_use, got {}", split);
+    }
+
+    #[test]
+    fn test_chunk_messages_respects_tool_use() {
+        // Create messages where tool_use is followed by tool_result
+        // Ensure chunking doesn't split right after tool_use
+        let messages: Vec<ProviderMessage> = vec![
+            ProviderMessage::user(&"x".repeat(10000)),            // 0 - ~2.5K tokens
+            ProviderMessage::assistant(&"y".repeat(10000)),       // 1
+            ProviderMessage {                                     // 2 - tool_use
+                role: Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ProviderMessage {                                     // 3 - tool_result
+                role: Role::User,
+                content: vec![ContentPart::ToolResult {
+                    tool_use_id: "tool_123".to_string(),
+                    content: "x".repeat(10000),
+                    is_error: None,
+                }],
+            },
+            ProviderMessage::user(&"a".repeat(10000)),            // 4 - next user message
+            ProviderMessage::assistant(&"b".repeat(10000)),       // 5
+        ];
+
+        // Target small chunks to force splitting
+        let chunks = chunk_messages_for_summarization(&messages, 5_000);
+
+        // Verify that no chunk ends with a tool_use message
+        // (i.e., tool_use and its tool_result should be in the same chunk)
+        for (i, chunk) in chunks.iter().enumerate() {
+            if let Some(last_msg) = chunk.messages.last() {
+                // If the last message has tool_use, check if it's the final chunk
+                // (if not final, the tool_result would be orphaned in the next chunk)
+                if has_tool_use(last_msg) && i < chunks.len() - 1 {
+                    panic!(
+                        "Chunk {} ends with tool_use, but there are more chunks after it. \
+                         This would orphan the tool_use from its tool_result.",
+                        i
+                    );
+                }
+            }
         }
     }
 }

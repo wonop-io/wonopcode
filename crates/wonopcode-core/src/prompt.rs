@@ -276,7 +276,10 @@ impl PromptLoop {
                     }
                     StreamChunk::ToolCallStart { id, name } => {
                         debug!(id = %id, name = %name, "Tool call started");
-                        tool_calls.push((id, name, String::new()));
+                        // Only add if not already present (avoid duplicates)
+                        if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                            tool_calls.push((id, name, String::new()));
+                        }
                     }
                     StreamChunk::ToolCallDelta { delta, .. } => {
                         if let Some(call) = tool_calls.last_mut() {

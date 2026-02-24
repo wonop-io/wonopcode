@@ -87,9 +87,12 @@ impl StreamProcessor {
                 arguments,
             } => {
                 // Complete tool call - either finalize pending or add new
+                // Only add if not already present (avoid duplicates)
                 self.pending_calls.remove(&id);
-                self.tool_calls
-                    .push((id.clone(), name.clone(), arguments.clone()));
+                if !self.tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                    self.tool_calls
+                        .push((id.clone(), name.clone(), arguments.clone()));
+                }
                 ProcessedChunk::ToolComplete {
                     id,
                     name,
@@ -132,9 +135,11 @@ impl StreamProcessor {
     /// Any pending tool calls that weren't completed via ToolCall chunks
     /// are finalized here.
     pub fn finalize(mut self) -> StreamResult {
-        // Finalize any remaining pending tool calls
+        // Finalize any remaining pending tool calls (avoid duplicates)
         for (id, pending) in self.pending_calls {
-            self.tool_calls.push((id, pending.name, pending.arguments));
+            if !self.tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                self.tool_calls.push((id, pending.name, pending.arguments));
+            }
         }
 
         StreamResult {
@@ -260,5 +265,54 @@ mod tests {
         let result = processor.finalize();
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0].2, r#"{"file":"test.txt"}"#);
+    }
+
+    #[test]
+    fn test_stream_processor_duplicate_tool_calls() {
+        let mut processor = StreamProcessor::new();
+
+        // First tool call
+        processor.process(StreamChunk::ToolCall {
+            id: "call1".into(),
+            name: "read".into(),
+            arguments: r#"{"file":"test.txt"}"#.into(),
+        });
+
+        // Duplicate tool call with same ID should be ignored
+        processor.process(StreamChunk::ToolCall {
+            id: "call1".into(),
+            name: "read".into(),
+            arguments: r#"{"file":"different.txt"}"#.into(),
+        });
+
+        let result = processor.finalize();
+        // Should only have one tool call, not two
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].0, "call1");
+        // Arguments should be from the first call
+        assert_eq!(result.tool_calls[0].2, r#"{"file":"test.txt"}"#);
+    }
+
+    #[test]
+    fn test_stream_processor_multiple_different_tool_calls() {
+        let mut processor = StreamProcessor::new();
+
+        // Two different tool calls (different IDs) should both be recorded
+        processor.process(StreamChunk::ToolCall {
+            id: "call1".into(),
+            name: "read".into(),
+            arguments: r#"{"file":"test.txt"}"#.into(),
+        });
+
+        processor.process(StreamChunk::ToolCall {
+            id: "call2".into(),
+            name: "write".into(),
+            arguments: r#"{"file":"other.txt"}"#.into(),
+        });
+
+        let result = processor.finalize();
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0].0, "call1");
+        assert_eq!(result.tool_calls[1].0, "call2");
     }
 }

@@ -69,12 +69,193 @@ impl AnthropicProvider {
         })
     }
 
+    /// Sanitize messages to ensure valid tool_use/tool_result pairs.
+    /// 
+    /// The Anthropic API requires:
+    /// 1. Every `tool_use` in an assistant message must have a corresponding `tool_result` in the next user message
+    /// 2. Every `tool_result` must have a corresponding `tool_use` in the previous assistant message
+    ///
+    /// This function removes orphaned tool_use/tool_result blocks to prevent API errors.
+    fn sanitize_messages(&self, messages: &[Message]) -> Vec<Message> {
+        use crate::message::{ContentPart, Role};
+        use std::collections::HashSet;
+        
+        let mut sanitized = Vec::with_capacity(messages.len());
+        
+        for (i, msg) in messages.iter().enumerate() {
+            match msg.role {
+                Role::Assistant => {
+                    // Check if this assistant message has tool_use blocks
+                    let tool_use_ids: HashSet<String> = msg.content.iter()
+                        .filter_map(|part| {
+                            if let ContentPart::ToolUse { id, .. } = part {
+                                Some(id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    
+                    if tool_use_ids.is_empty() {
+                        // No tool_use, keep as-is
+                        sanitized.push(msg.clone());
+                    } else {
+                        // Check if next message has all the tool_results
+                        let next_msg = messages.get(i + 1);
+                        let next_tool_result_ids: HashSet<String> = next_msg
+                            .map(|m| {
+                                m.content.iter()
+                                    .filter_map(|part| {
+                                        if let ContentPart::ToolResult { tool_use_id, .. } = part {
+                                            Some(tool_use_id.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        
+                        // Find tool_use IDs that don't have matching tool_results
+                        let orphaned_ids: HashSet<&String> = tool_use_ids
+                            .iter()
+                            .filter(|id| !next_tool_result_ids.contains(*id))
+                            .collect();
+                        
+                        if orphaned_ids.is_empty() {
+                            // All tool_use have matching tool_results
+                            sanitized.push(msg.clone());
+                        } else {
+                            // Remove orphaned tool_use blocks
+                            warn!(
+                                "ANTHROPIC: Removing {} orphaned tool_use blocks from message {}: {:?}",
+                                orphaned_ids.len(), i, orphaned_ids
+                            );
+                            
+                            let filtered_content: Vec<ContentPart> = msg.content.iter()
+                                .filter(|part| {
+                                    if let ContentPart::ToolUse { id, .. } = part {
+                                        !orphaned_ids.contains(id)
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .cloned()
+                                .collect();
+                            
+                            if filtered_content.is_empty() {
+                                // All content was tool_use that got removed
+                                // Add a placeholder text to avoid empty message
+                                sanitized.push(Message {
+                                    role: Role::Assistant,
+                                    content: vec![ContentPart::Text {
+                                        text: "[Tool calls removed due to missing results]".to_string(),
+                                    }],
+                                });
+                            } else {
+                                sanitized.push(Message {
+                                    role: msg.role.clone(),
+                                    content: filtered_content,
+                                });
+                            }
+                        }
+                    }
+                }
+                Role::User | Role::Tool => {
+                    // Check if this message has tool_results
+                    let tool_result_ids: HashSet<String> = msg.content.iter()
+                        .filter_map(|part| {
+                            if let ContentPart::ToolResult { tool_use_id, .. } = part {
+                                Some(tool_use_id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    
+                    if tool_result_ids.is_empty() {
+                        // No tool_results, keep as-is
+                        sanitized.push(msg.clone());
+                    } else {
+                        // Check if previous message has all the tool_use
+                        let prev_tool_use_ids: HashSet<String> = sanitized.last()
+                            .filter(|m| m.role == Role::Assistant)
+                            .map(|m| {
+                                m.content.iter()
+                                    .filter_map(|part| {
+                                        if let ContentPart::ToolUse { id, .. } = part {
+                                            Some(id.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        
+                        // Find tool_result IDs that don't have matching tool_use
+                        let orphaned_ids: HashSet<&String> = tool_result_ids
+                            .iter()
+                            .filter(|id| !prev_tool_use_ids.contains(*id))
+                            .collect();
+                        
+                        if orphaned_ids.is_empty() {
+                            // All tool_results have matching tool_use
+                            sanitized.push(msg.clone());
+                        } else {
+                            // Remove orphaned tool_result blocks
+                            warn!(
+                                "ANTHROPIC: Removing {} orphaned tool_result blocks from message {}: {:?}",
+                                orphaned_ids.len(), i, orphaned_ids
+                            );
+                            
+                            let filtered_content: Vec<ContentPart> = msg.content.iter()
+                                .filter(|part| {
+                                    if let ContentPart::ToolResult { tool_use_id, .. } = part {
+                                        !orphaned_ids.contains(tool_use_id)
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .cloned()
+                                .collect();
+                            
+                            if filtered_content.is_empty() {
+                                // All content was tool_result that got removed
+                                // Add a placeholder text to avoid empty message
+                                sanitized.push(Message {
+                                    role: msg.role.clone(),
+                                    content: vec![ContentPart::Text {
+                                        text: "[Tool results removed due to missing tool calls]".to_string(),
+                                    }],
+                                });
+                            } else {
+                                sanitized.push(Message {
+                                    role: msg.role.clone(),
+                                    content: filtered_content,
+                                });
+                            }
+                        }
+                    }
+                }
+                Role::System => {
+                    sanitized.push(msg.clone());
+                }
+            }
+        }
+        
+        sanitized
+    }
+
     /// Convert messages to Anthropic format.
     fn convert_messages(&self, messages: &[Message]) -> (Option<String>, Vec<AnthropicMessage>) {
+        // First sanitize messages to fix any broken tool pairs
+        let messages = self.sanitize_messages(messages);
+        
         let mut system = None;
         let mut converted = Vec::new();
 
-        for msg in messages {
+        for msg in &messages {
             match msg.role {
                 crate::message::Role::System => {
                     // Collect system messages
@@ -140,11 +321,29 @@ impl AnthropicProvider {
                     }
                 },
                 crate::message::ContentPart::ToolUse { id, name, input } => {
+                    // Anthropic API requires input to be a JSON object (dictionary)
+                    // If input is not an object, convert it to one
+                    let valid_input = if input.is_object() {
+                        input.clone()
+                    } else if input.is_null() {
+                        // Null becomes empty object
+                        json!({})
+                    } else {
+                        // For other types (string, array, etc.), wrap in an object
+                        // This shouldn't normally happen, but prevents API errors
+                        warn!(
+                            tool_id = %id,
+                            tool_name = %name,
+                            input_type = ?input,
+                            "Tool use input is not an object, wrapping in empty object"
+                        );
+                        json!({})
+                    };
                     json!({
                         "type": "tool_use",
                         "id": id,
                         "name": name,
-                        "input": input
+                        "input": valid_input
                     })
                 }
                 crate::message::ContentPart::ToolResult {
@@ -559,5 +758,269 @@ mod tests {
         assert_eq!(event.event, "message_start");
         assert_eq!(event.data, "{\"type\":\"message\"}");
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_sanitize_messages_valid_tool_pairs() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Valid messages with matching tool_use and tool_result
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![ContentPart::ToolUse {
+                    id: "tool_1".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![ContentPart::ToolResult {
+                    tool_use_id: "tool_1".to_string(),
+                    content: "result".to_string(),
+                    is_error: None,
+                }],
+            },
+            Message::assistant("Done"),
+        ];
+
+        let sanitized = provider.sanitize_messages(&messages);
+        
+        // Should keep all messages unchanged
+        assert_eq!(sanitized.len(), 4);
+        // Check tool_use is preserved
+        assert!(sanitized[1].content.iter().any(|p| matches!(p, ContentPart::ToolUse { .. })));
+        // Check tool_result is preserved
+        assert!(sanitized[2].content.iter().any(|p| matches!(p, ContentPart::ToolResult { .. })));
+    }
+
+    #[test]
+    fn test_sanitize_messages_orphaned_tool_use() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Tool_use without matching tool_result in next message
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::Text { text: "Let me help".to_string() },
+                    ContentPart::ToolUse {
+                        id: "orphan_tool".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            Message::user("Never mind"), // No tool_result here
+        ];
+
+        let sanitized = provider.sanitize_messages(&messages);
+        
+        // Should have 3 messages
+        assert_eq!(sanitized.len(), 3);
+        // Tool_use should be removed from second message
+        assert!(!sanitized[1].content.iter().any(|p| matches!(p, ContentPart::ToolUse { .. })));
+        // Text should be preserved
+        assert!(sanitized[1].content.iter().any(|p| matches!(p, ContentPart::Text { .. })));
+    }
+
+    #[test]
+    fn test_sanitize_messages_orphaned_tool_result() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Tool_result without matching tool_use in previous message
+        let messages = vec![
+            Message::user("Hello"),
+            Message::assistant("Hi there"), // No tool_use here
+            Message {
+                role: crate::message::Role::User,
+                content: vec![
+                    ContentPart::Text { text: "Here's the result".to_string() },
+                    ContentPart::ToolResult {
+                        tool_use_id: "orphan_result".to_string(),
+                        content: "result".to_string(),
+                        is_error: None,
+                    },
+                ],
+            },
+        ];
+
+        let sanitized = provider.sanitize_messages(&messages);
+        
+        // Should have 3 messages
+        assert_eq!(sanitized.len(), 3);
+        // Tool_result should be removed from third message
+        assert!(!sanitized[2].content.iter().any(|p| matches!(p, ContentPart::ToolResult { .. })));
+        // Text should be preserved
+        assert!(sanitized[2].content.iter().any(|p| matches!(p, ContentPart::Text { .. })));
+    }
+
+    #[test]
+    fn test_sanitize_messages_partial_tool_match() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Multiple tool_use but only some have matching tool_result
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "tool_1".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                    ContentPart::ToolUse {
+                        id: "tool_2".to_string(),
+                        name: "write".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![
+                    ContentPart::ToolResult {
+                        tool_use_id: "tool_1".to_string(), // Only tool_1 has result
+                        content: "result".to_string(),
+                        is_error: None,
+                    },
+                ],
+            },
+        ];
+
+        let sanitized = provider.sanitize_messages(&messages);
+        
+        // Should have 3 messages
+        assert_eq!(sanitized.len(), 3);
+        // Only tool_1 should remain in assistant message
+        let tool_uses: Vec<_> = sanitized[1].content.iter()
+            .filter_map(|p| if let ContentPart::ToolUse { id, .. } = p { Some(id.as_str()) } else { None })
+            .collect();
+        assert_eq!(tool_uses, vec!["tool_1"]);
+    }
+
+    #[test]
+    fn test_sanitize_messages_only_tool_use_removed() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Assistant message with only tool_use and no matching result
+        let messages = vec![
+            Message::user("Hello"),
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![
+                    ContentPart::ToolUse {
+                        id: "orphan".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({}),
+                    },
+                ],
+            },
+            Message::user("Continue"), // No tool_result
+        ];
+
+        let sanitized = provider.sanitize_messages(&messages);
+        
+        // Should have 3 messages
+        assert_eq!(sanitized.len(), 3);
+        // Second message should have placeholder text
+        assert!(sanitized[1].content.iter().any(|p| {
+            if let ContentPart::Text { text } = p {
+                text.contains("removed")
+            } else {
+                false
+            }
+        }));
+    }
+
+    #[test]
+    fn test_convert_content_tool_use_input_validation() {
+        use crate::message::ContentPart;
+        
+        let provider = AnthropicProvider {
+            client: reqwest::Client::new(),
+            base_url: ANTHROPIC_API_URL.to_string(),
+            model: crate::model::anthropic::claude_sonnet_4(),
+        };
+
+        // Test with valid object input
+        let content_valid = vec![ContentPart::ToolUse {
+            id: "tool_1".to_string(),
+            name: "read".to_string(),
+            input: serde_json::json!({"path": "/test"}),
+        }];
+        let converted = provider.convert_content(&content_valid);
+        assert_eq!(converted.len(), 1);
+        let input = &converted[0]["input"];
+        assert!(input.is_object());
+        assert_eq!(input["path"], "/test");
+
+        // Test with null input - should become empty object
+        let content_null = vec![ContentPart::ToolUse {
+            id: "tool_2".to_string(),
+            name: "list".to_string(),
+            input: serde_json::Value::Null,
+        }];
+        let converted = provider.convert_content(&content_null);
+        assert_eq!(converted.len(), 1);
+        let input = &converted[0]["input"];
+        assert!(input.is_object());
+        assert_eq!(input.as_object().unwrap().len(), 0);
+
+        // Test with string input - should become empty object
+        let content_string = vec![ContentPart::ToolUse {
+            id: "tool_3".to_string(),
+            name: "echo".to_string(),
+            input: serde_json::json!("invalid string input"),
+        }];
+        let converted = provider.convert_content(&content_string);
+        assert_eq!(converted.len(), 1);
+        let input = &converted[0]["input"];
+        assert!(input.is_object());
+
+        // Test with array input - should become empty object
+        let content_array = vec![ContentPart::ToolUse {
+            id: "tool_4".to_string(),
+            name: "batch".to_string(),
+            input: serde_json::json!(["a", "b", "c"]),
+        }];
+        let converted = provider.convert_content(&content_array);
+        assert_eq!(converted.len(), 1);
+        let input = &converted[0]["input"];
+        assert!(input.is_object());
     }
 }

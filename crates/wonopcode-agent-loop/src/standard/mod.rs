@@ -302,8 +302,17 @@ impl AgentLoop for StandardLoop {
                 let chunk = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
-                        warn!(error = %e, "Stream error (will be skipped)");
-                        continue;
+                        // Send error to UI so the user sees it
+                        let error_msg = format!("Provider error: {}", e);
+                        warn!(error = %e, "Stream error");
+                        ctx.send_update(LoopUpdate::Error(error_msg.clone()));
+                        
+                        // For critical errors, stop processing and return
+                        // This ensures the user sees the error instead of an empty response
+                        if !current_text.is_empty() {
+                            ctx.messages.push(ProviderMessage::assistant(&current_text));
+                        }
+                        return Err(crate::LoopError::from_provider_error(e));
                     }
                 };
 
@@ -329,7 +338,12 @@ impl AgentLoop for StandardLoop {
                         arguments,
                     } => {
                         debug!(id = %id, name = %name, "Tool call complete");
-                        tool_calls.push((id, name, arguments));
+                        // Only add if not already present (avoid duplicates)
+                        if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
+                            tool_calls.push((id, name, arguments));
+                        } else {
+                            debug!(id = %id, "Skipping duplicate tool call");
+                        }
                     }
                     StreamChunk::ReasoningStart => {}
                     StreamChunk::ReasoningDelta(delta) => {
@@ -451,7 +465,16 @@ impl AgentLoop for StandardLoop {
                         });
                     }
                     StreamChunk::Error(e) => {
+                        // Send error to UI so the user sees it
+                        let error_msg = format!("Stream error: {}", e);
                         warn!(error = %e, "Stream error");
+                        ctx.send_update(LoopUpdate::Error(error_msg.clone()));
+                        
+                        // For critical errors, stop processing and return
+                        if !current_text.is_empty() {
+                            ctx.messages.push(ProviderMessage::assistant(&current_text));
+                        }
+                        return Err(crate::LoopError::Internal(error_msg));
                     }
                 }
             }
