@@ -312,6 +312,12 @@ pub enum ClientMessage {
         template_content: String,
     },
 
+    /// Reset AGENTS.TEMPLATE.md to the default template.
+    ResetAgentsTemplate {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
     // =========================================================================
     // Context Management
     // =========================================================================
