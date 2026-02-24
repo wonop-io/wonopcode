@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 wonopcode-tui-core.workspace = true
 wonopcode-core.workspace = true
+wonopcode-provider.workspace = true
 
 ratatui.workspace = true
 crossterm.workspace = true

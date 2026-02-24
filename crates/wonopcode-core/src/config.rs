@@ -1826,6 +1826,14 @@ impl CredentialsManager {
     }
 
     /// Set a provider to use Claude CLI authentication.
+    ///
+    /// **DEPRECATED**: This method stores a preference for which auth method to use
+    /// with a provider. The new pattern is to use separate providers:
+    /// - `anthropic` for API key auth
+    /// - `anthropic-cli` for CLI auth
+    ///
+    /// This method is kept for backward compatibility with the desktop UI
+    /// which still uses an auth method toggle.
     pub fn set_claude_cli(&mut self, provider: &str) -> CoreResult<()> {
         self.credentials
             .insert(provider.to_string(), ProviderCredential::ClaudeCli);
@@ -1844,6 +1852,12 @@ impl CredentialsManager {
     }
 
     /// Get the authentication method for a provider.
+    ///
+    /// **DEPRECATED**: This returns the stored auth method preference.
+    /// The new pattern is to use separate providers (e.g., `anthropic` vs `anthropic-cli`)
+    /// rather than storing an auth method preference per provider.
+    ///
+    /// This method is kept for backward compatibility with the desktop UI.
     pub fn get_auth_method(&self, provider: &str) -> Option<AuthMethod> {
         self.credentials.get(provider).map(|c| c.auth_method())
     }

@@ -3952,8 +3952,8 @@ mod tests {
     #[test]
     fn test_get_providers_returns_all() {
         let providers = get_providers();
-        // Now we have 4 core providers: anthropic, anthropic-cli, openai, openai-codex
-        assert_eq!(providers.len(), 4);
+        // Now we have 5 core providers: anthropic, anthropic-cli, openai, openai-codex, compoundcoders
+        assert_eq!(providers.len(), 5);
     }
 
     #[test]

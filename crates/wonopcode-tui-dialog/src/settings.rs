@@ -8,7 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
+use std::collections::HashMap;
 
+use wonopcode_provider::registry;
 use wonopcode_tui_core::{RenderSettings, Theme};
 
 /// Helper function to create a centered rectangle.
@@ -263,51 +265,54 @@ pub enum SettingsResult {
     None,
 }
 
-/// Authentication settings changes to be saved to CredentialsManager.
+/// Authentication and provider settings changes to be saved.
 #[derive(Debug, Clone, Default)]
 pub struct AuthSettingsChanges {
-    /// Anthropic authentication method (API key or Claude CLI).
-    pub anthropic_method: Option<wonopcode_core::AuthMethod>,
-    /// Anthropic API key (only if changed).
-    pub anthropic_key: Option<String>,
-    /// OpenAI API key (only if changed).
-    pub openai_key: Option<String>,
+    /// API keys by provider creds_key (e.g., "anthropic" -> Some("sk-ant-...")).
+    /// Only contains entries for keys that have been changed.
+    pub api_keys: HashMap<String, Option<String>>,
+    /// CLI paths by binary name (e.g., "claude" -> Some("/usr/local/bin/claude")).
+    /// Only contains entries for paths that have been changed.
+    pub cli_paths: HashMap<String, Option<String>>,
 }
 
 impl AuthSettingsChanges {
     /// Apply these changes to a CredentialsManager.
     pub fn apply(&self, manager: &mut wonopcode_core::CredentialsManager) -> Result<(), String> {
-        // Set auth method for Anthropic
-        if let Some(method) = &self.anthropic_method {
-            match method {
-                wonopcode_core::AuthMethod::ClaudeCli => {
-                    manager
-                        .set_claude_cli("anthropic")
+        // Set all API keys that have been changed
+        for (creds_key, key_opt) in &self.api_keys {
+            if let Some(key) = key_opt {
+                manager
+                    .set_api_key(creds_key, key)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply CLI path changes to AppSettingsManager.
+    pub fn apply_cli_paths(
+        &self,
+        settings: &mut wonopcode_core::config::AppSettingsManager,
+    ) -> Result<(), String> {
+        for (binary_name, path_opt) in &self.cli_paths {
+            match binary_name.as_str() {
+                "claude" => {
+                    settings
+                        .set_claude_cli_path(path_opt.clone())
                         .map_err(|e| e.to_string())?;
                 }
-                wonopcode_core::AuthMethod::ApiKey => {
-                    // If switching to API key mode, only update if we have a new key
-                    if let Some(key) = &self.anthropic_key {
-                        manager
-                            .set_api_key("anthropic", key)
-                            .map_err(|e| e.to_string())?;
-                    }
+                "codex" => {
+                    settings
+                        .set_codex_cli_path(path_opt.clone())
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {
+                    // Unknown CLI binary - ignore for now
                 }
             }
-        } else if let Some(key) = &self.anthropic_key {
-            // Just updating the key without changing method
-            manager
-                .set_api_key("anthropic", key)
-                .map_err(|e| e.to_string())?;
         }
-
-        // Set other API keys
-        if let Some(key) = &self.openai_key {
-            manager
-                .set_api_key("openai", key)
-                .map_err(|e| e.to_string())?;
-        }
-
         Ok(())
     }
 }
@@ -448,58 +453,87 @@ impl SettingsDialog {
         );
 
         // Model tab
-        items.insert(
-            SettingsTab::Model,
-            vec![
-                SettingItem::new(
-                    "model",
-                    "Primary Model",
-                    "Default model for conversations (provider/model)",
-                    SettingValue::String("anthropic/claude-sonnet-4-5-20250929".to_string()),
-                ),
-                SettingItem::new(
-                    "small_model",
-                    "Small Model",
-                    "Fast model for quick tasks",
-                    SettingValue::String("anthropic/claude-3-haiku-20240307".to_string()),
-                ),
-                SettingItem::new(
-                    "default_agent",
-                    "Default Agent",
-                    "Agent to use by default",
-                    SettingValue::Select {
-                        value: "build".to_string(),
-                        options: vec![
-                            "build".to_string(),
-                            "plan".to_string(),
-                            "explore".to_string(),
-                        ],
-                    },
-                ),
-                // Authentication settings
-                SettingItem::new(
-                    "auth.anthropic_method",
-                    "Anthropic Auth",
-                    "Authentication method for Anthropic (Claude CLI uses your subscription)",
-                    SettingValue::Select {
-                        value: "api_key".to_string(),
-                        options: vec!["api_key".to_string(), "claude_cli".to_string()],
-                    },
-                ),
-                SettingItem::new(
-                    "auth.anthropic_key",
-                    "Anthropic API Key",
-                    "API key for Anthropic (sk-ant-...)",
-                    SettingValue::String(String::new()),
-                ),
-                SettingItem::new(
-                    "auth.openai_key",
-                    "OpenAI API Key",
-                    "API key for OpenAI (sk-...)",
-                    SettingValue::String(String::new()),
-                ),
-            ],
-        );
+        let mut model_settings = vec![
+            SettingItem::new(
+                "model",
+                "Primary Model",
+                "Default model for conversations (provider/model)",
+                SettingValue::String("anthropic/claude-sonnet-4-5-20250929".to_string()),
+            ),
+            SettingItem::new(
+                "small_model",
+                "Small Model",
+                "Fast model for quick tasks",
+                SettingValue::String("anthropic/claude-3-haiku-20240307".to_string()),
+            ),
+            SettingItem::new(
+                "default_agent",
+                "Default Agent",
+                "Agent to use by default",
+                SettingValue::Select {
+                    value: "build".to_string(),
+                    options: vec![
+                        "build".to_string(),
+                        "plan".to_string(),
+                        "explore".to_string(),
+                    ],
+                },
+            ),
+        ];
+
+        // Add API key settings dynamically from registry (deduped by creds_key)
+        for setting in registry::unique_api_key_settings() {
+            let key = format!("auth.{}_key", setting.creds_key);
+            let description = format!("API key ({}) - env: {}", setting.hint, setting.env_var);
+            model_settings.push(SettingItem::new(
+                key,
+                &setting.label,
+                description,
+                SettingValue::String(String::new()),
+            ));
+        }
+
+        // Add CLI path settings for providers that support CLI auth
+        // Use provider names for 1:1 correspondence
+        for (provider_id, binary_name, display_name) in registry::cli_providers_with_paths() {
+            let key = format!("cli.{}_path", binary_name);
+            // Use display_name from registry and append "CLI Path"
+            // e.g., "Claude CLI (Subscription)" -> "Anthropic CLI Path"
+            // e.g., "OpenAI Codex" -> "OpenAI Codex CLI Path"
+            let label = if provider_id.ends_with("-cli") {
+                // For "-cli" providers, use the base provider name
+                // "anthropic-cli" -> "Anthropic CLI Path"
+                let base = provider_id.trim_end_matches("-cli");
+                format!(
+                    "{} CLI Path",
+                    base.split('-')
+                        .map(|word| {
+                            let mut chars = word.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(c) => c.to_uppercase().chain(chars).collect(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            } else {
+                // For other CLI providers like "openai-codex", use display name
+                format!("{} CLI Path", display_name)
+            };
+            let description = format!(
+                "Path to {} binary (leave empty to search PATH)",
+                binary_name
+            );
+            model_settings.push(SettingItem::new(
+                key,
+                label,
+                description,
+                SettingValue::String(String::new()),
+            ));
+        }
+
+        items.insert(SettingsTab::Model, model_settings);
 
         // Permissions tab
         items.insert(
@@ -1164,26 +1198,16 @@ impl SettingsDialog {
         if let Some(creds_manager) = wonopcode_core::CredentialsManager::new() {
             if let Some(items) = dialog.items.get_mut(&SettingsTab::Model) {
                 for item in items.iter_mut() {
-                    match item.key.as_str() {
-                        "auth.anthropic_method" => {
-                            if let Some(method) = creds_manager.get_auth_method("anthropic") {
-                                if let SettingValue::Select { options, .. } = &item.value {
-                                    let value = match method {
-                                        wonopcode_core::AuthMethod::ApiKey => "api_key",
-                                        wonopcode_core::AuthMethod::ClaudeCli => "claude_cli",
-                                    };
-                                    update_item(
-                                        item,
-                                        SettingValue::Select {
-                                            value: value.to_string(),
-                                            options: options.clone(),
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                        "auth.anthropic_key" => {
-                            if let Some(key) = creds_manager.get_api_key("anthropic") {
+                    // Handle API key settings dynamically
+                    // Key format: auth.{creds_key}_key
+                    if item.key.starts_with("auth.") && item.key.ends_with("_key") {
+                        // Extract creds_key from "auth.{creds_key}_key"
+                        let creds_key = item.key
+                            .strip_prefix("auth.")
+                            .and_then(|s| s.strip_suffix("_key"));
+                        
+                        if let Some(creds_key) = creds_key {
+                            if let Some(key) = creds_manager.get_api_key(creds_key) {
                                 // Mask the key for display (show first 7 chars + dots)
                                 let masked = if key.len() > 10 {
                                     format!("{}•••••••••", &key[..7])
@@ -1193,17 +1217,6 @@ impl SettingsDialog {
                                 update_item(item, SettingValue::String(masked));
                             }
                         }
-                        "auth.openai_key" => {
-                            if let Some(key) = creds_manager.get_api_key("openai") {
-                                let masked = if key.len() > 10 {
-                                    format!("{}•••••••••", &key[..7])
-                                } else {
-                                    "•••••••••".to_string()
-                                };
-                                update_item(item, SettingValue::String(masked));
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -1813,34 +1826,41 @@ impl SettingsDialog {
                     continue;
                 }
 
-                match item.key.as_str() {
-                    "auth.anthropic_method" => {
-                        if let SettingValue::Select { value, .. } = &item.value {
-                            changes.anthropic_method = Some(match value.as_str() {
-                                "claude_cli" => wonopcode_core::AuthMethod::ClaudeCli,
-                                _ => wonopcode_core::AuthMethod::ApiKey,
-                            });
-                            has_any_changes = true;
-                        }
-                    }
-                    "auth.anthropic_key" => {
+                // Handle API key settings dynamically
+                // Key format: auth.{creds_key}_key
+                if item.key.starts_with("auth.") && item.key.ends_with("_key") {
+                    // Extract creds_key from "auth.{creds_key}_key"
+                    let creds_key = item.key
+                        .strip_prefix("auth.")
+                        .and_then(|s| s.strip_suffix("_key"));
+                    
+                    if let Some(creds_key) = creds_key {
                         if let SettingValue::String(s) = &item.value {
                             // Only save if it's not a masked key (doesn't contain dots)
                             if !s.is_empty() && !s.contains('•') {
-                                changes.anthropic_key = Some(s.clone());
+                                changes.api_keys.insert(creds_key.to_string(), Some(s.clone()));
                                 has_any_changes = true;
                             }
                         }
                     }
-                    "auth.openai_key" => {
+                }
+
+                // Handle CLI path settings
+                // Key format: cli.{binary_name}_path
+                if item.key.starts_with("cli.") && item.key.ends_with("_path") {
+                    // Extract binary_name from "cli.{binary_name}_path"
+                    let binary_name = item.key
+                        .strip_prefix("cli.")
+                        .and_then(|s| s.strip_suffix("_path"));
+                    
+                    if let Some(binary_name) = binary_name {
                         if let SettingValue::String(s) = &item.value {
-                            if !s.is_empty() && !s.contains('•') {
-                                changes.openai_key = Some(s.clone());
-                                has_any_changes = true;
-                            }
+                            // Empty string means use default (search PATH)
+                            let path = if s.is_empty() { None } else { Some(s.clone()) };
+                            changes.cli_paths.insert(binary_name.to_string(), path);
+                            has_any_changes = true;
                         }
                     }
-                    _ => {}
                 }
             }
         }

@@ -639,6 +639,13 @@ fn create_provider(
         }
         "openai" => Arc::new(OpenAIProvider::new(&config.api_key, model_info)?),
         "openai-codex" | "codex" => Arc::new(CodexProvider::new(model_info)?),
+        "compoundcoders" => {
+            use wonopcode_provider::compoundcoders::CompoundCodersProvider;
+            if config.api_key.is_empty() {
+                return Err("No Compound Coders API key provided.".into());
+            }
+            Arc::new(CompoundCodersProvider::new(&config.api_key, model_info)?)
+        }
         _ => {
             return Err(format!("Unknown provider: {}", config.provider).into());
         }
@@ -661,12 +668,15 @@ pub fn load_api_key(provider: &str) -> Option<String> {
         return None;
     }
 
-    // Try environment variable first
-    let env_var = match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        "openai-codex" | "codex" => "OPENAI_API_KEY",
-        _ => return None,
+    // Try environment variable first - use registry for env var lookup
+    let env_var = wonopcode_provider::registry::get_api_key_env_var(provider)
+        .or_else(|| match provider {
+            "codex" => Some("OPENAI_API_KEY"),
+            _ => None,
+        });
+    
+    let Some(env_var) = env_var else {
+        return None;
     };
 
     if let Ok(key) = std::env::var(env_var) {

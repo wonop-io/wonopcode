@@ -6929,6 +6929,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wonopcode-core",
+ "wonopcode-provider",
  "wonopcode-tui-core",
 ]
 

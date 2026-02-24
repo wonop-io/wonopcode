@@ -4122,6 +4122,16 @@ fn create_provider(
             let provider = wonopcode_provider::test::TestProvider::new(model_info);
             Ok(Arc::new(provider))
         }
+        "compoundcoders" => {
+            // Compound Coders API provider
+            use wonopcode_provider::compoundcoders::CompoundCodersProvider;
+            if config.api_key.is_empty() {
+                Err("No Compound Coders API key provided. Set COMPOUNDCODERS_API_KEY.".into())
+            } else {
+                let provider = CompoundCodersProvider::new(&config.api_key, model_info)?;
+                Ok(Arc::new(provider))
+            }
+        }
         _ => Err(format!("Unknown provider: {}", config.provider).into()),
     }
 }

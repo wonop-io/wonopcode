@@ -31,6 +31,7 @@ pub mod stream;
 // Core providers (always enabled)
 pub mod anthropic;
 pub mod codex;
+pub mod compoundcoders;
 pub mod openai;
 
 // CLI-based providers (subscription access)
