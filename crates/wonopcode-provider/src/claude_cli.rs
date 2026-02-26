@@ -539,13 +539,8 @@ impl ClaudeCliProvider {
     /// Also resets the accumulated token usage.
     pub async fn clear_session(&self) {
         let mut guard = self.session_id.write().await;
-        let old_value = guard.clone();
         *guard = None;
         drop(guard);
-        tracing::info!(
-            old_session = ?old_value,
-            "COMPACTION_DEBUG: clear_session() completed - session ID now None"
-        );
         self.accumulated_usage.write().await.reset();
     }
 
@@ -1211,12 +1206,7 @@ impl LanguageModel for ClaudeCliProvider {
     }
 
     async fn reset_session(&self) {
-        let old_session = self.session_id.read().await.clone();
         self.clear_session().await;
-        tracing::info!(
-            old_session = ?old_session,
-            "COMPACTION_DEBUG: Reset CLI session for compaction - next call will start fresh"
-        );
     }
 
     async fn get_cli_session_id(&self) -> Option<String> {
@@ -1234,11 +1224,6 @@ impl LanguageModel for ClaudeCliProvider {
     ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>> {
         // Check for existing session to resume
         let existing_session = self.session_id.read().await.clone();
-        tracing::info!(
-            existing_session = ?existing_session,
-            messages_count = messages.len(),
-            "COMPACTION_DEBUG: generate() called, checking for session to resume"
-        );
 
         // When resuming a session, Claude CLI already has the conversation history.
         // We only need to send the new user message, not the full history.
@@ -1465,9 +1450,27 @@ impl LanguageModel for ClaudeCliProvider {
                                 ContentBlock::Text { text } => {
                                     // Skip text blocks that were already streamed via stream_event
                                     // This prevents duplicate text when the full "assistant" message arrives
-                                    if streamed_text_indices.contains(&(block_index as u32)) {
-                                        tracing::trace!(block_index, "Skipping already-streamed text block");
+                                    let block_idx = block_index as u32;
+                                    if streamed_text_indices.contains(&block_idx) {
+                                        tracing::debug!(
+                                            block_index = block_idx,
+                                            text_len = text.len(),
+                                            streamed_indices = ?streamed_text_indices,
+                                            "Skipping already-streamed text block (dedup)"
+                                        );
                                         continue;
+                                    }
+
+                                    // DEDUP WARNING: If we reach here with non-empty text while streaming was active,
+                                    // this could indicate a bug where the index wasn't properly tracked
+                                    if !text.is_empty() && !total_text.is_empty() {
+                                        tracing::warn!(
+                                            block_index = block_idx,
+                                            text_len = text.len(),
+                                            total_text_len = total_text.len(),
+                                            streamed_indices = ?streamed_text_indices,
+                                            "POTENTIAL DUPLICATE: Text block not in streamed_indices but total_text is non-empty"
+                                        );
                                     }
 
                                     if !text.is_empty() {
@@ -1476,7 +1479,12 @@ impl LanguageModel for ClaudeCliProvider {
                                             yield StreamChunk::TextStart;
                                             text_started = true;
                                         }
-                                        tracing::trace!(text_len = text.len(), text_preview = %text.chars().take(20).collect::<String>(), "Yielding TextDelta (from assistant message)");
+                                        tracing::trace!(
+                                            text_len = text.len(),
+                                            text_preview = %text.chars().take(20).collect::<String>(),
+                                            block_index = block_idx,
+                                            "Yielding TextDelta (from assistant message)"
+                                        );
                                         total_text.push_str(&text);
                                         yield StreamChunk::TextDelta(text);
                                     }
@@ -1561,7 +1569,7 @@ impl LanguageModel for ClaudeCliProvider {
                     }
                     Ok(CliMessage::Result { result, is_error, usage, session_id, total_cost_usd, num_turns }) => {
                         // Log the received usage data for debugging
-                        info!(
+                        debug!(
                             has_usage = usage.is_some(),
                             usage_input = ?usage.as_ref().and_then(|u| u.input_tokens),
                             usage_output = ?usage.as_ref().and_then(|u| u.output_tokens),
@@ -1606,7 +1614,7 @@ impl LanguageModel for ClaudeCliProvider {
                             if let Some(o) = u.output_tokens {
                                 cli_output_tokens = o;
                             }
-                            info!(
+                            debug!(
                                 input = ?u.input_tokens,
                                 cache_creation = ?u.cache_creation_input_tokens,
                                 cache_read = ?u.cache_read_input_tokens,
@@ -1642,7 +1650,7 @@ impl LanguageModel for ClaudeCliProvider {
                                 cli_context_input_tokens, // Full context for tracking
                                 cli_cost,
                             );
-                            info!(
+                            debug!(
                                 cli_context_input = cli_context_input_tokens,
                                 cli_delta_input = cli_delta_input_tokens,
                                 cli_output = cli_output_tokens,
@@ -1689,7 +1697,7 @@ impl LanguageModel for ClaudeCliProvider {
                             finish_reason,
                         };
 
-                        info!(
+                        debug!(
                             input_delta = input_delta,
                             output_delta = output_delta,
                             accumulated_input = accumulated.total_input_tokens,
@@ -1756,16 +1764,20 @@ impl LanguageModel for ClaudeCliProvider {
                                             // Text token - emit immediately
                                             if let Some(ref text) = delta.text {
                                                 if !text.is_empty() {
+                                                    // Always track this content block index to prevent duplicate
+                                                    // emission when the full "assistant" message arrives
+                                                    streamed_text_indices.insert(event.index);
+                                                    
                                                     if !text_started {
                                                         // Safety: start text if we somehow missed content_block_start
                                                         tracing::trace!("Starting text stream (late, from text_delta)");
                                                         yield StreamChunk::TextStart;
                                                         text_started = true;
-                                                        streamed_text_indices.insert(event.index);
                                                     }
                                                     tracing::trace!(
                                                         text_len = text.len(),
                                                         text_preview = %text.chars().take(20).collect::<String>(),
+                                                        index = event.index,
                                                         "Yielding TextDelta (from stream_event)"
                                                     );
                                                     total_text.push_str(text);
@@ -1868,14 +1880,7 @@ impl LanguageModel for ClaudeCliProvider {
             if let Some(sid) = captured_session_id {
                 let mut session_lock = session_id_handle.write().await;
                 if session_lock.is_none() {
-                    tracing::info!(session_id = %sid, "COMPACTION_DEBUG: Storing CLI session ID for resumption");
                     *session_lock = Some(sid);
-                } else {
-                    tracing::info!(
-                        session_id = %sid,
-                        existing_session = ?*session_lock,
-                        "COMPACTION_DEBUG: NOT storing session ID (existing session present)"
-                    );
                 }
             }
 

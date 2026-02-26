@@ -32,7 +32,7 @@ pub async fn discover_worktrees(repo_path: &Path) -> CoreResult<Vec<PassiveWorks
     let stdout = String::from_utf8_lossy(&output.stdout);
     let worktrees = parse_worktree_list(&stdout, &repo_root);
 
-    info!(count = worktrees.len(), "Discovered worktrees");
+    debug!(count = worktrees.len(), "Discovered worktrees");
 
     Ok(worktrees)
 }

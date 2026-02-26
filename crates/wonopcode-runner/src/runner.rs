@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
     LoopUpdate, PermissionCheckRequest, PermissionChecker,
@@ -1314,11 +1314,6 @@ impl Runner {
             let tokens_before = estimated_tokens.total();
 
             // Send CompactionStarted event so UI can show running indicator
-            info!(
-                messages_before = messages_before,
-                tokens_before = tokens_before,
-                "COMPACTION_DEBUG: Sending CompactionStarted (automatic)"
-            );
             send_update(
                 update_tx,
                 AppUpdate::CompactionStarted {
@@ -1419,28 +1414,12 @@ impl Runner {
                     // provider starts fresh with the compacted message history.
                     {
                         let provider = self.provider.read().await;
-                        let is_stateful = provider.is_stateful();
-                        info!(
-                            is_stateful = is_stateful,
-                            provider_id = %provider.provider_id(),
-                            "COMPACTION_DEBUG: Checking if provider is stateful for session reset"
-                        );
-                        if is_stateful {
-                            info!("COMPACTION_DEBUG: Calling reset_session() on stateful provider");
+                        if provider.is_stateful() {
                             provider.reset_session().await;
-                            info!("COMPACTION_DEBUG: reset_session() completed");
                         }
                     }
 
                     // Send compaction performed event to UI
-                    info!(
-                        messages_before = messages_before,
-                        messages_after = messages.len(),
-                        tokens_before = tokens_before,
-                        tokens_after = tokens_after,
-                        has_summary = !summary.is_empty(),
-                        "COMPACTION_DEBUG: Sending CompactionPerformed (automatic)"
-                    );
                     send_update(
                         update_tx,
                         AppUpdate::CompactionPerformed {
@@ -1468,12 +1447,7 @@ impl Runner {
                             tokens_after,
                             if !summary.is_empty() { Some(summary.clone()) } else { None },
                         ).await {
-                            Ok(saved_count) => {
-                                info!(
-                                    saved_count = saved_count,
-                                    "COMPACTION_DEBUG: Persisted compacted messages to session"
-                                );
-                            }
+                            Ok(_saved_count) => {}
                             Err(e) => {
                                 warn!(error = %e, "Failed to persist compacted messages to session");
                             }
@@ -1793,11 +1767,6 @@ impl Runner {
 
                     // Send CompactionStarted event so UI can show running indicator
                     let messages_before = ctx.messages.len();
-                    info!(
-                        messages_before = messages_before,
-                        retry = overflow_retries,
-                        "COMPACTION_DEBUG: Sending CompactionStarted (emergency)"
-                    );
                     send_update(
                         update_tx,
                         AppUpdate::CompactionStarted {
@@ -1856,14 +1825,6 @@ impl Runner {
                             }
 
                             // Send emergency compaction event to UI
-                            info!(
-                                messages_before = messages_before,
-                                messages_after = new_messages.len(),
-                                tokens_before = tokens_before,
-                                tokens_after = tokens_after,
-                                has_summary = !summary.is_empty(),
-                                "COMPACTION_DEBUG: Sending CompactionPerformed (emergency)"
-                            );
                             send_update(
                                 update_tx,
                                 AppUpdate::CompactionPerformed {
@@ -1891,12 +1852,7 @@ impl Runner {
                                     tokens_after,
                                     if !summary.is_empty() { Some(summary.clone()) } else { None },
                                 ).await {
-                                    Ok(saved_count) => {
-                                        info!(
-                                            saved_count = saved_count,
-                                            "COMPACTION_DEBUG: Persisted compacted messages to session (emergency)"
-                                        );
-                                    }
+                                    Ok(_saved_count) => {}
                                     Err(e) => {
                                         warn!(error = %e, "Failed to persist compacted messages to session (emergency)");
                                     }
@@ -1956,7 +1912,7 @@ impl Runner {
                     let new_messages: Vec<_> =
                         messages.iter().skip(messages_count_before_loop).collect();
 
-                    info!(
+                    trace!(
                         messages_before = messages_count_before_loop,
                         messages_after = messages.len(),
                         new_message_count = new_messages.len(),
@@ -1985,7 +1941,7 @@ impl Runner {
                                     .count();
                                 tool_count += tools_in_msg;
 
-                                info!(
+                                trace!(
                                     content_parts = msg.content.len(),
                                     tool_use_parts = tools_in_msg,
                                     "SESSION PERSISTENCE: Saving assistant message"
@@ -1995,7 +1951,7 @@ impl Runner {
                                 // which will be converted to MessagePart::Tool by save_assistant_message
                                 match svc.save_assistant_message(msg, &last_saved_id).await {
                                     Ok(msg_id) => {
-                                        info!(
+                                        trace!(
                                             message_id = %msg_id,
                                             parts = msg.content.len(),
                                             "SESSION PERSISTENCE: Persisted assistant message with {} content parts",
@@ -2055,7 +2011,7 @@ impl Runner {
                         }
                     }
 
-                    info!(
+                    trace!(
                         assistant_messages_saved = assistant_count,
                         total_tool_parts = tool_count,
                         tool_results_updated = tool_results_updated,
@@ -2066,7 +2022,7 @@ impl Runner {
                     // This allows the workstream server to safely clear streaming state
                     // without losing the last message when clients reconnect.
                     let _ = update_tx.send(AppUpdate::TurnPersisted);
-                    info!("SESSION PERSISTENCE: Sent TurnPersisted event");
+                    trace!("SESSION PERSISTENCE: Sent TurnPersisted event");
                 }
             }
         }
@@ -2814,7 +2770,6 @@ impl Runner {
                     }
                 }
                 AppAction::Compact => {
-                    info!("COMPACTION_DEBUG: Manual compact requested via /compact command");
                     let _ =
                         update_tx.send(AppUpdate::Status("Compacting conversation...".to_string()));
 
@@ -2824,13 +2779,7 @@ impl Runner {
                         history.clone()
                     };
 
-                    info!(
-                        message_count = messages.len(),
-                        "COMPACTION_DEBUG: Current message count for manual compaction"
-                    );
-
                     if messages.len() < 4 {
-                        info!("COMPACTION_DEBUG: Not enough messages (<4), sending CompactionNotNeeded");
                         send_update(
                             &update_tx,
                             AppUpdate::CompactionNotNeeded,
@@ -2840,10 +2789,6 @@ impl Runner {
 
                     // Send CompactionStarted event so UI can show running indicator
                     let messages_before = messages.len();
-                    info!(
-                        messages_before = messages_before,
-                        "COMPACTION_DEBUG: Sending CompactionStarted (manual)"
-                    );
                     send_update(
                         &update_tx,
                         AppUpdate::CompactionStarted {
@@ -2901,14 +2846,6 @@ impl Runner {
                             }
 
                             // Send manual compaction event to UI
-                            info!(
-                                messages_before = messages_before,
-                                messages_after = new_messages.len(),
-                                tokens_before = tokens_before,
-                                tokens_after = tokens_after,
-                                has_summary = !summary.is_empty(),
-                                "COMPACTION_DEBUG: Sending CompactionPerformed (manual)"
-                            );
                             send_update(
                                 &update_tx,
                                 AppUpdate::CompactionPerformed {
@@ -2936,12 +2873,7 @@ impl Runner {
                                     tokens_after,
                                     if !summary.is_empty() { Some(summary.clone()) } else { None },
                                 ).await {
-                                    Ok(saved_count) => {
-                                        info!(
-                                            saved_count = saved_count,
-                                            "COMPACTION_DEBUG: Persisted compacted messages to session (manual)"
-                                        );
-                                    }
+                                    Ok(_saved_count) => {}
                                     Err(e) => {
                                         warn!(error = %e, "Failed to persist compacted messages to session (manual)");
                                     }

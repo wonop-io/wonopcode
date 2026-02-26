@@ -761,7 +761,7 @@ async fn generate_summary(
     ).await {
         Ok(result) => result,
         Err(_) => {
-            warn!("COMPACTION_DEBUG: Summary generation timed out after 120 seconds");
+            warn!("Summary generation timed out after 120 seconds");
             Err("Summary generation timed out after 120 seconds".to_string())
         }
     }
@@ -773,61 +773,34 @@ async fn generate_summary_inner(
     messages: Vec<ProviderMessage>,
     options: GenerateOptions,
 ) -> Result<String, String> {
-    info!("COMPACTION_DEBUG: generate_summary() starting, calling provider.generate()");
-    let start = std::time::Instant::now();
-    
     let stream = provider
         .generate(messages, options)
         .await
         .map_err(|e| {
-            warn!("COMPACTION_DEBUG: provider.generate() failed: {}", e);
+            warn!("provider.generate() failed: {}", e);
             format!("Failed to start summary generation: {e}")
         })?;
-    
-    info!("COMPACTION_DEBUG: provider.generate() returned successfully after {:?}, starting to consume stream", start.elapsed());
 
     let mut stream = Box::pin(stream);
     let mut summary = String::new();
-    let mut chunk_count = 0;
-    let mut last_chunk_time = std::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
-        chunk_count += 1;
-        let now = std::time::Instant::now();
-        let chunk_interval = now.duration_since(last_chunk_time);
-        last_chunk_time = now;
-        
-        // Log if chunks are arriving slowly (more than 5 seconds apart)
-        if chunk_interval.as_secs() > 5 {
-            debug!(
-                "COMPACTION_DEBUG: Slow chunk - {} seconds since last chunk (chunk #{})", 
-                chunk_interval.as_secs(), chunk_count
-            );
-        }
-        
         match chunk_result {
             Ok(StreamChunk::TextDelta(text)) => {
                 summary.push_str(&text);
-                if chunk_count % 10 == 0 {
-                    debug!("COMPACTION_DEBUG: Received {} chunks, summary length so far: {}", chunk_count, summary.len());
-                }
             }
             Ok(StreamChunk::Error(e)) => {
-                warn!("COMPACTION_DEBUG: Error generating summary at chunk {}: {}", chunk_count, e);
+                warn!("Error generating summary: {}", e);
                 return Err(format!("Summary generation error: {e}"));
             }
             Err(e) => {
-                warn!("COMPACTION_DEBUG: Stream error at chunk {}: {}", chunk_count, e);
+                warn!("Stream error: {}", e);
                 return Err(format!("Stream error: {e}"));
             }
             _ => {}
         }
     }
 
-    info!(
-        "COMPACTION_DEBUG: generate_summary() completed after {:?}, received {} chunks, summary length: {}", 
-        start.elapsed(), chunk_count, summary.len()
-    );
     Ok(summary.trim().to_string())
 }
 

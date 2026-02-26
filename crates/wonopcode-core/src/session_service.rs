@@ -129,25 +129,6 @@ impl SessionService {
         // 2. Sessions from other worktrees (same project_id, different directory) are NOT loaded
         match service.repo.list(&project_id).await {
             Ok(sessions) => {
-                info!(
-                    project_id = %project_id,
-                    directory = %cwd,
-                    session_count = sessions.len(),
-                    "COMPACTION_DEBUG: from_instance - found {} sessions for project",
-                    sessions.len()
-                );
-                
-                // Debug: Log all session directories for comparison
-                for (i, s) in sessions.iter().enumerate() {
-                    info!(
-                        session_index = i,
-                        session_id = %s.id,
-                        session_directory = %s.directory,
-                        "COMPACTION_DEBUG: from_instance - session {} has directory: {}",
-                        i, s.directory
-                    );
-                }
-                
                 // Filter sessions to only those matching this workstream's directory
                 // Sessions are already sorted by ID descending (newest first)
                 let matching_session = sessions.into_iter().find(|s| s.directory == cwd);
@@ -161,18 +142,6 @@ impl SessionService {
                         let mut ctx = service.conversion_ctx.write().await;
                         ctx.session_id = session.id.clone();
                     }
-                    info!(
-                        session_id = %session.id,
-                        directory = %cwd,
-                        "COMPACTION_DEBUG: Loaded most recent session for workstream"
-                    );
-                } else {
-                    info!(
-                        project_id = %project_id,
-                        directory = %cwd,
-                        "COMPACTION_DEBUG: No existing sessions found for directory '{}' - this means history will NOT be loaded",
-                        cwd
-                    );
                 }
             }
             Err(e) => {
@@ -180,7 +149,7 @@ impl SessionService {
                     project_id = %project_id,
                     directory = %cwd,
                     error = %e,
-                    "COMPACTION_DEBUG: Failed to list sessions, starting without history"
+                    "Failed to list sessions, starting without history"
                 );
             }
         }
@@ -645,12 +614,6 @@ impl SessionService {
         // Save a compaction marker message right after the summary
         // This will be rendered as the CompactionNotice in the UI
         let parent_id = summary_message_id.unwrap_or_else(|| last_saved_id.clone());
-        info!(
-            session_id = %session_id,
-            parent_id = %parent_id,
-            compaction_type = %compaction_type,
-            "COMPACTION_DEBUG: Saving compaction marker message"
-        );
         match self.save_compaction_event(
             &parent_id,
             compaction_type,
@@ -660,14 +623,8 @@ impl SessionService {
             tokens_after,
             summary,
         ).await {
-            Ok(marker_id) => {
+            Ok(_marker_id) => {
                 saved_count += 1;
-                info!(
-                    session_id = %session_id,
-                    marker_message_id = %marker_id,
-                    "COMPACTION_DEBUG: Saved compaction marker message with ID {}",
-                    marker_id
-                );
             }
             Err(e) => {
                 warn!(error = %e, "Failed to save compaction marker message");
@@ -696,34 +653,13 @@ impl SessionService {
         let session_id = match self.current_session_id().await {
             Some(id) => id,
             None => {
-                info!("COMPACTION_DEBUG: get_history - no current session ID");
                 return Ok(Vec::new());
             }
         };
-
-        info!(
-            session_id = %session_id,
-            "COMPACTION_DEBUG: get_history loading messages for session"
-        );
         
         let messages = self.repo
             .messages(&self.project_id, &session_id, None)
             .await?;
-        
-        // Debug: Check for compaction parts
-        let compaction_count = messages.iter()
-            .flat_map(|m| m.parts.iter())
-            .filter(|p| matches!(p, crate::message::MessagePart::Compaction(_)))
-            .count();
-        
-        info!(
-            session_id = %session_id,
-            message_count = messages.len(),
-            compaction_parts = compaction_count,
-            "COMPACTION_DEBUG: get_history loaded {} messages with {} compaction parts",
-            messages.len(),
-            compaction_count
-        );
         
         Ok(messages)
     }

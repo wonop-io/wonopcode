@@ -3714,13 +3714,6 @@ async function fetchUserData(userId) {
                 let toast = Toast::info(&format!("{} {} [Running]", icon, type_label))
                     .with_message(format!("Summarizing {} messages...", messages_before));
                 self.toasts.push(toast);
-                
-                tracing::info!(
-                    compaction_type = %type_label,
-                    messages_before = messages_before,
-                    "COMPACTION_DEBUG: TUI App received CompactionStarted ({} messages)",
-                    messages_before
-                );
             }
             AppUpdate::CompactionPerformed {
                 compaction_type,
@@ -3754,36 +3747,19 @@ async function fetchUserData(userId) {
                     _ => Toast::info(&format!("{} {}", icon, type_label)),
                 };
                 self.toasts.push(toast.with_message(message));
-                
-                tracing::info!(
-                    compaction_type = %compaction_type,
-                    messages_before = messages_before,
-                    messages_after = messages_after,
-                    tokens_before = tokens_before,
-                    tokens_after = tokens_after,
-                    "COMPACTION_DEBUG: TUI App received CompactionPerformed"
-                );
             }
             AppUpdate::CompactionNotNeeded => {
                 // Show a toast indicating compaction was not needed
                 let toast = Toast::info("✓ Compaction Not Needed")
                     .with_message("Message count is below threshold, no action taken.");
                 self.toasts.push(toast);
-                
-                tracing::info!("COMPACTION_DEBUG: TUI App received CompactionNotNeeded");
             }
             AppUpdate::CompactionProgress {
-                current_chunk,
-                total_chunks,
-                phase,
+                current_chunk: _,
+                total_chunks: _,
+                phase: _,
             } => {
-                // Log the progress (TUI doesn't have a visible progress indicator yet)
-                tracing::info!(
-                    current_chunk = current_chunk,
-                    total_chunks = total_chunks,
-                    phase = %phase,
-                    "COMPACTION_DEBUG: TUI App received CompactionProgress"
-                );
+                // TUI doesn't have a visible progress indicator yet
             }
         }
     }

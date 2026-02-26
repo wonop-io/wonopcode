@@ -919,11 +919,6 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
             compaction_type,
             messages_before,
         } => {
-            tracing::info!(
-                compaction_type = %compaction_type,
-                messages_before = %messages_before,
-                "COMPACTION_DEBUG: TUI backend converting CompactionStarted"
-            );
             let ct = match compaction_type.as_str() {
                 "emergency" => crate::CompactionType::Emergency,
                 "manual" => crate::CompactionType::Manual,
@@ -942,15 +937,6 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
             tokens_after,
             summary,
         } => {
-            tracing::info!(
-                compaction_type = %compaction_type,
-                messages_before = %messages_before,
-                messages_after = %messages_after,
-                tokens_before = %tokens_before,
-                tokens_after = %tokens_after,
-                has_summary = summary.is_some(),
-                "COMPACTION_DEBUG: TUI backend converting CompactionPerformed"
-            );
             let ct = match compaction_type.as_str() {
                 "emergency" => crate::CompactionType::Emergency,
                 "manual" => crate::CompactionType::Manual,
@@ -965,25 +951,16 @@ fn protocol_update_to_app(update: wonopcode_protocol::Update) -> AppUpdate {
                 summary,
             }
         }
-        Update::CompactionNotNeeded => {
-            tracing::info!("COMPACTION_DEBUG: TUI backend converting CompactionNotNeeded");
-            AppUpdate::CompactionNotNeeded
-        }
+        Update::CompactionNotNeeded => AppUpdate::CompactionNotNeeded,
         Update::CompactionProgress {
             current_chunk,
             total_chunks,
             phase,
-        } => {
-            tracing::info!(
-                "COMPACTION_DEBUG: TUI backend converting CompactionProgress: chunk {}/{} ({})",
-                current_chunk, total_chunks, phase
-            );
-            AppUpdate::CompactionProgress {
-                current_chunk,
-                total_chunks,
-                phase,
-            }
-        }
+        } => AppUpdate::CompactionProgress {
+            current_chunk,
+            total_chunks,
+            phase,
+        },
     }
 }
 

@@ -143,7 +143,7 @@ impl AgentLoop for StandardLoop {
         ctx: &mut LoopContext<'_>,
         user_input: &str,
     ) -> Result<String, LoopError> {
-        info!(loop_name = "standard", "Starting prompt execution");
+        debug!(loop_name = "standard", "Starting prompt execution");
 
         // Reset doom loop detector for new prompt
         if let Ok(mut detector) = self.doom_detector.lock() {
@@ -400,7 +400,7 @@ impl AgentLoop for StandardLoop {
                         accumulated_usage,
                         finish_reason: reason,
                     } => {
-                        info!(
+                        debug!(
                             step_input = usage.input_tokens,
                             step_output = usage.output_tokens,
                             has_accumulated = accumulated_usage.is_some(),
@@ -437,16 +437,12 @@ impl AgentLoop for StandardLoop {
                             (None, None, None, None, None, None)
                         };
 
-                        info!(
+                        debug!(
                             step_input = step_usage.input_tokens,
                             step_output = step_usage.output_tokens,
                             step_cost = step_cost,
                             accumulated_input = ?accumulated_input,
                             accumulated_output = ?accumulated_output,
-                            accumulated_cost = ?accumulated_cost,
-                            last_request_input = ?last_request_input,
-                            last_request_output = ?last_request_output,
-                            last_request_cache_read = ?last_request_cache_read,
                             "Sending TokenUsage update"
                         );
 
@@ -486,7 +482,7 @@ impl AgentLoop for StandardLoop {
                 }
             }
 
-            info!(
+            debug!(
                 iteration,
                 text_len = current_text.len(),
                 tool_calls = tool_calls.len(),
@@ -675,7 +671,7 @@ impl AgentLoop for StandardLoop {
             }
         }
 
-        info!(
+        debug!(
             loop_name = "standard",
             iterations = iteration,
             response_len = final_text.len(),

@@ -91,7 +91,7 @@ impl WorkstreamService {
 
     /// Refresh the list of passive workstreams from git.
     pub async fn refresh(&self) -> CoreResult<()> {
-        info!(repo_root = %self.repo_root.display(), "Refreshing workstream list");
+        debug!(repo_root = %self.repo_root.display(), "Refreshing workstream list");
 
         let worktrees = discover_worktrees(&self.repo_root).await?;
         let mut passive = self.passive_workstreams.write().await;
@@ -110,7 +110,7 @@ impl WorkstreamService {
         // Emit refresh event
         let _ = self.event_tx.send(WorkstreamEvent::Refreshed { count });
 
-        info!(count = count, "Workstream list refreshed");
+        debug!(count = count, "Workstream list refreshed");
 
         Ok(())
     }
