@@ -431,6 +431,8 @@ impl PromptLoop {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool_name);

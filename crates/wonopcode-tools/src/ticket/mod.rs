@@ -8,6 +8,7 @@ mod list;
 mod read;
 mod search;
 mod service;
+mod trackers;
 
 pub use create::TicketCreateTool;
 pub use list::TicketListTool;
@@ -17,6 +18,7 @@ pub use service::{
     CreatedTicket, NewTicket, TicketAttachment, TicketComment, TicketDetails, TicketError,
     TicketFilter, TicketService, TicketStatus, TicketSummary, TicketUser, TrackerInfo,
 };
+pub use trackers::TicketListTrackersTool;
 
 #[cfg(test)]
 pub(crate) use service::mock;

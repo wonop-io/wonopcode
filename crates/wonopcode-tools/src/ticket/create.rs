@@ -46,7 +46,8 @@ Required fields:
 
 Optional fields:
 - description: Detailed description (markdown supported)
-- tracker_id: Which tracker to create in (uses first enabled if not specified)
+- tracker_id: Which tracker to create in (uses the workstream's tracker by default, 
+              or first enabled tracker if not in a workstream)
 - assignee: Username to assign the ticket to
 - labels: Array of labels/tags to apply
 - status: Initial status ("open" or "in-progress", defaults to "open")
@@ -124,11 +125,28 @@ Returns the created ticket's ID and URL."#
         // Parse status if provided
         let status = args.status.map(|s| TicketStatus::parse(&s));
 
+        // Determine which tracker to use:
+        // 1. Explicit tracker_id from the request
+        // 2. Workstream's default tracker (from context)
+        // 3. BeatTicketService will fall back to first enabled tracker
+        let explicit_tracker = args.tracker_id.clone();
+        let workstream_tracker = ctx.workstream_default_tracker_id.clone();
+        let effective_tracker_id = explicit_tracker
+            .clone()
+            .or_else(|| workstream_tracker.clone());
+
+        debug!(
+            explicit_tracker = ?explicit_tracker,
+            workstream_tracker = ?workstream_tracker,
+            effective_tracker = ?effective_tracker_id,
+            "Determining target tracker"
+        );
+
         // Build the new ticket
         let new_ticket = NewTicket {
             title: title.to_string(),
             description: args.description,
-            tracker_id: args.tracker_id,
+            tracker_id: effective_tracker_id,
             assignee: args.assignee,
             labels: args.labels.unwrap_or_default(),
             status,
@@ -306,6 +324,8 @@ mod tests {
             event_tx: None,
             ticket_service: Some(mock),
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 
@@ -323,6 +343,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 
@@ -556,5 +578,60 @@ mod tests {
 
         let output = result.unwrap();
         assert_eq!(output.metadata["url"], "https://linear.app/team/WON-200");
+    }
+
+    #[tokio::test]
+    async fn test_execute_create_uses_workstream_default_tracker() {
+        let mock = Arc::new(MockTicketService::new());
+        mock.set_create_result(Ok(sample_created_ticket()));
+
+        // Create context with workstream default tracker set
+        let mut ctx = create_test_context(mock.clone());
+        ctx.workstream_ticket_id = Some("WON-123".to_string());
+        ctx.workstream_default_tracker_id = Some("linear-workstream-tracker".to_string());
+
+        let tool = TicketCreateTool;
+
+        // Create ticket without explicit tracker_id
+        let result = tool
+            .execute(json!({"title": "Ticket using workstream tracker"}), &ctx)
+            .await;
+        assert!(result.is_ok());
+
+        // Verify the workstream tracker was used
+        let captured = mock.get_captured_new_ticket().unwrap();
+        assert_eq!(
+            captured.tracker_id,
+            Some("linear-workstream-tracker".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_create_explicit_tracker_overrides_workstream() {
+        let mock = Arc::new(MockTicketService::new());
+        mock.set_create_result(Ok(sample_created_ticket()));
+
+        // Create context with workstream default tracker set
+        let mut ctx = create_test_context(mock.clone());
+        ctx.workstream_ticket_id = Some("WON-123".to_string());
+        ctx.workstream_default_tracker_id = Some("linear-workstream-tracker".to_string());
+
+        let tool = TicketCreateTool;
+
+        // Create ticket WITH explicit tracker_id - should override workstream default
+        let result = tool
+            .execute(
+                json!({
+                    "title": "Ticket with explicit tracker",
+                    "tracker_id": "github-explicit"
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        // Verify the explicit tracker was used, not workstream default
+        let captured = mock.get_captured_new_ticket().unwrap();
+        assert_eq!(captured.tracker_id, Some("github-explicit".to_string()));
     }
 }

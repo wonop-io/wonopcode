@@ -55,10 +55,16 @@ impl LegacyTracker {
                         return None;
                     }
                 };
-                let token = match self.config.get("api_token").and_then(|v| v.as_str()) {
+                // Try "token" first (current format), then fall back to "api_token" (legacy)
+                let token = match self
+                    .config
+                    .get("token")
+                    .or_else(|| self.config.get("api_token"))
+                    .and_then(|v| v.as_str())
+                {
                     Some(s) => s.to_string(),
                     None => {
-                        warn!(tracker_id = %self.id, "GitHub tracker missing 'api_token' field");
+                        warn!(tracker_id = %self.id, "GitHub tracker missing 'token' or 'api_token' field");
                         return None;
                     }
                 };

@@ -24,6 +24,9 @@ struct TicketListArgs {
     /// Maximum number of results (default: 50).
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Filter by specific tracker ID (optional).
+    #[serde(default)]
+    tracker_id: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -44,8 +47,11 @@ Use this tool to get an overview of tickets in the project. You can filter by:
 - assignee: Filter by assigned user's username
 - labels: Filter by labels (all must match)
 - limit: Maximum number of results (default 50, max 100)
+- tracker_id: Filter to a specific tracker (use ticket_list_trackers to see available IDs)
 
-Returns a formatted table of tickets with ID, title, status, and assignee."#
+Returns a formatted table of tickets with ID, title, status, and assignee.
+
+Tip: Use ticket_list_trackers first to discover available trackers and their IDs."#
     }
 
     fn parameters_schema(&self) -> Value {
@@ -75,6 +81,10 @@ Returns a formatted table of tickets with ID, title, status, and assignee."#
                     "maximum": 100,
                     "default": 50,
                     "description": "Maximum number of tickets to return"
+                },
+                "tracker_id": {
+                    "type": "string",
+                    "description": "Filter to a specific tracker ID. Use ticket_list_trackers to see available IDs."
                 }
             }
         })
@@ -92,6 +102,7 @@ Returns a formatted table of tickets with ID, title, status, and assignee."#
             status = ?args.status,
             assignee = ?args.assignee,
             limit = args.limit,
+            tracker_id = ?args.tracker_id,
             "Listing tickets"
         );
 
@@ -112,6 +123,7 @@ Returns a formatted table of tickets with ID, title, status, and assignee."#
             assignee: args.assignee,
             labels: args.labels.unwrap_or_default(),
             limit: args.limit.min(100),
+            tracker_id: args.tracker_id,
         };
 
         // Execute the list operation
@@ -204,6 +216,7 @@ mod tests {
         assert!(schema["properties"]["assignee"].is_object());
         assert!(schema["properties"]["labels"].is_object());
         assert!(schema["properties"]["limit"].is_object());
+        assert!(schema["properties"]["tracker_id"].is_object());
     }
 
     #[test]
@@ -263,6 +276,16 @@ mod tests {
         assert!(args.assignee.is_none());
         assert!(args.labels.is_none());
         assert_eq!(args.limit, 50);
+        assert!(args.tracker_id.is_none());
+    }
+
+    #[test]
+    fn test_ticket_list_args_with_tracker_id() {
+        let args: TicketListArgs = serde_json::from_value(json!({
+            "tracker_id": "linear-1"
+        }))
+        .unwrap();
+        assert_eq!(args.tracker_id, Some("linear-1".to_string()));
     }
 
     #[test]
@@ -303,6 +326,8 @@ mod tests {
             event_tx: None,
             ticket_service: Some(mock),
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 
@@ -443,6 +468,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         };
 
         let tool = TicketListTool;

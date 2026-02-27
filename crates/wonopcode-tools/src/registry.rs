@@ -48,6 +48,7 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::ticket::TicketSearchTool));
         registry.register(Arc::new(crate::ticket::TicketReadTool));
         registry.register(Arc::new(crate::ticket::TicketCreateTool));
+        registry.register(Arc::new(crate::ticket::TicketListTrackersTool));
 
         // Register memory tools
         registry.register(Arc::new(crate::memory::MemoryStoreTool));
@@ -228,6 +229,7 @@ mod tests {
         assert!(tools.contains(&"ticket_search"));
         assert!(tools.contains(&"ticket_read"));
         assert!(tools.contains(&"ticket_create"));
+        assert!(tools.contains(&"ticket_list_trackers"));
     }
 
     #[test]
@@ -324,6 +326,7 @@ mod tests {
             "ticket_search",
             "ticket_read",
             "ticket_create",
+            "ticket_list_trackers",
         ];
         for tool_id in &ticket_tools {
             let tool = registry
@@ -348,13 +351,14 @@ mod tests {
         let registry = ToolRegistry::with_builtins();
 
         let ticket_tools = registry.filter(|id| id.starts_with("ticket_"));
-        assert_eq!(ticket_tools.len(), 4);
+        assert_eq!(ticket_tools.len(), 5);
 
         let tool_ids: Vec<&str> = ticket_tools.iter().map(|t| t.id()).collect();
         assert!(tool_ids.contains(&"ticket_list"));
         assert!(tool_ids.contains(&"ticket_search"));
         assert!(tool_ids.contains(&"ticket_read"));
         assert!(tool_ids.contains(&"ticket_create"));
+        assert!(tool_ids.contains(&"ticket_list_trackers"));
     }
 
     #[test]

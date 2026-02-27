@@ -34,7 +34,10 @@ use wonopcode_provider::{
 use wonopcode_sandbox::{SandboxConfig, SandboxManager, SandboxRuntime, SandboxRuntimeType};
 use wonopcode_server::GitOperations;
 use wonopcode_snapshot::{SnapshotConfig, SnapshotStore};
-use wonopcode_tools::{mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolEvent, ToolRegistry};
+use wonopcode_tools::{
+    ace::state::WorkstreamState, mcp::McpToolsBuilder, mcp_todo_adapter, todo, ToolEvent,
+    ToolRegistry,
+};
 use wonopcode_tui::{
     AppAction, AppUpdate, GitCommitUpdate, GitFileUpdate, GitStatusUpdate, McpStatusUpdate,
     PermissionRequestUpdate, PhaseUpdate, SaveScope, TodoUpdate,
@@ -1719,6 +1722,10 @@ impl Runner {
             PermissionCheckerAdapter::new(self.permission_manager.clone()),
         );
 
+        // Load workstream state for default tracker resolution
+        let (workstream_ticket_id, workstream_default_tracker_id) =
+            Self::load_workstream_context(cwd);
+
         // Build LoopContext
         let mut ctx = LoopContext {
             cwd,
@@ -1738,6 +1745,8 @@ impl Runner {
             permission_checker: Some(permission_checker),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            workstream_ticket_id,
+            workstream_default_tracker_id,
             prompt_images: images,
         };
 
@@ -3936,6 +3945,39 @@ impl Runner {
         help.push_str("/help   - Show this help message\n");
         help.push_str("\nType any command starting with '/' to use it.\n");
         help
+    }
+
+    /// Load workstream context from the current directory.
+    ///
+    /// Returns the ticket ID and default tracker ID for the current workstream.
+    /// If no workstream state exists, returns (None, None).
+    fn load_workstream_context(cwd: &Path) -> (Option<String>, Option<String>) {
+        match WorkstreamState::load(cwd) {
+            Ok(Some(state)) => {
+                let ticket_id = if state.ticket_id.is_empty() {
+                    None
+                } else {
+                    Some(state.ticket_id.clone())
+                };
+                let tracker_id = state.tracker_id().map(String::from);
+
+                debug!(
+                    ticket_id = ?ticket_id,
+                    tracker_id = ?tracker_id,
+                    "Loaded workstream context"
+                );
+
+                (ticket_id, tracker_id)
+            }
+            Ok(None) => {
+                trace!("No workstream state found");
+                (None, None)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to load workstream state");
+                (None, None)
+            }
+        }
     }
 }
 

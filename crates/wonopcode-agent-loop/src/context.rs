@@ -289,6 +289,18 @@ pub struct LoopContext<'a> {
     /// persistent storage across global, workstream, and session scopes.
     pub memory_service: Option<wonopcode_tools::SharedMemoryService>,
 
+    /// Optional workstream ticket ID.
+    ///
+    /// When set, this is the ticket ID associated with the current workstream.
+    /// Used to determine the default tracker for ticket operations.
+    pub workstream_ticket_id: Option<String>,
+
+    /// Optional default tracker ID for the workstream.
+    ///
+    /// When set, ticket operations will use this tracker as the default
+    /// instead of the first available tracker.
+    pub workstream_default_tracker_id: Option<String>,
+
     /// Images attached to the current prompt.
     ///
     /// When set, these images should be included with the user message.

@@ -119,6 +119,8 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             event_tx: None,                               // MCP HTTP doesn't need event_tx
             ticket_service: None,                         // No ticket service in MCP HTTP
             memory_service: self.memory_service.clone(),  // Share memory service with tools
+            workstream_ticket_id: None,                   // No workstream in MCP HTTP
+            workstream_default_tracker_id: None,          // No workstream tracker in MCP HTTP
         };
 
         tracing::info!(

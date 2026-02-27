@@ -17,6 +17,9 @@ struct TicketSearchArgs {
     /// Maximum number of results (default: 20).
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Filter by specific tracker ID (optional).
+    #[serde(default)]
+    tracker_id: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -37,7 +40,12 @@ The search query can include:
 - Keywords that appear in ticket titles or descriptions
 - Ticket IDs (partial or full)
 
-Returns a list of matching tickets sorted by relevance."#
+Optional filtering:
+- tracker_id: Search only in a specific tracker (use ticket_list_trackers to see available IDs)
+
+Returns a list of matching tickets sorted by relevance.
+
+Tip: Use ticket_list_trackers first to discover available trackers and their IDs."#
     }
 
     fn parameters_schema(&self) -> Value {
@@ -56,6 +64,10 @@ Returns a list of matching tickets sorted by relevance."#
                     "maximum": 50,
                     "default": 20,
                     "description": "Maximum number of results to return"
+                },
+                "tracker_id": {
+                    "type": "string",
+                    "description": "Filter to a specific tracker ID. Use ticket_list_trackers to see available IDs."
                 }
             }
         })
@@ -75,7 +87,7 @@ Returns a list of matching tickets sorted by relevance."#
             return Err(ToolError::validation("Search query cannot be empty"));
         }
 
-        debug!(query = %query, limit = args.limit, "Searching tickets");
+        debug!(query = %query, limit = args.limit, tracker_id = ?args.tracker_id, "Searching tickets");
 
         // Get ticket service from context
         let ticket_service = ctx.ticket_service.as_ref().ok_or_else(|| {
@@ -86,7 +98,7 @@ Returns a list of matching tickets sorted by relevance."#
 
         // Execute the search
         let tickets = ticket_service
-            .search_tickets(query, args.limit.min(50))
+            .search_tickets(query, args.limit.min(50), args.tracker_id.as_deref())
             .await
             .map_err(|e| ToolError::execution_failed(e.to_string()))?;
 
@@ -177,6 +189,7 @@ mod tests {
 
         assert!(schema["properties"]["query"].is_object());
         assert!(schema["properties"]["limit"].is_object());
+        assert!(schema["properties"]["tracker_id"].is_object());
     }
 
     #[test]
@@ -231,6 +244,7 @@ mod tests {
         .unwrap();
         assert_eq!(args.query, "test");
         assert_eq!(args.limit, 20);
+        assert!(args.tracker_id.is_none());
     }
 
     #[test]
@@ -242,6 +256,17 @@ mod tests {
         .unwrap();
         assert_eq!(args.query, "bug fix");
         assert_eq!(args.limit, 10);
+    }
+
+    #[test]
+    fn test_ticket_search_args_with_tracker_id() {
+        let args: TicketSearchArgs = serde_json::from_value(json!({
+            "query": "bug fix",
+            "tracker_id": "linear-1"
+        }))
+        .unwrap();
+        assert_eq!(args.query, "bug fix");
+        assert_eq!(args.tracker_id, Some("linear-1".to_string()));
     }
 
     // Integration tests with MockTicketService
@@ -260,6 +285,8 @@ mod tests {
             event_tx: None,
             ticket_service: Some(mock),
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 
@@ -277,6 +304,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 

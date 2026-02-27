@@ -372,6 +372,8 @@ impl Processor {
             event_tx: None,
             ticket_service: None, // ACP tools run without ticket service for now
             memory_service: None, // ACP tools run without memory service for now
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool.id());

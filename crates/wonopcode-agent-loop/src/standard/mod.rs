@@ -570,6 +570,8 @@ impl AgentLoop for StandardLoop {
                 tool_timeout,
                 ctx.ticket_service.clone(),
                 ctx.memory_service.clone(),
+                ctx.workstream_ticket_id.clone(),
+                ctx.workstream_default_tracker_id.clone(),
             );
 
             let mut tool_results = Vec::new();
