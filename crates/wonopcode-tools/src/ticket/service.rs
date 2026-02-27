@@ -239,6 +239,19 @@ pub struct TrackerInfo {
     pub enabled: bool,
 }
 
+/// Label information including tracker source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelInfo {
+    /// The label name.
+    pub name: String,
+    /// Hex color code (e.g., "ff0000").
+    pub color: Option<String>,
+    /// Label description.
+    pub description: Option<String>,
+    /// Which tracker this label belongs to.
+    pub tracker_name: String,
+}
+
 /// Trait for ticket operations.
 ///
 /// This trait abstracts ticket operations, allowing tools to access
@@ -280,6 +293,29 @@ pub trait TicketService: Send + Sync {
     ///
     /// Returns information about all configured trackers.
     async fn list_trackers(&self) -> Result<Vec<TrackerInfo>, TicketError>;
+
+    /// Add labels to a ticket.
+    ///
+    /// Adds the specified labels to a ticket without removing existing labels.
+    async fn add_labels(
+        &self,
+        ticket_id: &str,
+        labels: Vec<String>,
+    ) -> Result<TicketDetails, TicketError>;
+
+    /// Remove labels from a ticket.
+    ///
+    /// Removes the specified labels from a ticket while preserving other labels.
+    async fn remove_labels(
+        &self,
+        ticket_id: &str,
+        labels: Vec<String>,
+    ) -> Result<TicketDetails, TicketError>;
+
+    /// List available labels across all enabled trackers.
+    ///
+    /// Returns labels from all trackers with their associated tracker names.
+    async fn list_labels(&self) -> Result<Vec<LabelInfo>, TicketError>;
 }
 
 #[cfg(test)]
@@ -386,6 +422,9 @@ pub mod mock {
         pub get_result: Mutex<Option<Result<TicketDetails, TicketError>>>,
         pub create_result: Mutex<Option<Result<CreatedTicket, TicketError>>>,
         pub trackers_result: Mutex<Option<Result<Vec<TrackerInfo>, TicketError>>>,
+        pub add_labels_result: Mutex<Option<Result<TicketDetails, TicketError>>>,
+        pub remove_labels_result: Mutex<Option<Result<TicketDetails, TicketError>>>,
+        pub list_labels_result: Mutex<Option<Result<Vec<LabelInfo>, TicketError>>>,
         /// Captured filter from last list_tickets call.
         pub captured_filter: Mutex<Option<TicketFilter>>,
         /// Captured query from last search_tickets call.
@@ -394,6 +433,10 @@ pub mod mock {
         pub captured_ticket_id: Mutex<Option<String>>,
         /// Captured new ticket from last create_ticket call.
         pub captured_new_ticket: Mutex<Option<NewTicket>>,
+        /// Captured ticket ID and labels from last add_labels call.
+        pub captured_add_labels: Mutex<Option<(String, Vec<String>)>>,
+        /// Captured ticket ID and labels from last remove_labels call.
+        pub captured_remove_labels: Mutex<Option<(String, Vec<String>)>>,
     }
 
     impl MockTicketService {
@@ -405,10 +448,15 @@ pub mod mock {
                 get_result: Mutex::new(None),
                 create_result: Mutex::new(None),
                 trackers_result: Mutex::new(None),
+                add_labels_result: Mutex::new(None),
+                remove_labels_result: Mutex::new(None),
+                list_labels_result: Mutex::new(None),
                 captured_filter: Mutex::new(None),
                 captured_search_query: Mutex::new(None),
                 captured_ticket_id: Mutex::new(None),
                 captured_new_ticket: Mutex::new(None),
+                captured_add_labels: Mutex::new(None),
+                captured_remove_labels: Mutex::new(None),
             }
         }
 
@@ -456,6 +504,31 @@ pub mod mock {
         /// Get the captured new ticket from last create_ticket call.
         pub fn get_captured_new_ticket(&self) -> Option<NewTicket> {
             self.captured_new_ticket.lock().unwrap().take()
+        }
+
+        /// Set the result for add_labels.
+        pub fn set_add_labels_result(&self, result: Result<TicketDetails, TicketError>) {
+            *self.add_labels_result.lock().unwrap() = Some(result);
+        }
+
+        /// Set the result for remove_labels.
+        pub fn set_remove_labels_result(&self, result: Result<TicketDetails, TicketError>) {
+            *self.remove_labels_result.lock().unwrap() = Some(result);
+        }
+
+        /// Set the result for list_labels.
+        pub fn set_list_labels_result(&self, result: Result<Vec<LabelInfo>, TicketError>) {
+            *self.list_labels_result.lock().unwrap() = Some(result);
+        }
+
+        /// Get the captured ticket ID and labels from last add_labels call.
+        pub fn get_captured_add_labels(&self) -> Option<(String, Vec<String>)> {
+            self.captured_add_labels.lock().unwrap().take()
+        }
+
+        /// Get the captured ticket ID and labels from last remove_labels call.
+        pub fn get_captured_remove_labels(&self) -> Option<(String, Vec<String>)> {
+            self.captured_remove_labels.lock().unwrap().take()
         }
     }
 
@@ -521,6 +594,40 @@ pub mod mock {
                 .unwrap()
                 .take()
                 .unwrap_or(Err(TicketError::NoTrackers))
+        }
+
+        async fn add_labels(
+            &self,
+            ticket_id: &str,
+            labels: Vec<String>,
+        ) -> Result<TicketDetails, TicketError> {
+            *self.captured_add_labels.lock().unwrap() = Some((ticket_id.to_string(), labels));
+            self.add_labels_result
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or(Err(TicketError::TicketNotFound(ticket_id.to_string())))
+        }
+
+        async fn remove_labels(
+            &self,
+            ticket_id: &str,
+            labels: Vec<String>,
+        ) -> Result<TicketDetails, TicketError> {
+            *self.captured_remove_labels.lock().unwrap() = Some((ticket_id.to_string(), labels));
+            self.remove_labels_result
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or(Err(TicketError::TicketNotFound(ticket_id.to_string())))
+        }
+
+        async fn list_labels(&self) -> Result<Vec<LabelInfo>, TicketError> {
+            self.list_labels_result
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or(Ok(Vec::new()))
         }
     }
 
@@ -617,6 +724,30 @@ pub mod mock {
                 name: "GitHub".to_string(),
                 tracker_type: "github".to_string(),
                 enabled: true,
+            },
+        ]
+    }
+
+    /// Helper function to create sample label info for testing.
+    pub fn sample_label_info() -> Vec<LabelInfo> {
+        vec![
+            LabelInfo {
+                name: "bug".to_string(),
+                color: Some("d73a4a".to_string()),
+                description: Some("Something isn't working".to_string()),
+                tracker_name: "GitHub".to_string(),
+            },
+            LabelInfo {
+                name: "feature".to_string(),
+                color: Some("a2eeef".to_string()),
+                description: Some("New feature request".to_string()),
+                tracker_name: "GitHub".to_string(),
+            },
+            LabelInfo {
+                name: "enhancement".to_string(),
+                color: Some("84b6eb".to_string()),
+                description: None,
+                tracker_name: "Linear".to_string(),
             },
         ]
     }
