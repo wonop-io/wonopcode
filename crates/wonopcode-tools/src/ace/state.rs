@@ -21,6 +21,11 @@ pub struct WorkstreamState {
     /// Source of the ticket (linear, github_issues, etc.).
     #[serde(default)]
     pub ticket_source: Option<String>,
+    /// Tracker ID that owns this ticket.
+    /// This is discovered automatically when the workstream is first used
+    /// and cached for subsequent operations.
+    #[serde(default)]
+    pub ticket_tracker_id: Option<String>,
     /// When this workstream was created.
     pub created_at: DateTime<Utc>,
     /// When this workstream was last updated.
@@ -118,6 +123,7 @@ impl WorkstreamState {
             ticket_id: ticket_id.to_string(),
             ticket_title: None,
             ticket_source: None,
+            ticket_tracker_id: None,
             created_at: now,
             updated_at: now,
             workflow: WorkflowState {
@@ -127,6 +133,26 @@ impl WorkstreamState {
             active_task: None,
             sequences: SequenceCounters::default(),
         }
+    }
+
+    /// Create a new workstream state with a known tracker.
+    pub fn new_with_tracker(ticket_id: &str, tracker_id: &str) -> Self {
+        let mut state = Self::new(ticket_id);
+        state.ticket_tracker_id = Some(tracker_id.to_string());
+        state
+    }
+
+    /// Set the tracker ID for this workstream.
+    ///
+    /// This is typically called when the tracker is discovered automatically
+    /// by searching for the ticket across all configured trackers.
+    pub fn set_tracker_id(&mut self, tracker_id: String) {
+        self.ticket_tracker_id = Some(tracker_id);
+    }
+
+    /// Get the tracker ID if known.
+    pub fn tracker_id(&self) -> Option<&str> {
+        self.ticket_tracker_id.as_deref()
     }
 
     /// Load state from .wonopcode/state.yaml.
@@ -403,6 +429,7 @@ mod tests {
         assert_eq!(state.workflow.current_phase, WorkflowPhase::Requirements);
         assert!(state.active_task.is_none());
         assert_eq!(state.sequences.use_case, 0);
+        assert!(state.ticket_tracker_id.is_none());
 
         // Requirements should be in_progress
         let req_status = state.workflow.phases.get("requirements").unwrap().status;
@@ -411,6 +438,24 @@ mod tests {
         // Other phases should be pending
         let design_status = state.workflow.phases.get("design").unwrap().status;
         assert_eq!(design_status, PhaseStatus::Pending);
+    }
+
+    #[test]
+    fn test_new_with_tracker() {
+        let state = WorkstreamState::new_with_tracker("WON-123", "linear-tracker-1");
+
+        assert_eq!(state.ticket_id, "WON-123");
+        assert_eq!(state.ticket_tracker_id, Some("linear-tracker-1".to_string()));
+        assert_eq!(state.tracker_id(), Some("linear-tracker-1"));
+    }
+
+    #[test]
+    fn test_set_tracker_id() {
+        let mut state = WorkstreamState::new("WON-456");
+        assert!(state.tracker_id().is_none());
+
+        state.set_tracker_id("github-tracker-2".to_string());
+        assert_eq!(state.tracker_id(), Some("github-tracker-2"));
     }
 
     #[test]
@@ -438,6 +483,62 @@ mod tests {
         assert_eq!(loaded.ticket_id, "WON-456");
         assert_eq!(loaded.ticket_title, Some("Test ticket".to_string()));
         assert_eq!(loaded.sequences.use_case, 2);
+    }
+
+    #[test]
+    fn test_save_and_load_with_tracker() {
+        let dir = tempdir().unwrap();
+        let mut state = WorkstreamState::new_with_tracker("WON-789", "linear-main");
+        state.ticket_title = Some("Feature with tracker".to_string());
+
+        state.save(dir.path()).unwrap();
+
+        let loaded = WorkstreamState::load(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ticket_id, "WON-789");
+        assert_eq!(loaded.tracker_id(), Some("linear-main"));
+        assert_eq!(loaded.ticket_title, Some("Feature with tracker".to_string()));
+    }
+
+    #[test]
+    fn test_load_legacy_state_without_tracker_id() {
+        // Test backward compatibility: loading a state.yaml that doesn't have ticket_tracker_id
+        let dir = tempdir().unwrap();
+        let wonopcode_dir = dir.path().join(".wonopcode");
+        std::fs::create_dir_all(&wonopcode_dir).unwrap();
+
+        // Write a legacy state.yaml without ticket_tracker_id
+        let legacy_yaml = r#"
+ticket_id: WON-LEGACY
+ticket_title: Legacy Ticket
+created_at: 2024-01-01T00:00:00Z
+updated_at: 2024-01-01T00:00:00Z
+workflow:
+  current_phase: requirements
+  phases:
+    requirements:
+      status: in_progress
+    analysis:
+      status: pending
+    design:
+      status: pending
+    implementation:
+      status: pending
+    verification:
+      status: pending
+    deployment:
+      status: pending
+sequences:
+  use-case: 0
+  requirement: 0
+  design: 0
+  test-case: 0
+  task: 0
+"#;
+        std::fs::write(wonopcode_dir.join("state.yaml"), legacy_yaml).unwrap();
+
+        let loaded = WorkstreamState::load(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ticket_id, "WON-LEGACY");
+        assert!(loaded.tracker_id().is_none()); // Should default to None
     }
 
     #[test]

@@ -194,6 +194,9 @@ pub struct TicketFilter {
     pub labels: Vec<String>,
     /// Maximum number of results to return.
     pub limit: usize,
+    /// Filter by specific tracker ID (optional).
+    /// If set, only tickets from this tracker are returned.
+    pub tracker_id: Option<String>,
 }
 
 /// Data for creating a new ticket.
@@ -262,15 +265,19 @@ pub trait TicketService: Send + Sync {
     /// List tickets with optional filtering.
     ///
     /// Returns tickets from all enabled trackers matching the filter.
+    /// If a default tracker is set, its tickets appear first.
     async fn list_tickets(&self, filter: TicketFilter) -> Result<Vec<TicketSummary>, TicketError>;
 
     /// Search tickets by query string.
     ///
-    /// Searches ticket titles and descriptions across all enabled trackers.
+    /// Searches ticket titles and descriptions across trackers.
+    /// If `tracker_id` is specified, only searches that tracker.
+    /// If a default tracker is set and no `tracker_id` specified, its results appear first.
     async fn search_tickets(
         &self,
         query: &str,
         limit: usize,
+        tracker_id: Option<&str>,
     ) -> Result<Vec<TicketSummary>, TicketError>;
 
     /// Get full ticket details.
@@ -286,7 +293,8 @@ pub trait TicketService: Send + Sync {
 
     /// Create a new ticket.
     ///
-    /// Creates a ticket in the specified tracker (or first enabled tracker).
+    /// Creates a ticket in the specified tracker. If no tracker_id is specified
+    /// in the NewTicket, uses the default tracker (if set) or the first enabled tracker.
     async fn create_ticket(&self, ticket: NewTicket) -> Result<CreatedTicket, TicketError>;
 
     /// List available trackers.
@@ -316,6 +324,29 @@ pub trait TicketService: Send + Sync {
     ///
     /// Returns labels from all trackers with their associated tracker names.
     async fn list_labels(&self) -> Result<Vec<LabelInfo>, TicketError>;
+
+    /// Find which tracker owns a specific ticket.
+    ///
+    /// Searches across all enabled trackers to find which one contains
+    /// the given ticket ID. Returns the tracker ID if found.
+    ///
+    /// This is useful for discovering the tracker when a workstream
+    /// is associated with a ticket but the tracker is not yet known.
+    async fn find_tracker_for_ticket(&self, ticket_id: &str) -> Result<Option<String>, TicketError>;
+
+    /// Get the current default tracker ID.
+    ///
+    /// Returns None if no default tracker is set.
+    fn default_tracker_id(&self) -> Option<String>;
+
+    /// Set the default tracker ID for operations.
+    ///
+    /// When set, this tracker will be used as the default for:
+    /// - Creating tickets (when no tracker_id specified)
+    /// - Prioritizing results in list/search operations
+    ///
+    /// Pass None to clear the default.
+    fn set_default_tracker_id(&self, tracker_id: Option<String>);
 }
 
 #[cfg(test)]
@@ -425,6 +456,7 @@ pub mod mock {
         pub add_labels_result: Mutex<Option<Result<TicketDetails, TicketError>>>,
         pub remove_labels_result: Mutex<Option<Result<TicketDetails, TicketError>>>,
         pub list_labels_result: Mutex<Option<Result<Vec<LabelInfo>, TicketError>>>,
+        pub find_tracker_result: Mutex<Option<Result<Option<String>, TicketError>>>,
         /// Captured filter from last list_tickets call.
         pub captured_filter: Mutex<Option<TicketFilter>>,
         /// Captured query from last search_tickets call.
@@ -437,6 +469,10 @@ pub mod mock {
         pub captured_add_labels: Mutex<Option<(String, Vec<String>)>>,
         /// Captured ticket ID and labels from last remove_labels call.
         pub captured_remove_labels: Mutex<Option<(String, Vec<String>)>>,
+        /// Captured ticket ID from last find_tracker_for_ticket call.
+        pub captured_find_tracker_ticket_id: Mutex<Option<String>>,
+        /// Current default tracker ID.
+        pub default_tracker_id: Mutex<Option<String>>,
     }
 
     impl MockTicketService {
@@ -451,12 +487,15 @@ pub mod mock {
                 add_labels_result: Mutex::new(None),
                 remove_labels_result: Mutex::new(None),
                 list_labels_result: Mutex::new(None),
+                find_tracker_result: Mutex::new(None),
                 captured_filter: Mutex::new(None),
                 captured_search_query: Mutex::new(None),
                 captured_ticket_id: Mutex::new(None),
                 captured_new_ticket: Mutex::new(None),
                 captured_add_labels: Mutex::new(None),
                 captured_remove_labels: Mutex::new(None),
+                captured_find_tracker_ticket_id: Mutex::new(None),
+                default_tracker_id: Mutex::new(None),
             }
         }
 
@@ -484,6 +523,11 @@ pub mod mock {
         #[allow(dead_code)]
         pub fn set_trackers_result(&self, result: Result<Vec<TrackerInfo>, TicketError>) {
             *self.trackers_result.lock().unwrap() = Some(result);
+        }
+
+        /// Set the result for find_tracker_for_ticket.
+        pub fn set_find_tracker_result(&self, result: Result<Option<String>, TicketError>) {
+            *self.find_tracker_result.lock().unwrap() = Some(result);
         }
 
         /// Get the captured filter from last list_tickets call.
@@ -530,6 +574,11 @@ pub mod mock {
         pub fn get_captured_remove_labels(&self) -> Option<(String, Vec<String>)> {
             self.captured_remove_labels.lock().unwrap().take()
         }
+
+        /// Get the captured ticket ID from last find_tracker_for_ticket call.
+        pub fn get_captured_find_tracker_ticket_id(&self) -> Option<String> {
+            self.captured_find_tracker_ticket_id.lock().unwrap().take()
+        }
     }
 
     impl Default for MockTicketService {
@@ -556,6 +605,7 @@ pub mod mock {
             &self,
             query: &str,
             _limit: usize,
+            _tracker_id: Option<&str>,
         ) -> Result<Vec<TicketSummary>, TicketError> {
             *self.captured_search_query.lock().unwrap() = Some(query.to_string());
             self.search_result
@@ -628,6 +678,26 @@ pub mod mock {
                 .unwrap()
                 .take()
                 .unwrap_or(Ok(Vec::new()))
+        }
+
+        async fn find_tracker_for_ticket(
+            &self,
+            ticket_id: &str,
+        ) -> Result<Option<String>, TicketError> {
+            *self.captured_find_tracker_ticket_id.lock().unwrap() = Some(ticket_id.to_string());
+            self.find_tracker_result
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or(Ok(None))
+        }
+
+        fn default_tracker_id(&self) -> Option<String> {
+            self.default_tracker_id.lock().unwrap().clone()
+        }
+
+        fn set_default_tracker_id(&self, tracker_id: Option<String>) {
+            *self.default_tracker_id.lock().unwrap() = tracker_id;
         }
     }
 
@@ -766,6 +836,7 @@ pub mod mock {
                 assignee: Some("john".to_string()),
                 labels: vec!["bug".to_string()],
                 limit: 10,
+                tracker_id: None,
             };
 
             let result = mock.list_tickets(filter).await;

@@ -108,6 +108,13 @@ pub struct ToolContext {
     pub ticket_service: Option<Arc<dyn TicketService>>,
     /// Optional memory service for memory tools.
     pub memory_service: Option<SharedMemoryService>,
+    /// Workstream's ticket ID (from .wonopcode/state.yaml).
+    /// This is the ticket ID associated with the current workstream.
+    pub workstream_ticket_id: Option<String>,
+    /// Default tracker ID for the workstream.
+    /// This is the tracker that owns the workstream's ticket.
+    /// Tools should use this as the default for ticket operations.
+    pub workstream_default_tracker_id: Option<String>,
 }
 
 impl ToolContext {
@@ -234,6 +241,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 

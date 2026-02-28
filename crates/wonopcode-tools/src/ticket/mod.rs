@@ -11,6 +11,7 @@ mod read;
 mod remove_labels;
 mod search;
 mod service;
+mod trackers;
 
 pub use add_labels::TicketAddLabelsTool;
 pub use create::TicketCreateTool;
@@ -23,6 +24,7 @@ pub use service::{
     CreatedTicket, LabelInfo, NewTicket, TicketAttachment, TicketComment, TicketDetails,
     TicketError, TicketFilter, TicketService, TicketStatus, TicketSummary, TicketUser, TrackerInfo,
 };
+pub use trackers::TicketListTrackersTool;
 
 #[cfg(test)]
 pub(crate) use service::mock;

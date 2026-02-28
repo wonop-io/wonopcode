@@ -1007,6 +1007,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
         }
     }
 
