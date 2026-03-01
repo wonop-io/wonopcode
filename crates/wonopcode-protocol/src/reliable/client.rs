@@ -51,6 +51,18 @@ pub enum ClientMessage {
     },
 
     // =========================================================================
+    // Connection Health
+    // =========================================================================
+    /// Ping message for connection health check.
+    ///
+    /// Server should respond with `Pong` containing the same timestamp.
+    /// Used to detect stale connections and measure round-trip latency.
+    Ping {
+        /// Client timestamp in milliseconds since epoch.
+        timestamp: u64,
+    },
+
+    // =========================================================================
     // Workstream Operations
     // =========================================================================
     /// List all workstreams.
@@ -539,5 +551,23 @@ mod tests {
         let json = serde_json::to_string(&subscribe).unwrap();
         assert!(json.contains("subscribe"));
         assert!(json.contains("42"));
+    }
+
+    #[test]
+    fn test_ping_message() {
+        let ping = ClientMessage::Ping {
+            timestamp: 1709312400000,
+        };
+        let json = serde_json::to_string(&ping).unwrap();
+        assert!(json.contains("ping"));
+        assert!(json.contains("1709312400000"));
+
+        // Test deserialization
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        if let ClientMessage::Ping { timestamp } = parsed {
+            assert_eq!(timestamp, 1709312400000);
+        } else {
+            panic!("Wrong message type");
+        }
     }
 }
