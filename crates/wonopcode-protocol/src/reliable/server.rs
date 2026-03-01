@@ -47,6 +47,17 @@ pub enum ServerMessage {
     },
 
     // =========================================================================
+    // Connection Health
+    // =========================================================================
+    /// Pong response to client Ping.
+    ///
+    /// Echoes the timestamp from the client's Ping message.
+    Pong {
+        /// Echo of the client's timestamp from the Ping message.
+        timestamp: u64,
+    },
+
+    // =========================================================================
     // Responses to Requests
     // =========================================================================
     /// Response to a client request.
@@ -677,5 +688,23 @@ mod tests {
         let json = serde_json::to_string(&shutdown).unwrap();
         assert!(json.contains("server_shutdown"));
         assert!(json.contains("Maintenance"));
+    }
+
+    #[test]
+    fn test_pong_message() {
+        let pong = ServerMessage::Pong {
+            timestamp: 1709312400000,
+        };
+        let json = serde_json::to_string(&pong).unwrap();
+        assert!(json.contains("pong"));
+        assert!(json.contains("1709312400000"));
+
+        // Test deserialization
+        let parsed: ServerMessage = serde_json::from_str(&json).unwrap();
+        if let ServerMessage::Pong { timestamp } = parsed {
+            assert_eq!(timestamp, 1709312400000);
+        } else {
+            panic!("Wrong message type");
+        }
     }
 }
