@@ -619,28 +619,68 @@ pub static MODELS: &[ModelDefinition] = &[
         crate::model::openai::o4_mini,
     ),
     // =========================================================================
-    // OpenAI Codex Models
+    // OpenAI Codex Models - GPT-5.x Codex Family (March 2026)
     // =========================================================================
+    // Default: GPT-5.3-Codex (most capable)
     ModelDefinition::new(
-        "codex",
+        "gpt-5.3-codex",
         "openai-codex",
-        "OpenAI Codex",
-        crate::codex::models::codex,
+        "GPT-5.3 Codex",
+        crate::codex::models::gpt_5_3_codex,
+    )
+    .with_aliases(&["codex", "codex-latest"]),
+    ModelDefinition::new(
+        "gpt-5.2-codex",
+        "openai-codex",
+        "GPT-5.2 Codex",
+        crate::codex::models::gpt_5_2_codex,
     ),
+    ModelDefinition::new(
+        "gpt-5.1-codex",
+        "openai-codex",
+        "GPT-5.1 Codex",
+        crate::codex::models::gpt_5_1_codex,
+    ),
+    ModelDefinition::new(
+        "gpt-5.1-codex-max",
+        "openai-codex",
+        "GPT-5.1 Codex Max",
+        crate::codex::models::gpt_5_1_codex_max,
+    ),
+    ModelDefinition::new(
+        "gpt-5-codex",
+        "openai-codex",
+        "GPT-5 Codex",
+        crate::codex::models::gpt_5_codex,
+    ),
+    ModelDefinition::new(
+        "gpt-5.1-codex-mini",
+        "openai-codex",
+        "GPT-5.1 Codex Mini",
+        crate::codex::models::gpt_5_1_codex_mini,
+    ),
+    // Legacy model (deprecated but still available)
+    ModelDefinition::new(
+        "codex-mini-latest",
+        "openai-codex",
+        "Codex Mini (Legacy)",
+        crate::codex::models::codex_mini_latest,
+    ),
+    // Reasoning models via Codex API
     ModelDefinition::new(
         "codex-o3",
         "openai-codex",
-        "OpenAI Codex (o3)",
+        "OpenAI o3 (via Codex)",
         crate::codex::models::o3,
     )
-    .with_aliases(&["o3"]),
+    .with_aliases(&["codex/o3"]),
     ModelDefinition::new(
         "codex-o4-mini",
         "openai-codex",
-        "OpenAI Codex (o4-mini)",
+        "OpenAI o4-mini (via Codex)",
         crate::codex::models::o4_mini,
     )
-    .with_aliases(&["o4-mini"]),
+    .with_aliases(&["codex/o4-mini"]),
     // =========================================================================
     // Compound Coders Models
     // =========================================================================
@@ -819,7 +859,7 @@ fn create_fallback_model_info(model_id: &str, provider_id: &str) -> ModelInfo {
     let (context, output) = match provider_id {
         "anthropic" | "anthropic-cli" => (200_000, 8_192),
         "openai" => (128_000, 16_384),
-        "openai-codex" => (128_000, 32_000),
+        "openai-codex" => (256_000, 128_000), // GPT-5.x Codex models
         _ => (32_000, 4_096),
     };
 
@@ -890,6 +930,10 @@ pub fn is_model_compatible(provider_id: &str, model_id: &str) -> bool {
         "openai-codex" => {
             model_lower == "codex"
                 || model_lower.starts_with("codex-")
+                || model_lower.starts_with("gpt-5.3-codex")
+                || model_lower.starts_with("gpt-5.2-codex")
+                || model_lower.starts_with("gpt-5.1-codex")
+                || model_lower.starts_with("gpt-5-codex")
         }
         "compoundcoders" => {
             model_lower.starts_with("wonop/")
@@ -908,9 +952,17 @@ pub fn infer_provider(model_id: &str) -> &'static str {
     // Fall back to prefix matching
     let model_lower = model_id.to_lowercase();
 
-    if model_lower == "codex" || model_lower.starts_with("codex-") {
+    // Check for Codex models first (before generic gpt- check)
+    if model_lower == "codex"
+        || model_lower.starts_with("codex-")
+        || model_lower.starts_with("gpt-5.3-codex")
+        || model_lower.starts_with("gpt-5.2-codex")
+        || model_lower.starts_with("gpt-5.1-codex")
+        || model_lower.starts_with("gpt-5-codex")
+    {
         return "openai-codex";
     }
+    // Generic OpenAI models
     if model_lower.starts_with("gpt-")
         || model_lower.starts_with("o1")
         || model_lower.starts_with("o3")
@@ -1022,12 +1074,43 @@ mod tests {
 
     #[test]
     fn test_codex_models() {
-        let codex = find_model("codex").expect("codex should exist");
+        // "codex" is now an alias for gpt-5.3-codex
+        let codex = find_model("codex").expect("codex alias should exist");
+        assert_eq!(codex.id, "gpt-5.3-codex");
         assert_eq!(codex.provider_id, "openai-codex");
 
-        // o3 should be an alias for codex-o3
-        let o3 = find_model("o3");
-        assert!(o3.is_some());
+        // Test GPT-5.x Codex models
+        let gpt_5_3 = find_model("gpt-5.3-codex").expect("gpt-5.3-codex should exist");
+        assert_eq!(gpt_5_3.provider_id, "openai-codex");
+
+        let gpt_5_2 = find_model("gpt-5.2-codex").expect("gpt-5.2-codex should exist");
+        assert_eq!(gpt_5_2.provider_id, "openai-codex");
+
+        // Test legacy model
+        let codex_mini = find_model("codex-mini-latest").expect("codex-mini-latest should exist");
+        assert_eq!(codex_mini.provider_id, "openai-codex");
+
+        // Test reasoning models via Codex
+        let codex_o3 = find_model("codex-o3").expect("codex-o3 should exist");
+        assert_eq!(codex_o3.provider_id, "openai-codex");
+
+        // codex/o3 is an alias for codex-o3
+        let codex_o3_alias = find_model("codex/o3");
+        assert!(codex_o3_alias.is_some());
+    }
+
+    #[test]
+    fn test_infer_provider_codex_models() {
+        // GPT-5.x Codex models should infer to openai-codex
+        assert_eq!(infer_provider("gpt-5.3-codex"), "openai-codex");
+        assert_eq!(infer_provider("gpt-5.2-codex"), "openai-codex");
+        assert_eq!(infer_provider("gpt-5.1-codex"), "openai-codex");
+        assert_eq!(infer_provider("gpt-5-codex"), "openai-codex");
+        assert_eq!(infer_provider("codex-mini-latest"), "openai-codex");
+        
+        // Generic GPT models should infer to openai
+        assert_eq!(infer_provider("gpt-5.2"), "openai");
+        assert_eq!(infer_provider("gpt-4o"), "openai");
     }
 
     // =========================================================================
