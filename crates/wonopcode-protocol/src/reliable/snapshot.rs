@@ -156,6 +156,17 @@ pub struct WorkstreamStateSnapshot {
     /// Current compaction progress details (if compacting).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compaction_progress: Option<CompactionProgressSnapshot>,
+
+    // =========================================================================
+    // Validation Fields
+    // =========================================================================
+    /// Sequence number for this snapshot (prevents out-of-order updates).
+    #[serde(default)]
+    pub sequence: u64,
+
+    /// Timestamp when this snapshot was created (milliseconds since epoch).
+    #[serde(default)]
+    pub timestamp: u64,
 }
 
 /// Snapshot of current compaction progress.
@@ -242,6 +253,8 @@ impl Default for WorkstreamStateSnapshot {
             allow_all: false,
             is_compacting: false,
             compaction_progress: None,
+            sequence: 0,
+            timestamp: 0,
         }
     }
 }
