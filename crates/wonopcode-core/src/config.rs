@@ -1805,10 +1805,27 @@ impl CredentialsManager {
 
     /// Get API key from environment variable.
     fn get_api_key_from_env(&self, provider: &str) -> Option<String> {
+        // Special handling for openai-codex:
+        // Priority: 1) Subscription auth (handled by provider), 2) CODEX_API_KEY, 3) OPENAI_API_KEY
+        // If subscription auth is available, return None to let the provider use it
+        if provider == "openai-codex" {
+            // Check if subscription auth is available first - if so, prefer it over API keys
+            if wonopcode_provider::codex::CodexProvider::has_subscription_auth() {
+                return None; // Let provider use subscription auth
+            }
+            // Fall back to CODEX_API_KEY
+            if let Ok(key) = std::env::var("CODEX_API_KEY") {
+                if !key.trim().is_empty() {
+                    return Some(key);
+                }
+            }
+            // Fall back to OPENAI_API_KEY
+            return std::env::var("OPENAI_API_KEY").ok().filter(|k| !k.is_empty());
+        }
+
         let env_var = match provider {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openai" => "OPENAI_API_KEY",
-            "openai-codex" => "OPENAI_API_KEY", // Codex uses the same API key as OpenAI
             "openrouter" => "OPENROUTER_API_KEY",
             "google" => "GOOGLE_API_KEY",
             "xai" => "XAI_API_KEY",

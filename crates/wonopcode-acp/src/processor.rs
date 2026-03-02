@@ -676,20 +676,38 @@ pub fn load_api_key(provider: &str) -> Option<String> {
         return None;
     }
 
-    // Try environment variable first - use registry for env var lookup
-    let env_var = wonopcode_provider::registry::get_api_key_env_var(provider)
-        .or_else(|| match provider {
-            "codex" => Some("OPENAI_API_KEY"),
-            _ => None,
-        });
-    
-    let Some(env_var) = env_var else {
-        return None;
-    };
+    // Special handling for openai-codex:
+    // Priority: 1) Subscription auth (handled by provider), 2) CODEX_API_KEY, 3) OPENAI_API_KEY
+    if provider == "openai-codex" || provider == "codex" {
+        use wonopcode_provider::codex::CodexProvider;
+        
+        // Check if subscription auth is available first - if so, prefer it over API keys
+        if CodexProvider::has_subscription_auth() {
+            return None; // Let provider use subscription auth
+        }
+        // Fall back to CODEX_API_KEY
+        if let Ok(key) = std::env::var("CODEX_API_KEY") {
+            if !key.trim().is_empty() {
+                return Some(key);
+            }
+        }
+        // Fall back to OPENAI_API_KEY
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            if !key.is_empty() {
+                return Some(key);
+            }
+        }
+        // No env var, continue to check credentials file
+    } else {
+        // Try environment variable first - use registry for env var lookup
+        let env_var = wonopcode_provider::registry::get_api_key_env_var(provider);
 
-    if let Ok(key) = std::env::var(env_var) {
-        if !key.is_empty() {
-            return Some(key);
+        if let Some(env_var) = env_var {
+            if let Ok(key) = std::env::var(env_var) {
+                if !key.is_empty() {
+                    return Some(key);
+                }
+            }
         }
     }
 

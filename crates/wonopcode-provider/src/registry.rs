@@ -417,7 +417,7 @@ pub static PROVIDERS: &[ProviderDefinition] = &[
     // OpenAI Codex (Responses API - ChatGPT subscription or API key)
     // =========================================================================
     ProviderDefinition::new("openai-codex", "OpenAI Codex")
-        .with_env(&["OPENAI_API_KEY"])
+        .with_env(&["CODEX_API_KEY", "OPENAI_API_KEY"]) // CODEX_API_KEY takes precedence
         .with_default_model("codex")
         .with_auth_methods(&[AuthMethodType::ApiKey, AuthMethodType::OAuthDeviceCode])
         .with_api_key(

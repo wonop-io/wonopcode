@@ -246,26 +246,41 @@ impl CodexProvider {
         find_codex_cli().is_some()
     }
 
-    /// Check if Codex is authenticated (sync, fast check) - static version.
+    /// Check if Codex subscription auth is available (sync, fast check).
     ///
-    /// This performs a quick heuristic check by looking for:
-    /// 1. OPENAI_API_KEY environment variable
-    /// 2. ~/.codex/auth.json file (from `codex login`)
+    /// This checks only for ~/.codex/auth.json file (from `codex login`),
+    /// NOT for API keys in environment variables.
     ///
-    /// Returns `true` if authentication appears to be configured.
-    pub fn has_credentials() -> bool {
-        // 1. Check for API key in environment
-        if wonop_codex_auth::read_api_key_from_env().is_some() {
-            debug!("Codex authenticated via API key environment variable");
+    /// Use this to determine if subscription auth should take priority over API keys.
+    pub fn has_subscription_auth() -> bool {
+        let codex_home = wonop_codex_auth::default_codex_home();
+        let auth_file = codex_home.join(wonop_codex_auth::AUTH_FILE_NAME);
+
+        if auth_file.exists() {
+            debug!(path = %auth_file.display(), "Codex subscription auth file found");
             return true;
         }
 
-        // 2. Check for auth.json file from `codex login`
-        let codex_home = wonop_codex_auth::default_codex_home();
-        let auth_file = codex_home.join(wonop_codex_auth::AUTH_FILE_NAME);
-        
-        if auth_file.exists() {
-            debug!(path = %auth_file.display(), "Codex auth file found");
+        false
+    }
+
+    /// Check if Codex is authenticated (sync, fast check) - static version.
+    ///
+    /// This performs a quick heuristic check by looking for:
+    /// 1. ~/.codex/auth.json file (from `codex login`) - subscription auth
+    /// 2. CODEX_API_KEY environment variable
+    /// 3. OPENAI_API_KEY environment variable
+    ///
+    /// Returns `true` if any authentication method appears to be configured.
+    pub fn has_credentials() -> bool {
+        // 1. Check for subscription auth file from `codex login` (preferred)
+        if Self::has_subscription_auth() {
+            return true;
+        }
+
+        // 2. Check for API key in environment (CODEX_API_KEY or OPENAI_API_KEY)
+        if wonop_codex_auth::read_api_key_from_env().is_some() {
+            debug!("Codex authenticated via API key environment variable");
             return true;
         }
 

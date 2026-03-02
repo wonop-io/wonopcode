@@ -1702,11 +1702,12 @@ async fn config_update(
 async fn config_providers() -> impl IntoResponse {
     // Return provider configurations
     // Only 4 core providers: Anthropic (API + CLI), OpenAI (API + Codex)
+    // Note: openai-codex auth priority: 1) subscription (~/.codex/auth.json), 2) CODEX_API_KEY, 3) OPENAI_API_KEY
     Json(serde_json::json!({
         "anthropic": { "name": "Anthropic API", "env": ["ANTHROPIC_API_KEY"] },
         "anthropic-cli": { "name": "Claude CLI (Subscription)", "env": [] },
         "openai": { "name": "OpenAI API", "env": ["OPENAI_API_KEY"] },
-        "openai-codex": { "name": "OpenAI Codex", "env": ["OPENAI_API_KEY"] }
+        "openai-codex": { "name": "OpenAI Codex", "env": ["CODEX_API_KEY", "OPENAI_API_KEY"] }
     }))
 }
 

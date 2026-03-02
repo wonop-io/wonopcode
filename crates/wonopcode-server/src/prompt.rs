@@ -513,9 +513,24 @@ pub fn create_provider_from_config(
     model_id: &str,
 ) -> Result<BoxedLanguageModel, String> {
     // Try to load API key from environment
+    // For openai-codex: Priority is 1) subscription auth, 2) CODEX_API_KEY, 3) OPENAI_API_KEY
     let api_key = match provider_name {
         "anthropic" => std::env::var("ANTHROPIC_API_KEY").ok(),
-        "openai" | "openai-codex" => std::env::var("OPENAI_API_KEY").ok(),
+        "openai" => std::env::var("OPENAI_API_KEY").ok(),
+        // For openai-codex, prefer subscription auth over API keys
+        // If subscription auth exists, return None to let provider use it
+        "openai-codex" => {
+            use wonopcode_provider::codex::CodexProvider;
+            if CodexProvider::has_subscription_auth() {
+                None // Let provider use subscription auth
+            } else {
+                // Fall back to CODEX_API_KEY, then OPENAI_API_KEY
+                std::env::var("CODEX_API_KEY")
+                    .ok()
+                    .filter(|k| !k.trim().is_empty())
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            }
+        }
         _ => None,
     };
 
