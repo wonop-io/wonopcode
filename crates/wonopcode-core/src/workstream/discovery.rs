@@ -201,6 +201,60 @@ fn branch_exists(repo_root: &Path, branch_name: &str) -> bool {
     }
 }
 
+/// Check if a fully-qualified git ref exists.
+fn ref_exists(repo_root: &Path, full_ref: &str) -> bool {
+    let output = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", full_ref])
+        .current_dir(repo_root)
+        .output();
+
+    match output {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Resolve a base branch name to a fully-qualified ref to avoid ambiguity.
+///
+/// When users select a branch from the UI, remote branches have their origin/ prefix
+/// stripped for display. This function resolves the branch name to an unambiguous ref:
+/// - First checks for a local branch (refs/heads/...)
+/// - Then checks for a remote tracking branch (refs/remotes/origin/...)
+///
+/// Using fully-qualified refs avoids "ambiguous object name" errors when both
+/// a local branch and remote tracking branch exist with the same name.
+fn resolve_base_branch(repo_root: &Path, base_branch: &str) -> String {
+    // Check for local branch first (refs/heads/...)
+    let local_ref = format!("refs/heads/{}", base_branch);
+    if ref_exists(repo_root, &local_ref) {
+        debug!(
+            base_branch = %base_branch,
+            resolved = %local_ref,
+            "Resolved to local branch"
+        );
+        return local_ref;
+    }
+
+    // Check for remote tracking branch (refs/remotes/origin/...)
+    let remote_ref = format!("refs/remotes/origin/{}", base_branch);
+    if ref_exists(repo_root, &remote_ref) {
+        debug!(
+            base_branch = %base_branch,
+            resolved = %remote_ref,
+            "Resolved to remote tracking branch"
+        );
+        return remote_ref;
+    }
+
+    // Fall back to original (let git produce the error message)
+    // This handles cases like tags, commit SHAs, or other refs
+    debug!(
+        base_branch = %base_branch,
+        "Could not resolve to local or remote branch, using as-is"
+    );
+    base_branch.to_string()
+}
+
 /// Create a new git worktree.
 pub async fn create_worktree(
     repo_root: &Path,
@@ -235,6 +289,9 @@ pub async fn create_worktree(
     // Check if branch already exists (e.g., from a previously closed worktree)
     let branch_already_exists = branch_exists(repo_root, branch_name);
 
+    // Resolve base branch - adds origin/ prefix if needed for remote-only branches
+    let resolved_base = resolve_base_branch(repo_root, base_branch);
+
     let output = if branch_already_exists {
         // Branch exists - reuse it by creating worktree without -b flag
         info!(branch = %branch_name, "Branch already exists, reusing for worktree");
@@ -257,7 +314,7 @@ pub async fn create_worktree(
                 "-b",
                 branch_name,
                 worktree_path.to_string_lossy().as_ref(),
-                base_branch,
+                &resolved_base,
             ])
             .current_dir(repo_root)
             .output()
