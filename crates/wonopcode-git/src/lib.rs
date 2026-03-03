@@ -334,6 +334,9 @@ pub fn get_diff_files_with_compare(
         _ => return Ok(Vec::new()),
     };
 
+    // Determine if we're comparing against working tree (should include untracked files)
+    let include_untracked = compare.is_none();
+
     // Get name-status
     let status_output = Command::new("git")
         .args(["diff", "--name-status", &diff_spec])
@@ -406,7 +409,107 @@ pub fn get_diff_files_with_compare(
         });
     }
 
+    // If comparing against working tree, also include untracked files
+    if include_untracked {
+        let untracked_files = get_untracked_files(worktree_path)?;
+        for untracked in untracked_files {
+            // Count lines in untracked file for additions count
+            let line_count = count_file_lines(worktree_path, &untracked).unwrap_or(0);
+            files.push(DiffFileSummary {
+                path: untracked,
+                status: "untracked".to_string(),
+                additions: line_count,
+                deletions: 0,
+            });
+        }
+    }
+
     Ok(files)
+}
+
+/// Get list of untracked files in the repository
+fn get_untracked_files(worktree_path: &Path) -> Result<Vec<String>> {
+    let output = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git ls-files")?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let files: Vec<String> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(files)
+}
+
+/// Count number of lines in a file
+fn count_file_lines(worktree_path: &Path, file_path: &str) -> Result<usize> {
+    let full_path = worktree_path.join(file_path);
+    let content = std::fs::read_to_string(&full_path)
+        .context(format!("Failed to read file: {}", file_path))?;
+    Ok(content.lines().count())
+}
+
+/// Check if a file is untracked (not in git index)
+fn is_file_untracked(worktree_path: &Path, file_path: &str) -> Result<bool> {
+    let output = Command::new("git")
+        .args(["ls-files", "--error-unmatch", file_path])
+        .current_dir(worktree_path)
+        .output()
+        .context("Failed to run git ls-files")?;
+
+    // If ls-files --error-unmatch succeeds, the file is tracked
+    // If it fails, the file is untracked
+    Ok(!output.status.success())
+}
+
+/// Get diff for an untracked file (all lines shown as added)
+fn get_untracked_file_diff(worktree_path: &Path, file_path: &str) -> Result<FileDiff> {
+    let full_path = worktree_path.join(file_path);
+    let content = std::fs::read_to_string(&full_path)
+        .context(format!("Failed to read untracked file: {}", file_path))?;
+
+    let file_lines: Vec<&str> = content.lines().collect();
+    let line_count = file_lines.len();
+
+    // Create diff lines - all lines are "added"
+    let mut diff_lines = Vec::new();
+
+    // Add a header line
+    diff_lines.push(DiffLine {
+        line_type: DiffLineType::Header,
+        old_line_num: None,
+        new_line_num: None,
+        content: format!("@@ -0,0 +1,{} @@ new file", line_count),
+    });
+
+    // Add all lines as "added"
+    for (idx, line) in file_lines.iter().enumerate() {
+        diff_lines.push(DiffLine {
+            line_type: DiffLineType::Added,
+            old_line_num: None,
+            new_line_num: Some(idx + 1),
+            content: line.to_string(),
+        });
+    }
+
+    Ok(FileDiff {
+        path: file_path.to_string(),
+        status: "untracked".to_string(),
+        additions: line_count,
+        deletions: 0,
+        lines: diff_lines,
+    })
 }
 
 /// Get full diff for a specific file
@@ -498,6 +601,14 @@ pub fn get_file_diff_with_compare(
     base: Option<&str>,
     compare: Option<&str>,
 ) -> Result<FileDiff> {
+    // Check if comparing against working tree (includes untracked files)
+    let include_untracked = compare.is_none();
+
+    // Check if file is untracked
+    if include_untracked && is_file_untracked(worktree_path, file_path)? {
+        return get_untracked_file_diff(worktree_path, file_path);
+    }
+
     // Build diff spec
     let diff_spec = match (base, compare) {
         (Some(b), Some(c)) => format!("{b}..{c}"),
