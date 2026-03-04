@@ -1801,6 +1801,10 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::CompactionNotNeeded => {
                     continue;
                 }
+                // ArtifactsUpdated is desktop-only feature
+                wonopcode_tui::AppUpdate::ArtifactsUpdated { .. } => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);

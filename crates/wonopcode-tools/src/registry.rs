@@ -218,11 +218,11 @@ mod tests {
         assert!(tools.contains(&"glob"));
         assert!(tools.contains(&"grep"));
 
-        // Should have ACE tools
+        // Should have ACE tools (todoread/todowrite use standard names)
         assert!(tools.contains(&"ace_create_artifact"));
         assert!(tools.contains(&"ace_read_artifact"));
-        assert!(tools.contains(&"ace_todo_read"));
-        assert!(tools.contains(&"ace_todo_write"));
+        assert!(tools.contains(&"todoread"));
+        assert!(tools.contains(&"todowrite"));
         assert!(tools.contains(&"ace_todo_update"));
         assert!(tools.contains(&"ace_what_now"));
         assert!(tools.contains(&"ace_submit_checkpoint"));

@@ -8,6 +8,7 @@ pub mod registry;
 
 // Tool implementations
 pub mod ace;
+pub mod ace_todo_store;
 pub mod bash;
 pub mod batch;
 pub mod edit;
@@ -35,9 +36,10 @@ pub use registry::ToolRegistry;
 
 // Re-export ACE tools for convenience
 pub use ace::{
-    AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
-    AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+    AceCreateArtifactTool, AceReadArtifactTool, AceSessionLogTool, AceSubmitCheckpointTool,
+    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
 };
+pub use ace_todo_store::AceTodoStore;
 
 // Re-export ticket tools for convenience
 pub use ticket::{

@@ -391,7 +391,7 @@ fn recommend_implementation_phase(
             }
         }
 
-        output.push_str("\n```\nace_todo_write(tasks=[\n");
+        output.push_str("\n```\ntodowrite(tasks=[\n");
         if let Some(parent) = designs.first().or(requirements.first()) {
             output.push_str(&format!(
                 "  {{content: \"Implement feature\", parent: \"{}\", priority: \"high\"}},\n",
@@ -719,7 +719,7 @@ plan approved BEFORE writing any code."#
                             return Err(ToolError::validation(
                                 "Cannot submit implementation plan checkpoint: No tasks defined.\n\n\
                                  You must create tasks that break down the implementation work.\n\
-                                 Use `ace_todo_write(tasks=[...])` to create tasks first.\n\n\
+                                 Use `todowrite(tasks=[...])` to create tasks first.\n\n\
                                  Call `ace_what_now()` for guidance on creating tasks."
                             ));
                         }
@@ -784,7 +784,7 @@ plan approved BEFORE writing any code."#
                                  Each task must reference at least one design, requirement, use case, or test case.\n\n\
                                  Tasks without valid parents:\n{}{}\n\n\
                                  Available parent artifacts:\n{}\n\n\
-                                 Update tasks with: `ace_todo_write(tasks=[{{content: \"...\", parent: \"DES-xxx\"}}])`",
+                                 Update tasks with: `todowrite(tasks=[{{content: \"...\", parent: \"DES-xxx\"}}])`",
                                 orphan_tasks.len(), orphan_list, more_msg, available_parents
                             )));
                         }
@@ -1166,14 +1166,27 @@ mod tests {
         let store = ArtifactStore::new(dir.path()).unwrap();
         store.ensure_directories().unwrap();
 
-        // Create proper artifact hierarchy: UC -> REQ -> DES -> TASK
+        // Create session first (UseCases require a Session parent)
+        let session = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Session,
+                "Test Session",
+                "",
+                vec![],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        // Create proper artifact hierarchy: SESSION -> UC -> REQ -> DES -> TASK
         let uc = store
             .create_artifact(
                 &mut state,
                 ArtifactType::UseCase,
                 "Test Use Case",
                 "Content",
-                vec![],
+                vec![session.metadata.id],
                 Priority::Medium,
                 false,
             )

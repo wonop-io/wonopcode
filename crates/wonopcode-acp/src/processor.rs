@@ -64,19 +64,11 @@ impl Processor {
         // Create provider
         let provider = create_provider(&config)?;
 
-        // Create in-memory todo store
-        let todo_store = Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new());
-
         // Create tool registry
+        // ACE-backed todoread/todowrite are included in with_builtins()
         let mut tools = ToolRegistry::with_builtins();
         tools.register(Arc::new(wonopcode_tools::bash::BashTool));
         tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-        tools.register(Arc::new(wonopcode_tools::todo::TodoWriteTool::new(
-            todo_store.clone(),
-        )));
-        tools.register(Arc::new(wonopcode_tools::todo::TodoReadTool::new(
-            todo_store,
-        )));
 
         Ok(Self {
             config,

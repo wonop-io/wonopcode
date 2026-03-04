@@ -415,6 +415,12 @@ pub enum AppUpdate {
         phases: Vec<PhaseUpdate>,
         todos: Vec<TodoUpdate>,
     },
+    /// Artifacts updated (from ACE tools).
+    /// Used by desktop to update Documents view.
+    ArtifactsUpdated {
+        /// List of artifact summaries (id, type, title, progress, priority, parents, is_staged).
+        artifacts: Vec<(String, String, String, String, String, Vec<String>, bool)>,
+    },
     /// LSP servers updated.
     LspUpdated(Vec<LspStatusUpdate>),
     /// MCP servers updated.
@@ -3760,6 +3766,9 @@ async function fetchUserData(userId) {
                 phase: _,
             } => {
                 // TUI doesn't have a visible progress indicator yet
+            }
+            AppUpdate::ArtifactsUpdated { .. } => {
+                // TUI doesn't have a Documents View - handled by desktop only
             }
         }
     }

@@ -876,6 +876,10 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             total_chunks: *total_chunks,
             phase: phase.clone(),
         },
+        // ArtifactsUpdated - desktop-only feature, convert to status for unified protocol
+        wonopcode_tui::AppUpdate::ArtifactsUpdated { artifacts } => ServerPayload::Status {
+            message: format!("Artifacts updated: {} artifacts", artifacts.len()),
+        },
     }
 }
 

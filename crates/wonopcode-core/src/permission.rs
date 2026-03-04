@@ -619,8 +619,8 @@ impl PermissionManager {
             // ACE tools (spec document management - low risk, only modifies specs/ directory)
             PermissionRule::allow("ace_create_artifact"),
             PermissionRule::allow("ace_read_artifact"),
-            PermissionRule::allow("ace_todo_read"),
-            PermissionRule::allow("ace_todo_write"),
+            PermissionRule::allow("todoread"),
+            PermissionRule::allow("todowrite"),
             PermissionRule::allow("ace_todo_update"),
             PermissionRule::allow("ace_what_now"),
             PermissionRule::allow("ace_submit_checkpoint"),
