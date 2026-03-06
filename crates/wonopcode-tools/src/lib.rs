@@ -12,6 +12,7 @@ pub mod ace_todo_store;
 pub mod bash;
 pub mod batch;
 pub mod edit;
+pub mod execute_typescript;
 pub mod glob;
 pub mod grep;
 pub mod list;
@@ -50,6 +51,9 @@ pub use ticket::{
 pub use memory::{
     MemoryClearTool, MemoryRecallTool, MemorySearchTool, MemoryStoreTool, SharedMemoryService,
 };
+
+// Re-export Code Mode tools for convenience
+pub use execute_typescript::ExecuteTypescriptTool;
 
 use async_trait::async_trait;
 use serde_json::Value;

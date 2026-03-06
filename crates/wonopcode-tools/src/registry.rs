@@ -59,6 +59,9 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::memory::MemorySearchTool));
         registry.register(Arc::new(crate::memory::MemoryClearTool));
 
+        // Register Code Mode tools
+        registry.register(Arc::new(crate::execute_typescript::ExecuteTypescriptTool));
+
         registry
     }
 
@@ -391,6 +394,71 @@ mod tests {
             ticket_ids.len(),
             unique.len(),
             "ticket tool IDs should be unique"
+        );
+    }
+
+    // Code Mode tool integration tests
+
+    #[test]
+    fn tool_registry_has_execute_typescript() {
+        let registry = ToolRegistry::with_builtins();
+        let tools = registry.list();
+
+        assert!(
+            tools.contains(&"execute_typescript"),
+            "execute_typescript tool should be registered"
+        );
+    }
+
+    #[test]
+    fn tool_registry_execute_typescript_has_valid_schema() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry
+            .get("execute_typescript")
+            .expect("execute_typescript should be registered");
+
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+
+        let required = schema["required"]
+            .as_array()
+            .expect("should have required array");
+        assert!(required.contains(&json!("code")));
+
+        assert!(schema["properties"]["code"].is_object());
+        assert!(schema["properties"]["description"].is_object());
+        assert!(schema["properties"]["timeout_secs"].is_object());
+    }
+
+    #[test]
+    fn tool_registry_execute_typescript_has_description() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry
+            .get("execute_typescript")
+            .expect("execute_typescript should be registered");
+
+        let desc = tool.description();
+        assert!(!desc.is_empty(), "should have a non-empty description");
+        assert!(
+            desc.contains("TypeScript"),
+            "description should mention TypeScript"
+        );
+        assert!(
+            desc.contains("sandbox"),
+            "description should mention sandbox"
+        );
+    }
+
+    #[test]
+    fn tool_registry_execute_typescript_requires_permission() {
+        let registry = ToolRegistry::with_builtins();
+        let tool = registry
+            .get("execute_typescript")
+            .expect("execute_typescript should be registered");
+
+        assert!(
+            tool.requires_permission(),
+            "execute_typescript should require permission"
         );
     }
 }
