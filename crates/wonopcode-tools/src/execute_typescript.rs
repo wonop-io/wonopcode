@@ -49,17 +49,27 @@ impl Tool for ExecuteTypescriptTool {
 This tool provides a typed API for file operations, shell commands, and more.
 The code runs in an isolated V8 sandbox with no network access.
 
+## Discovery
+
+Call `help()` or `help("topic")` to get API documentation:
+- `help()` — List all namespaces
+- `help("fs")` — File system docs
+- `help("ace")` — ACE workflow docs
+- `help("lsp")` — Code intelligence docs
+
 ## Available API
 
-The `wonop` global object provides:
+All APIs are flat globals:
 
-- `wonop.fs.read(path, options?)` - Read a file (path relative to project root)
-- `wonop.fs.write(path, content)` - Write a file
-- `wonop.fs.list(dir?, options?)` - List directory contents
-- `wonop.fs.glob(pattern, dir?)` - Find files by pattern
-- `wonop.fs.grep(pattern, options?)` - Search file contents
-- `wonop.fs.edit(path, oldText, newText, options?)` - Edit file
-- `wonop.exec(command, args?, options?)` - Run shell command
+- fs.read/write/list/glob/grep/edit — File operations
+- exec(command, args?, options?) — Shell commands
+- lsp.definition/references/symbols/hover — Code intelligence
+- memory.store/recall/search/clear — Persistent storage
+- web.search/fetch/codeSearch — HTTP requests
+- ace.createArtifact/submitCheckpoint/whatNow — Spec-first TDD
+- tasks.create/list — Task tracking
+- tickets.list/get/create/search — Issue tracking
+- context.projectRoot/sessionId — Session info
 
 ## Rules
 
@@ -72,9 +82,12 @@ The `wonop` global object provides:
 ## Example
 
 ```typescript
-const result = await wonop.fs.read("src/main.rs");
-const lines = result.content.split("\n");
-console.log(`File has ${lines.length} lines`);
+// Get help first if unsure about an API
+console.log(help("fs"));
+
+// Then use the API
+const file = await fs.read("src/main.rs");
+console.log(`File has ${file.totalLines} lines`);
 ```"#
     }
 
@@ -277,8 +290,10 @@ mod tests {
         let tool = ExecuteTypescriptTool;
         let desc = tool.description();
         assert!(desc.contains("TypeScript"));
-        assert!(desc.contains("wonop"));
         assert!(desc.contains("sandbox"));
+        assert!(desc.contains("fs.read"));  // Flat namespace
+        assert!(desc.contains("exec"));
+        assert!(desc.contains("help"));
     }
 
     #[test]
@@ -343,34 +358,20 @@ mod tests {
     #[test]
     fn test_default_tool_definitions() {
         let defs = default_tool_definitions();
-
-        // Should have at least 4 default tools
-        assert!(defs.len() >= 4);
-
-        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-        assert!(names.contains(&"read_file"));
-        assert!(names.contains(&"write_file"));
-        assert!(names.contains(&"list_dir"));
-        assert!(names.contains(&"shell_exec"));
+        // After the API refactor, default_tool_definitions returns empty
+        // The full API is now namespaced and available via flat globals
+        assert!(defs.is_empty());
     }
 
     #[test]
     fn test_generate_type_stubs() {
+        // generate_type_stubs is for legacy tool definitions
+        // The new API uses generate_api_stubs() which provides
+        // flat namespace declarations (fs, exec, lsp, etc.)
         let defs = default_tool_definitions();
         let stubs = generate_type_stubs(&defs);
-
-        // Should contain interfaces for all tools
-        assert!(stubs.contains("interface ReadFileInput"));
-        assert!(stubs.contains("interface WriteFileInput"));
-        assert!(stubs.contains("interface ListDirInput"));
-        assert!(stubs.contains("interface ShellExecInput"));
-
-        // Should declare the wonop global
-        assert!(stubs.contains("declare const wonop"));
-
-        // Should contain method declarations
-        assert!(stubs.contains("read_file:"));
-        assert!(stubs.contains("write_file:"));
+        // With empty definitions, stubs should still have the header
+        assert!(stubs.contains("wonop"));
     }
 
     // ============================================================================
@@ -478,7 +479,7 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        const result = await wonop.fs.read("test.txt");
+                        const result = await fs.read("test.txt");
                         console.log(result.content);
                     "#,
                     "description": "Read test file"
@@ -515,7 +516,7 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        await wonop.fs.write("output.txt", "Created by TypeScript");
+                        await fs.write("output.txt", "Created by TypeScript");
                         console.log("File written");
                     "#,
                     "description": "Write test file"
@@ -557,7 +558,7 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        const result = await wonop.fs.list(".");
+                        const result = await fs.list(".");
                         console.log(result.entries.map(e => e.name).join(", "));
                     "#,
                     "description": "List directory"

@@ -8141,6 +8141,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "wonopcode-codemode",
  "wonopcode-core",
  "wonopcode-provider",
  "wonopcode-snapshot",

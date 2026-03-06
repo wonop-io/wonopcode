@@ -17,6 +17,7 @@ wonopcode-util = { workspace = true }
 wonopcode-provider = { workspace = true }
 wonopcode-tools = { workspace = true }
 wonopcode-snapshot = { workspace = true }
+wonopcode-codemode = { workspace = true }
 
 # Async
 tokio = { workspace = true }

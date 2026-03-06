@@ -17,6 +17,7 @@ use wonopcode_provider::{
     model::ModelInfo, stream::StreamChunk, BoxedLanguageModel, GenerateOptions,
     Message as ProviderMessage, ToolDefinition,
 };
+use wonopcode_codemode::{format_hints_for_injection, select_hints};
 use wonopcode_tools::ToolRegistry;
 
 /// Processor configuration.
@@ -120,10 +121,19 @@ impl Processor {
             &environment,
         );
 
-        // Add user message to history
+        // Add user message with hints to history
         {
+            // Select contextual hints based on user message
+            let hints = select_hints(prompt, &[]);
+            let hints_text = format_hints_for_injection(&hints);
+            let augmented_prompt = if hints_text.is_empty() {
+                prompt.to_string()
+            } else {
+                format!("{}\n\n{}", prompt, hints_text)
+            };
+
             let mut history = self.history.write().await;
-            history.push(ProviderMessage::user(prompt));
+            history.push(ProviderMessage::user(&augmented_prompt));
         }
 
         // Get tool definitions
