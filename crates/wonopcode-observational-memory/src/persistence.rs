@@ -251,6 +251,9 @@ impl ObservationPersistence {
             state.observations = persisted.observations;
             state.workstream_id = persisted.workstream_id;
             state.loaded_from_previous_session = true;
+            
+            // Restore stats from previous session
+            state.stats = persisted.stats;
 
             // Recalculate observation tokens
             state.observation_tokens = state
@@ -259,6 +262,14 @@ impl ObservationPersistence {
                 .filter(|o| o.is_active())
                 .map(|o| o.estimate_tokens())
                 .sum();
+            
+            tracing::info!(
+                total_observations = state.stats.total_observations,
+                reflections_run = state.stats.reflections_run,
+                tokens_observed = state.stats.tokens_observed,
+                tokens_after_compression = state.stats.tokens_after_compression,
+                "Restored OM stats from previous session"
+            );
         }
 
         Ok((state, loaded_session_date))
