@@ -146,11 +146,11 @@ impl ObservationalMemoryConfig {
             }
             (Some(obs), None) => {
                 // Use custom observer threshold with default reflector
-                self.thresholds = ThresholdConfig::with_absolute_thresholds(obs, 40_000);
+                self.thresholds = ThresholdConfig::with_absolute_thresholds(obs, 20_000);
             }
             (None, Some(ref_)) => {
                 // Use default observer threshold with custom reflector  
-                self.thresholds = ThresholdConfig::with_absolute_thresholds(30_000, ref_);
+                self.thresholds = ThresholdConfig::with_absolute_thresholds(10_000, ref_);
             }
             (None, None) => {
                 // Keep defaults

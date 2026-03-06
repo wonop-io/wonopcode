@@ -125,8 +125,8 @@ impl TokenBudget {
             observation_tokens: 0,
             message_tokens: 0,
             max_tokens,
-            observer_threshold: 30_000,
-            reflector_threshold: 40_000,
+            observer_threshold: 10_000,
+            reflector_threshold: 20_000,
         }
     }
 
@@ -918,8 +918,8 @@ mod tests {
             observation_tokens: 5000,
             message_tokens: 3000,
             max_tokens: 100_000,
-            observer_threshold: 30_000,
-            reflector_threshold: 40_000,
+            observer_threshold: 10_000,
+            reflector_threshold: 20_000,
         };
         assert_eq!(budget.total(), 9000);
     }
@@ -931,8 +931,8 @@ mod tests {
             observation_tokens: 0,
             message_tokens: 0,
             max_tokens: 100_000,
-            observer_threshold: 30_000,
-            reflector_threshold: 40_000,
+            observer_threshold: 10_000,
+            reflector_threshold: 20_000,
         };
         assert!((budget.usage_percent() - 10.0).abs() < 0.01);
     }
@@ -1123,8 +1123,8 @@ mod tests {
             observation_tokens: 20000,
             message_tokens: 10000,
             max_tokens: 128_000,
-            observer_threshold: 30_000,
-            reflector_threshold: 40_000,
+            observer_threshold: 10_000,
+            reflector_threshold: 20_000,
         };
         panel.update_budget(budget);
 

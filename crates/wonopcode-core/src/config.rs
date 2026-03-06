@@ -1968,7 +1968,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub developer_mode: bool,
 
-    /// Custom observer threshold in tokens (default: 30,000).
+    /// Custom observer threshold in tokens (default: 10,000).
     /// When unobserved messages exceed this threshold, the Observer runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub om_observer_threshold: Option<u32>,

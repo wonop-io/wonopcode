@@ -1351,6 +1351,10 @@ impl Runner {
         };
 
         // === PRE-PROMPT COMPACTION ===
+        // Skip legacy compaction when Observational Memory is enabled.
+        // OM handles context management via observations/reflections.
+        let om_enabled = self.om_config.enabled;
+        
         // Check if compaction is needed based on TOKEN count (primary) or message count (fallback)
         let context_limit = {
             let provider = self.provider.read().await;
@@ -1369,13 +1373,14 @@ impl Runner {
             0
         };
 
-        // Compaction thresholds
+        // Compaction thresholds (only used when OM is disabled)
         const TOKEN_COMPACTION_THRESHOLD_PERCENT: u8 = 80; // Compact at 80% context usage
         const MESSAGE_COMPACTION_THRESHOLD: usize = 100; // Fallback: also compact at 100+ messages
 
         let needs_token_compaction = usage_percent >= TOKEN_COMPACTION_THRESHOLD_PERCENT;
         let needs_message_compaction = messages.len() > MESSAGE_COMPACTION_THRESHOLD;
-        let needs_compaction = needs_token_compaction || needs_message_compaction;
+        // Only trigger legacy compaction when OM is disabled
+        let needs_compaction = !om_enabled && (needs_token_compaction || needs_message_compaction);
 
         if needs_compaction {
             let reason = if needs_token_compaction {
@@ -1926,6 +1931,19 @@ impl Runner {
             match &loop_result {
                 Err(LoopError::ContextOverflow) if overflow_retries < MAX_OVERFLOW_RETRIES => {
                     overflow_retries += 1;
+                    
+                    // When OM is enabled, context overflow is unexpected (OM should manage context).
+                    // Skip legacy compaction and report the error - OM needs investigation.
+                    if om_enabled {
+                        warn!(
+                            retry = overflow_retries,
+                            "Context overflow detected with Observational Memory enabled - this is unexpected. \
+                             OM should have compressed context before overflow. Skipping legacy compaction."
+                        );
+                        result = loop_result;
+                        break;
+                    }
+                    
                     warn!(
                         retry = overflow_retries,
                         "Context overflow detected, performing emergency compaction"

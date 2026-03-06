@@ -165,7 +165,7 @@ impl StandardLoop {
                     thresholds.observer_threshold,
                 )
             } else {
-                (0, 0, 40_000, 30_000)
+                (0, 0, 20_000, 10_000)
             };
 
         let avg_compression = if stats.tokens_observed > 0 {
