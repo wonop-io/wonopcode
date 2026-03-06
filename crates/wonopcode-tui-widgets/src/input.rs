@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Paragraph},
     Frame,
 };
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 use wonopcode_tui_core::metrics;
 use wonopcode_tui_core::{AgentMode, Theme};
 
@@ -423,12 +423,12 @@ impl InputWidget {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     match c {
                         'a' => {
-                            self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+                            self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
                             // Snap outside paste regions after moving to head
                             self.snap_cursor_outside_paste_region();
                         }
                         'e' => {
-                            self.textarea.move_cursor(tui_textarea::CursorMove::End);
+                            self.textarea.move_cursor(ratatui_textarea::CursorMove::End);
                             // Snap outside paste regions after moving to end
                             self.snap_cursor_outside_paste_region();
                         }
@@ -493,7 +493,7 @@ impl InputWidget {
             KeyCode::Left => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.textarea
-                        .move_cursor(tui_textarea::CursorMove::WordBack);
+                        .move_cursor(ratatui_textarea::CursorMove::WordBack);
                 } else {
                     // Skip over paste regions as atomic units
                     self.move_cursor_left_skip_paste();
@@ -502,7 +502,7 @@ impl InputWidget {
             KeyCode::Right => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.textarea
-                        .move_cursor(tui_textarea::CursorMove::WordForward);
+                        .move_cursor(ratatui_textarea::CursorMove::WordForward);
                 } else {
                     // Skip over paste regions as atomic units
                     self.move_cursor_right_skip_paste();
@@ -544,17 +544,17 @@ impl InputWidget {
             }
             KeyCode::Home => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.textarea.move_cursor(tui_textarea::CursorMove::Top);
+                    self.textarea.move_cursor(ratatui_textarea::CursorMove::Top);
                 }
-                self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+                self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
                 // Snap outside paste regions after moving to head
                 self.snap_cursor_outside_paste_region();
             }
             KeyCode::End => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.textarea.move_cursor(tui_textarea::CursorMove::Bottom);
+                    self.textarea.move_cursor(ratatui_textarea::CursorMove::Bottom);
                 }
-                self.textarea.move_cursor(tui_textarea::CursorMove::End);
+                self.textarea.move_cursor(ratatui_textarea::CursorMove::End);
                 // Snap outside paste regions after moving to end
                 self.snap_cursor_outside_paste_region();
             }
@@ -582,9 +582,9 @@ impl InputWidget {
 
     /// Move cursor to a specific column on the current line.
     fn move_to_column(&mut self, col: usize) {
-        self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
         for _ in 0..col {
-            self.textarea.move_cursor(tui_textarea::CursorMove::Forward);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
         }
     }
 
@@ -594,14 +594,14 @@ impl InputWidget {
         let (row, col) = offset_to_cursor(&raw_text, offset);
 
         // Move to target row
-        self.textarea.move_cursor(tui_textarea::CursorMove::Top);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Top);
         for _ in 0..row {
-            self.textarea.move_cursor(tui_textarea::CursorMove::Down);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Down);
         }
         // Move to target column
-        self.textarea.move_cursor(tui_textarea::CursorMove::Head);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
         for _ in 0..col {
-            self.textarea.move_cursor(tui_textarea::CursorMove::Forward);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
         }
     }
 
@@ -622,7 +622,7 @@ impl InputWidget {
             self.move_to_offset(end_offset);
         } else {
             // Normal move
-            self.textarea.move_cursor(tui_textarea::CursorMove::Forward);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
         }
     }
 
@@ -640,7 +640,7 @@ impl InputWidget {
         if let Some(start_offset) = skip_paste_region_left(&raw_text, current_offset - 1) {
             self.move_to_offset(start_offset);
         } else {
-            self.textarea.move_cursor(tui_textarea::CursorMove::Back);
+            self.textarea.move_cursor(ratatui_textarea::CursorMove::Back);
         }
     }
 
@@ -726,7 +726,7 @@ impl InputWidget {
         }
 
         // Move to the previous logical line
-        self.textarea.move_cursor(tui_textarea::CursorMove::Up);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Up);
         let (new_row, _) = self.textarea.cursor();
 
         // Get the length of the previous line to position cursor on its last visual row
@@ -785,7 +785,7 @@ impl InputWidget {
         }
 
         // Move to the next logical line (first visual row)
-        self.textarea.move_cursor(tui_textarea::CursorMove::Down);
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Down);
         let (new_row, _) = self.textarea.cursor();
 
         // Position at the same visual column or end of line

@@ -287,32 +287,14 @@ pub async fn create_mcp_http_state(
     // Initialize file time tracker
     let file_time = Arc::new(FileTimeState::new());
 
-    // Use shared file todo store
-    let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> = if let Some(store) =
-        wonopcode_tools::todo::SharedFileTodoStore::from_env()
-    {
-        tracing::info!(
-            path = %store.path().display(),
-            "MCP HTTP using SharedFileTodoStore"
-        );
-        Arc::new(store)
-    } else {
-        tracing::warn!("WONOPCODE_TODO_FILE not set, MCP HTTP using InMemoryTodoStore - todos will NOT sync with TUI!");
-        Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
-    };
-
+    // Use ACE-backed todo store (todos are stored as ACE Task artifacts)
     // Create tool registry with all tools
     // Note: Memory tools are included in with_builtins() and access the service
     // through ctx.memory_service at execution time (same pattern as ticket tools)
+    // ACE-backed todoread/todowrite are included in with_builtins()
     let mut tools = ToolRegistry::with_builtins();
     tools.register(Arc::new(wonopcode_tools::bash::BashTool));
     tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoWriteTool::new(
-        todo_store.clone(),
-    )));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoReadTool::new(
-        todo_store,
-    )));
     tools.register(Arc::new(wonopcode_tools::lsp::LspTool::new()));
 
     // Create memory service and initialize workstream

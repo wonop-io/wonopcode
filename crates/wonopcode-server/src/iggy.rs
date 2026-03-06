@@ -883,6 +883,10 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
                 message: "observational_memory_update".to_string(),
             }
         }
+        // ArtifactsUpdated - desktop-only feature, convert to status for unified protocol
+        wonopcode_tui::AppUpdate::ArtifactsUpdated { artifacts } => ServerPayload::Status {
+            message: format!("Artifacts updated: {} artifacts", artifacts.len()),
+        },
     }
 }
 

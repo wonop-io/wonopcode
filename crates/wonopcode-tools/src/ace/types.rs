@@ -9,6 +9,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArtifactType {
+    /// Session artifact - root of all artifacts in a workstream.
+    /// Contains a changelog of decisions and discoveries.
+    Session,
     UseCase,
     Requirement,
     Design,
@@ -20,6 +23,7 @@ impl ArtifactType {
     /// Get the ID prefix for this artifact type.
     pub fn prefix(&self) -> &'static str {
         match self {
+            ArtifactType::Session => "SESSION",
             ArtifactType::UseCase => "UC",
             ArtifactType::Requirement => "REQ",
             ArtifactType::Design => "DES",
@@ -31,6 +35,7 @@ impl ArtifactType {
     /// Get the directory name for this artifact type.
     pub fn directory(&self) -> &'static str {
         match self {
+            ArtifactType::Session => "sessions",
             ArtifactType::UseCase => "use-cases",
             ArtifactType::Requirement => "requirements",
             ArtifactType::Design => "designs",
@@ -42,6 +47,7 @@ impl ArtifactType {
     /// Parse artifact type from string.
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
+            "session" => Some(ArtifactType::Session),
             "use-case" | "usecase" | "uc" => Some(ArtifactType::UseCase),
             "requirement" | "req" => Some(ArtifactType::Requirement),
             "design" | "des" => Some(ArtifactType::Design),
@@ -54,6 +60,7 @@ impl ArtifactType {
     /// Parse artifact type from ID prefix.
     pub fn from_prefix(prefix: &str) -> Option<Self> {
         match prefix {
+            "SESSION" => Some(ArtifactType::Session),
             "UC" => Some(ArtifactType::UseCase),
             "REQ" => Some(ArtifactType::Requirement),
             "DES" => Some(ArtifactType::Design),
@@ -66,11 +73,13 @@ impl ArtifactType {
     /// Returns valid parent types for this artifact type.
     pub fn valid_parent_types(&self) -> &'static [ArtifactType] {
         match self {
-            ArtifactType::UseCase => &[], // UC has no parents (ticket is implicit)
+            ArtifactType::Session => &[], // Session is the root, no parents
+            ArtifactType::UseCase => &[ArtifactType::Session], // UC parents to Session
             ArtifactType::Requirement => &[ArtifactType::UseCase],
             ArtifactType::Design => &[ArtifactType::Requirement],
             ArtifactType::TestCase => &[ArtifactType::Requirement],
             ArtifactType::Task => &[
+                ArtifactType::Session, // Tasks can parent directly to Session (for todowrite)
                 ArtifactType::Requirement,
                 ArtifactType::Design,
                 ArtifactType::TestCase,
@@ -165,6 +174,39 @@ pub enum Priority {
     #[default]
     Medium,
     Low,
+}
+
+/// Importance levels for session log entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionLogImportance {
+    /// 🔴 Important - key decisions, critical info
+    Important,
+    /// 🟡 Maybe important - worth noting but not critical
+    MaybeImportant,
+    /// 🟢 Info only - general observations
+    InfoOnly,
+}
+
+impl SessionLogImportance {
+    /// Get the emoji for this importance level.
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            SessionLogImportance::Important => "🔴",
+            SessionLogImportance::MaybeImportant => "🟡",
+            SessionLogImportance::InfoOnly => "🟢",
+        }
+    }
+
+    /// Parse from string.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "important" | "high" | "critical" => Some(SessionLogImportance::Important),
+            "maybe_important" | "maybe" | "medium" => Some(SessionLogImportance::MaybeImportant),
+            "info_only" | "info" | "low" => Some(SessionLogImportance::InfoOnly),
+            _ => None,
+        }
+    }
 }
 
 impl Priority {
@@ -304,6 +346,12 @@ pub struct ArtifactMetadata {
     pub parents: Vec<String>,
     #[serde(default)]
     pub priority: Priority,
+    /// Optional phase for grouping tasks in the plan view.
+    /// When set, tasks are grouped by phase in the implementation plan.
+    /// For backwards compatibility, this is optional - legacy tasks without a phase
+    /// are placed in an "Unphased" group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     #[serde(default = "default_author")]
@@ -388,7 +436,7 @@ pub fn extract_ticket_id_from_artifact_id(artifact_id: &str) -> Option<String> {
     let without_sequence = parts[1]; // e.g., "TASK-WON-157" or "UC-413"
 
     // Now strip the prefix
-    let prefixes = ["TASK-", "UC-", "REQ-", "DES-", "TC-"];
+    let prefixes = ["SESSION-", "TASK-", "UC-", "REQ-", "DES-", "TC-"];
     for prefix in prefixes {
         if let Some(ticket_id) = without_sequence.strip_prefix(prefix) {
             if !ticket_id.is_empty() {
@@ -431,7 +479,13 @@ mod tests {
 
     #[test]
     fn test_artifact_type_valid_parents() {
-        assert!(ArtifactType::UseCase.valid_parent_types().is_empty());
+        // Session is root, has no parents
+        assert!(ArtifactType::Session.valid_parent_types().is_empty());
+        // UseCase requires Session
+        assert_eq!(
+            ArtifactType::UseCase.valid_parent_types(),
+            &[ArtifactType::Session]
+        );
         assert_eq!(
             ArtifactType::Requirement.valid_parent_types(),
             &[ArtifactType::UseCase]
@@ -444,9 +498,11 @@ mod tests {
             ArtifactType::TestCase.valid_parent_types(),
             &[ArtifactType::Requirement]
         );
+        // Tasks can parent to Session (for ad-hoc todos) or to other artifacts
         assert_eq!(
             ArtifactType::Task.valid_parent_types(),
             &[
+                ArtifactType::Session,
                 ArtifactType::Requirement,
                 ArtifactType::Design,
                 ArtifactType::TestCase

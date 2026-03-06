@@ -10,7 +10,7 @@ wonopcode-tui-core.workspace = true
 
 ratatui.workspace = true
 crossterm.workspace = true
-tui-textarea.workspace = true
+ratatui-textarea.workspace = true
 ignore.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -398,6 +398,8 @@ mod tests {
             allow_all: false,
             is_compacting: false,
             compaction_progress: None,
+            sequence: 42,
+            timestamp: 1609459200000,
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();

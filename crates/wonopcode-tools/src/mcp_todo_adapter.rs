@@ -353,19 +353,16 @@ impl McpTodoAdapter {
     }
 
     /// Check if a tool ID represents an MCP TODO read tool.
+    ///
+    /// NOTE: This only detects tools from external MCP servers, not the native
+    /// `todoread` tool. The native tool is ACE-backed and handles its own output.
     fn is_mcp_todo_read_tool(tool_id: &str) -> bool {
-        // Standard MCP naming patterns
-        (tool_id.starts_with("mcp__") && (
-            tool_id.ends_with("__todo_read") ||
-            tool_id.ends_with("__todoread") ||
-            tool_id.contains("__todo_read__") ||
-            tool_id.contains("__todoread__")
-        )) ||
-        // ACE framework tools (both direct and MCP-prefixed)
-        tool_id == "ace_todo_read" || tool_id == "mcp_ace_todo_read" ||
-        // Generic patterns for other frameworks
-        tool_id.ends_with("_todo_read") ||
-        tool_id.ends_with("_todoread")
+        // Standard MCP naming patterns (external MCP servers)
+        tool_id.starts_with("mcp__")
+            && (tool_id.ends_with("__todo_read")
+                || tool_id.ends_with("__todoread")
+                || tool_id.contains("__todo_read__")
+                || tool_id.contains("__todoread__"))
     }
 
     /// Check if a tool ID represents an MCP TODO write tool.
@@ -378,35 +375,29 @@ impl McpTodoAdapter {
     /// This can be called without an McpTodoAdapter instance, which is useful
     /// when intercepting tool completions from external execution (e.g., Claude CLI)
     /// where no local MCP setup exists.
+    ///
+    /// NOTE: This only detects tools from external MCP servers, not the native
+    /// `todowrite` tool. The native tool is ACE-backed and handles its own output.
     pub fn is_mcp_todo_write_tool_static(tool_id: &str) -> bool {
-        // Standard MCP naming patterns
-        (tool_id.starts_with("mcp__") && (
-            tool_id.ends_with("__todo_write") ||
-            tool_id.ends_with("__todowrite") ||
-            tool_id.contains("__todo_write__") ||
-            tool_id.contains("__todowrite__")
-        )) ||
-        // ACE framework tools (both direct and MCP-prefixed)
-        tool_id == "ace_todo_write" || tool_id == "mcp_ace_todo_write" ||
-        // Generic patterns for other frameworks
-        tool_id.ends_with("_todo_write") ||
-        tool_id.ends_with("_todowrite")
+        // Standard MCP naming patterns (external MCP servers)
+        tool_id.starts_with("mcp__")
+            && (tool_id.ends_with("__todo_write")
+                || tool_id.ends_with("__todowrite")
+                || tool_id.contains("__todo_write__")
+                || tool_id.contains("__todowrite__"))
     }
 
     /// Check if a tool ID represents an MCP TODO update tool.
+    ///
+    /// NOTE: This only detects tools from external MCP servers, not the native
+    /// `ace_todo_update` tool. The native tool is ACE-backed and handles its own output.
     fn is_mcp_todo_update_tool(tool_id: &str) -> bool {
-        // Standard MCP naming patterns
-        (tool_id.starts_with("mcp__") && (
-            tool_id.ends_with("__todo_update") ||
-            tool_id.ends_with("__todoupdate") ||
-            tool_id.contains("__todo_update__") ||
-            tool_id.contains("__todoupdate__")
-        )) ||
-        // ACE framework tools (both direct and MCP-prefixed)
-        tool_id == "ace_todo_update" || tool_id == "mcp_ace_todo_update" ||
-        // Generic patterns for other frameworks
-        tool_id.ends_with("_todo_update") ||
-        tool_id.ends_with("_todoupdate")
+        // Standard MCP naming patterns (external MCP servers)
+        tool_id.starts_with("mcp__")
+            && (tool_id.ends_with("__todo_update")
+                || tool_id.ends_with("__todoupdate")
+                || tool_id.contains("__todo_update__")
+                || tool_id.contains("__todoupdate__"))
     }
 
     /// Get summary of detected MCP TODO tools for logging.
@@ -513,38 +504,32 @@ mod tests {
     }
 
     #[test]
-    fn test_ace_tool_detection() {
+    fn test_native_tools_not_detected() {
+        // Native ACE-backed tools should NOT be detected by the MCP adapter
+        // They handle their own output and events
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(MockMcpTodoTool {
-                id: "ace_todo_read".to_string(),
+                id: "todoread".to_string(),
             }),
             Arc::new(MockMcpTodoTool {
-                id: "ace_todo_write".to_string(),
+                id: "todowrite".to_string(),
             }),
             Arc::new(MockMcpTodoTool {
                 id: "ace_todo_update".to_string(),
-            }),
-            Arc::new(MockMcpTodoTool {
-                id: "ace_elicit".to_string(), // Should be ignored (not a TODO tool)
             }),
         ];
 
         let adapter = McpTodoAdapter::new(&tools);
 
-        assert!(adapter.has_mcp_todo_read());
-        assert!(adapter.has_mcp_todo_write());
-        assert!(adapter.has_mcp_todo_update());
-        assert!(adapter.has_mcp_todo_tools());
+        // Native tools should not be detected
+        assert!(!adapter.has_mcp_todo_read());
+        assert!(!adapter.has_mcp_todo_write());
+        assert!(!adapter.has_mcp_todo_update());
+        assert!(!adapter.has_mcp_todo_tools());
 
-        assert!(adapter.is_mcp_todo_tool("ace_todo_read"));
-        assert!(adapter.is_mcp_todo_tool("ace_todo_write"));
-        assert!(adapter.is_mcp_todo_tool("ace_todo_update"));
-        assert!(!adapter.is_mcp_todo_tool("ace_elicit"));
-
-        let summary = adapter.get_summary();
-        assert!(summary.contains("read(ace_todo_read)"));
-        assert!(summary.contains("write(ace_todo_write)"));
-        assert!(summary.contains("update(ace_todo_update)"));
+        assert!(!adapter.is_mcp_todo_tool("todoread"));
+        assert!(!adapter.is_mcp_todo_tool("todowrite"));
+        assert!(!adapter.is_mcp_todo_tool("ace_todo_update"));
     }
 
     #[test]

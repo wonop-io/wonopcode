@@ -8,9 +8,11 @@ pub mod registry;
 
 // Tool implementations
 pub mod ace;
+pub mod ace_todo_store;
 pub mod bash;
 pub mod batch;
 pub mod edit;
+pub mod execute_typescript;
 pub mod glob;
 pub mod grep;
 pub mod list;
@@ -35,9 +37,10 @@ pub use registry::ToolRegistry;
 
 // Re-export ACE tools for convenience
 pub use ace::{
-    AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
-    AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+    AceCreateArtifactTool, AceReadArtifactTool, AceSessionLogTool, AceSubmitCheckpointTool,
+    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
 };
+pub use ace_todo_store::AceTodoStore;
 
 // Re-export ticket tools for convenience
 pub use ticket::{
@@ -48,6 +51,9 @@ pub use ticket::{
 pub use memory::{
     MemoryClearTool, MemoryRecallTool, MemorySearchTool, MemoryStoreTool, SharedMemoryService,
 };
+
+// Re-export Code Mode tools for convenience
+pub use execute_typescript::ExecuteTypescriptTool;
 
 use async_trait::async_trait;
 use serde_json::Value;

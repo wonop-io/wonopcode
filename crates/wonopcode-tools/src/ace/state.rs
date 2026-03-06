@@ -26,6 +26,10 @@ pub struct WorkstreamState {
     /// and cached for subsequent operations.
     #[serde(default)]
     pub ticket_tracker_id: Option<String>,
+    /// Session artifact ID for this workstream.
+    /// Auto-created when the workstream is initialized.
+    #[serde(default)]
+    pub session_id: Option<String>,
     /// When this workstream was created.
     pub created_at: DateTime<Utc>,
     /// When this workstream was last updated.
@@ -75,6 +79,9 @@ impl Default for PhaseState {
 /// Sequence counters for generating artifact IDs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SequenceCounters {
+    /// Session sequence counter.
+    #[serde(default)]
+    pub session: u32,
     /// Use case sequence counter.
     #[serde(rename = "use-case", default)]
     pub use_case: u32,
@@ -124,6 +131,7 @@ impl WorkstreamState {
             ticket_title: None,
             ticket_source: None,
             ticket_tracker_id: None,
+            session_id: None, // Session is created lazily when first needed
             created_at: now,
             updated_at: now,
             workflow: WorkflowState {
@@ -162,33 +170,59 @@ impl WorkstreamState {
     ///
     /// Returns None if no state file exists AND we can't infer a ticket ID.
     pub fn load(root_dir: &Path) -> Result<Option<Self>> {
+        tracing::debug!(
+            "🔄 WorkstreamState::load: Looking for state in root_dir={}",
+            root_dir.display()
+        );
+
         let state_path = root_dir.join(".wonopcode").join("state.yaml");
+        tracing::debug!("🔄 WorkstreamState::load: state_path={}", state_path.display());
 
         if state_path.exists() {
+            tracing::info!("🔄 WorkstreamState::load: Found existing state file");
             let content = std::fs::read_to_string(&state_path)
                 .with_context(|| format!("Failed to read {}", state_path.display()))?;
 
             let state: Self = serde_yaml::from_str(&content)
                 .with_context(|| format!("Failed to parse {}", state_path.display()))?;
 
+            tracing::info!(
+                "🔄 WorkstreamState::load: Loaded state - ticket_id={}, active_task={:?}",
+                state.ticket_id,
+                state.active_task
+            );
             return Ok(Some(state));
         }
+
+        tracing::debug!("🔄 WorkstreamState::load: No state file exists, trying to infer from directory name");
 
         // Try to infer ticket ID from worktree directory name
         // Pattern: feature-{TICKET_ID}--{description} or {prefix}-{TICKET_ID}-{suffix}
         if let Some(dir_name) = root_dir.file_name().and_then(|n| n.to_str()) {
+            tracing::debug!("🔄 WorkstreamState::load: Directory name: '{}'", dir_name);
             if let Some(ticket_id) = Self::extract_ticket_id(dir_name) {
+                tracing::info!(
+                    "🔄 WorkstreamState::load: Inferred ticket_id='{}' from directory name",
+                    ticket_id
+                );
                 // Auto-create state for this workstream
                 let mut state = Self::new(&ticket_id);
                 state.ticket_title = Self::extract_title(dir_name);
 
                 // Save the state so it persists
+                tracing::debug!("🔄 WorkstreamState::load: Saving auto-created state");
                 state.save(root_dir)?;
 
                 return Ok(Some(state));
+            } else {
+                tracing::debug!(
+                    "🔄 WorkstreamState::load: Could not extract ticket ID from '{}'",
+                    dir_name
+                );
             }
         }
 
+        tracing::debug!("🔄 WorkstreamState::load: No state could be loaded or inferred");
         Ok(None)
     }
 
@@ -200,22 +234,46 @@ impl WorkstreamState {
     ///
     /// The default ticket ID is generated from the directory name using a short hash.
     pub fn ensure_initialized(root_dir: &Path) -> Result<Self> {
+        tracing::info!(
+            "🔄 WorkstreamState::ensure_initialized: root_dir={}",
+            root_dir.display()
+        );
+
         // First try normal load (which may auto-create from directory name)
         if let Some(state) = Self::load(root_dir)? {
+            tracing::info!(
+                "🔄 WorkstreamState::ensure_initialized: Loaded existing state - ticket_id={}",
+                state.ticket_id
+            );
             return Ok(state);
         }
 
         // No state exists and couldn't infer ticket ID - create a default workstream
         let ticket_id = Self::generate_default_ticket_id(root_dir);
+        tracing::info!(
+            "🔄 WorkstreamState::ensure_initialized: Creating new state with generated ticket_id={}",
+            ticket_id
+        );
+
         let mut state = Self::new(&ticket_id);
 
         // Try to extract a title from the directory name
         if let Some(dir_name) = root_dir.file_name().and_then(|n| n.to_str()) {
             state.ticket_title = Some(Self::humanize_directory_name(dir_name));
+            tracing::debug!(
+                "🔄 WorkstreamState::ensure_initialized: Set ticket_title={:?}",
+                state.ticket_title
+            );
         }
 
         // Save the state so it persists
+        tracing::debug!("🔄 WorkstreamState::ensure_initialized: Saving new state");
         state.save(root_dir)?;
+
+        tracing::info!(
+            "🔄 WorkstreamState::ensure_initialized: State created and saved - ticket_id={}",
+            state.ticket_id
+        );
 
         Ok(state)
     }
@@ -356,6 +414,7 @@ impl WorkstreamState {
     /// This increments the counter and returns the new value.
     pub fn next_sequence(&mut self, artifact_type: &str) -> u32 {
         let counter = match artifact_type {
+            "session" | "sessions" => &mut self.sequences.session,
             "use-case" | "use-cases" => &mut self.sequences.use_case,
             "requirement" | "requirements" => &mut self.sequences.requirement,
             "design" | "designs" => &mut self.sequences.design,

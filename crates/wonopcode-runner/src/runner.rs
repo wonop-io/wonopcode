@@ -685,19 +685,10 @@ impl Runner {
         let lsp_client = Arc::new(wonopcode_lsp::LspClient::with_defaults());
 
         // Create tool registry with all tools
+        // Note: with_builtins() includes ACE-backed todoread/todowrite and other ACE tools
         let mut tools = ToolRegistry::with_builtins();
         tools.register(Arc::new(wonopcode_tools::bash::BashTool));
         tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-
-        // ACE tools for structured workflow (replaces legacy todowrite/todoread)
-        tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
-        tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
-        tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
-        tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
-        tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
-        tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
-        tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
-
         tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
             lsp_client.clone(),
         )));
@@ -1222,19 +1213,10 @@ impl Runner {
             }
 
             // We need a mutable tools registry - create a new one with MCP tools
+            // Note: with_builtins() includes ACE-backed todoread/todowrite and other ACE tools
             let mut new_tools = ToolRegistry::with_builtins();
             new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
             new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-
-            // ACE tools for structured workflow (replaces legacy todowrite/todoread)
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
-
             new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
                 self.lsp_client.clone(),
             )));
@@ -1723,7 +1705,7 @@ impl Runner {
                         metadata,
                     } => {
                         // Check if this is a legacy TODO tool (from MCP) and emit TodosUpdated if so.
-                        // Note: ACE tools (ace_todo_write, ace_todo_update) emit events directly
+                        // Note: ACE tools (todowrite, ace_todo_update) emit events directly
                         // through the tool_event_tx channel, so they don't need interception here.
                         let is_legacy_todo_tool = if let Some(ref mappings) = mcp_todo_mappings {
                             // Check registered MCP TODO tools
