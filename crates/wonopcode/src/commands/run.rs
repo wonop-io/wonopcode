@@ -192,6 +192,7 @@ pub async fn run_command(
         external_mcp_servers: std::collections::HashMap::new(),
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
+        observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)

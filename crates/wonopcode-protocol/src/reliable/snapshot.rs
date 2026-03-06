@@ -158,6 +158,13 @@ pub struct WorkstreamStateSnapshot {
     pub compaction_progress: Option<CompactionProgressSnapshot>,
 
     // =========================================================================
+    // Observational Memory State
+    // =========================================================================
+    /// Observational Memory state snapshot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observational_memory: Option<ObservationalMemorySnapshot>,
+
+    // =========================================================================
     // Validation Fields
     // =========================================================================
     /// Sequence number for this snapshot (prevents out-of-order updates).
@@ -226,6 +233,90 @@ fn default_schema_version() -> u32 {
     2
 }
 
+// =============================================================================
+// Observational Memory Types
+// =============================================================================
+
+/// Snapshot of observational memory state for the UI.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObservationalMemorySnapshot {
+    /// Whether observational memory is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Current observations.
+    #[serde(default)]
+    pub observations: Vec<ObservationSnapshot>,
+
+    /// Tokens used by observations.
+    #[serde(default)]
+    pub observation_tokens: u32,
+
+    /// Reflector threshold (when reflector triggers).
+    #[serde(default)]
+    pub reflector_threshold: u32,
+
+    /// Tokens used by unobserved messages.
+    #[serde(default)]
+    pub message_tokens: u32,
+
+    /// Observer threshold (when observer triggers).
+    #[serde(default)]
+    pub observer_threshold: u32,
+
+    /// System prompt tokens (relatively static).
+    #[serde(default)]
+    pub system_tokens: u32,
+
+    /// Total observations created this session.
+    #[serde(default)]
+    pub total_observations: u32,
+
+    /// Number of reflections performed.
+    #[serde(default)]
+    pub reflections_count: u32,
+
+    /// Average compression ratio achieved.
+    #[serde(default)]
+    pub avg_compression: f32,
+
+    /// Estimated cost savings from prompt caching.
+    #[serde(default)]
+    pub cache_savings: f64,
+
+    /// Whether observations were loaded from a previous session.
+    #[serde(default)]
+    pub loaded_from_previous_session: bool,
+
+    /// When the previous session was saved (human-readable, e.g., "March 2nd" or "2 days ago").
+    #[serde(default)]
+    pub loaded_session_date: Option<String>,
+}
+
+/// Single observation in the OM system.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ObservationSnapshot {
+    /// Unique identifier.
+    pub id: String,
+
+    /// Priority: "high", "medium", "low" (🔴, 🟡, 🟢).
+    pub priority: String,
+
+    /// When the observation was created (ISO timestamp or time string).
+    pub timestamp: String,
+
+    /// The observation content.
+    pub content: String,
+
+    /// Child observations (hierarchical structure).
+    #[serde(default)]
+    pub children: Vec<ObservationSnapshot>,
+
+    /// Whether the user has pinned this observation.
+    #[serde(default)]
+    pub pinned: bool,
+}
+
 impl Default for WorkstreamStateSnapshot {
     fn default() -> Self {
         Self {
@@ -253,6 +344,7 @@ impl Default for WorkstreamStateSnapshot {
             allow_all: false,
             is_compacting: false,
             compaction_progress: None,
+            observational_memory: None,
             sequence: 0,
             timestamp: 0,
         }

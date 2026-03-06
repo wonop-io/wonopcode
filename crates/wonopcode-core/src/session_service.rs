@@ -129,11 +129,37 @@ impl SessionService {
         // 2. Sessions from other worktrees (same project_id, different directory) are NOT loaded
         match service.repo.list(&project_id).await {
             Ok(sessions) => {
+                debug!(
+                    project_id = %project_id,
+                    directory = %cwd,
+                    session_count = sessions.len(),
+                    "Found {} sessions for project, filtering by directory",
+                    sessions.len()
+                );
+                
+                // Log all sessions for debugging
+                for s in &sessions {
+                    debug!(
+                        session_id = %s.id,
+                        session_directory = %s.directory,
+                        matches_cwd = (s.directory == cwd),
+                        "Session {} has directory '{}' (matches: {})",
+                        s.id, s.directory, s.directory == cwd
+                    );
+                }
+                
                 // Filter sessions to only those matching this workstream's directory
                 // Sessions are already sorted by ID descending (newest first)
                 let matching_session = sessions.into_iter().find(|s| s.directory == cwd);
 
                 if let Some(session) = matching_session {
+                    info!(
+                        project_id = %project_id,
+                        directory = %cwd,
+                        session_id = %session.id,
+                        "Restored session {} for workstream",
+                        session.id
+                    );
                     {
                         let mut current = service.current_session.write().await;
                         *current = Some(session.id.clone());
@@ -142,6 +168,12 @@ impl SessionService {
                         let mut ctx = service.conversion_ctx.write().await;
                         ctx.session_id = session.id.clone();
                     }
+                } else {
+                    info!(
+                        project_id = %project_id,
+                        directory = %cwd,
+                        "No matching session found for directory, will create new session on first message"
+                    );
                 }
             }
             Err(e) => {
@@ -651,8 +683,19 @@ impl SessionService {
     /// Returns messages in chronological order.
     pub async fn get_history(&self) -> CoreResult<Vec<MessageWithParts>> {
         let session_id = match self.current_session_id().await {
-            Some(id) => id,
+            Some(id) => {
+                info!(
+                    project_id = %self.project_id,
+                    session_id = %id,
+                    "📜 Loading history for session"
+                );
+                id
+            },
             None => {
+                warn!(
+                    project_id = %self.project_id,
+                    "⚠️ No current session, returning empty history"
+                );
                 return Ok(Vec::new());
             }
         };
@@ -660,6 +703,30 @@ impl SessionService {
         let messages = self.repo
             .messages(&self.project_id, &session_id, None)
             .await?;
+        
+        info!(
+            project_id = %self.project_id,
+            session_id = %session_id,
+            message_count = messages.len(),
+            "📜 Loaded {} messages from session repository",
+            messages.len()
+        );
+        
+        // Log message details for debugging
+        for (i, msg) in messages.iter().enumerate() {
+            let role = match &msg.message {
+                crate::message::Message::User(_) => "user",
+                crate::message::Message::Assistant(_) => "assistant",
+            };
+            debug!(
+                idx = i,
+                role = role,
+                id = %msg.message.id(),
+                parts = msg.parts.len(),
+                "Message {}: {} with {} parts",
+                i, role, msg.parts.len()
+            );
+        }
         
         Ok(messages)
     }

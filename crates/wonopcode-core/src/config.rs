@@ -1962,6 +1962,21 @@ pub struct AppSettings {
     /// If not set, defaults to "main".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_base_branch: Option<String>,
+
+    /// Whether developer mode is enabled.
+    /// Shows additional debugging information in the UI (e.g., reflection diffs).
+    #[serde(default)]
+    pub developer_mode: bool,
+
+    /// Custom observer threshold in tokens (default: 10,000).
+    /// When unobserved messages exceed this threshold, the Observer runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub om_observer_threshold: Option<u32>,
+
+    /// Custom reflector threshold in tokens (default: 40,000).
+    /// When observations exceed this threshold, the Reflector runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub om_reflector_threshold: Option<u32>,
 }
 
 /// Manages application-wide settings.
@@ -2074,6 +2089,39 @@ impl AppSettingsManager {
     /// Set the default base branch for new workstreams.
     pub fn set_default_base_branch(&mut self, branch: Option<String>) -> CoreResult<()> {
         self.settings.default_base_branch = branch;
+        self.save()
+    }
+
+    /// Get whether developer mode is enabled.
+    pub fn get_developer_mode(&self) -> bool {
+        self.settings.developer_mode
+    }
+
+    /// Set whether developer mode is enabled.
+    pub fn set_developer_mode(&mut self, enabled: bool) -> CoreResult<()> {
+        self.settings.developer_mode = enabled;
+        self.save()
+    }
+
+    /// Get the custom observer threshold.
+    pub fn get_om_observer_threshold(&self) -> Option<u32> {
+        self.settings.om_observer_threshold
+    }
+
+    /// Set the custom observer threshold.
+    pub fn set_om_observer_threshold(&mut self, threshold: Option<u32>) -> CoreResult<()> {
+        self.settings.om_observer_threshold = threshold;
+        self.save()
+    }
+
+    /// Get the custom reflector threshold.
+    pub fn get_om_reflector_threshold(&self) -> Option<u32> {
+        self.settings.om_reflector_threshold
+    }
+
+    /// Set the custom reflector threshold.
+    pub fn set_om_reflector_threshold(&mut self, threshold: Option<u32>) -> CoreResult<()> {
+        self.settings.om_reflector_threshold = threshold;
         self.save()
     }
 }

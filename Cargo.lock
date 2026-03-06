@@ -8153,6 +8153,7 @@ name = "wonopcode-agent-loop"
 version = "0.1.2"
 dependencies = [
  "async-trait",
+ "chrono",
  "futures",
  "indexmap 2.13.0",
  "serde",
@@ -8164,6 +8165,7 @@ dependencies = [
  "tracing",
  "uuid",
  "wonop-memory",
+ "wonopcode-observational-memory",
  "wonopcode-provider",
  "wonopcode-sandbox",
  "wonopcode-snapshot",
@@ -8316,6 +8318,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "wonopcode-observational-memory"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wonopcode-provider",
+]
+
+[[package]]
 name = "wonopcode-protocol"
 version = "0.1.2"
 dependencies = [
@@ -8368,6 +8386,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
  "wonop-memory",
  "wonopcode-agent-loop",
  "wonopcode-core",

@@ -1,12 +1,13 @@
 //! Context passed to agent loop implementations.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use wonopcode_observational_memory::{MemoryState, TokenStateMachine};
 use wonopcode_provider::{BoxedLanguageModel, Message as ProviderMessage, ToolDefinition};
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
@@ -202,6 +203,98 @@ pub enum LoopUpdate {
 
     /// Error message.
     Error(String),
+
+    /// Observational Memory state update.
+    ///
+    /// Sent when observations are created or reflections occur.
+    /// Contains a snapshot of the current OM state for UI display.
+    ObservationalMemoryUpdate(ObservationalMemoryStateSnapshot),
+
+    /// New assistant messages to persist to session repository.
+    ///
+    /// Emitted BEFORE the observer drains messages from context.
+    /// The runner should collect these and persist them instead of
+    /// iterating ctx.messages (which may be drained by the observer).
+    MessagesForPersistence(Vec<wonopcode_provider::Message>),
+
+    /// Completion statistics recorded (Developer Mode feature).
+    ///
+    /// Emitted after each LLM completion finishes, containing timing
+    /// and usage data for debugging and monitoring.
+    CompletionRecorded {
+        /// Unique ID for this completion.
+        id: String,
+        /// Unix timestamp (ms) when completion started.
+        timestamp: f64,
+        /// Model ID used.
+        model: String,
+        /// Input tokens for this completion.
+        input_tokens: u64,
+        /// Output tokens for this completion.
+        output_tokens: u64,
+        /// Cache read tokens (if applicable).
+        cache_read_tokens: u64,
+        /// Estimated cost for this completion.
+        cost: f64,
+        /// Time to first token (ms).
+        latency_ms: u64,
+        /// Total duration from start to finish (ms).
+        total_duration_ms: u64,
+        /// Finish reason (end_turn, tool_use, max_tokens, etc.).
+        finish_reason: String,
+        /// Optional: Full request JSON (if recording enabled).
+        request: Option<String>,
+        /// Optional: Full response JSON (if recording enabled).
+        response: Option<String>,
+    },
+}
+
+/// Snapshot of Observational Memory state for UI updates.
+#[derive(Debug, Clone)]
+pub struct ObservationalMemoryStateSnapshot {
+    /// Whether OM is enabled.
+    pub enabled: bool,
+    /// Current observations.
+    pub observations: Vec<ObservationSnapshot>,
+    /// Token count for observations.
+    pub observation_tokens: u32,
+    /// Reflector token threshold.
+    pub reflector_threshold: u32,
+    /// Token count for unobserved messages.
+    pub message_tokens: u32,
+    /// Observer token threshold.
+    pub observer_threshold: u32,
+    /// System prompt token estimate.
+    pub system_tokens: u32,
+    /// Total observations created.
+    pub total_observations: u32,
+    /// Number of reflections performed.
+    pub reflections_count: u32,
+    /// Average compression ratio achieved.
+    pub avg_compression: f32,
+    /// Estimated cost savings from caching.
+    pub cache_savings: f64,
+    /// Whether observations were loaded from a previous session.
+    pub loaded_from_previous_session: bool,
+    /// When the previous session was saved (human-readable).
+    pub loaded_session_date: Option<String>,
+}
+
+/// Snapshot of a single observation for UI display.
+#[derive(Debug, Clone)]
+pub struct ObservationSnapshot {
+    /// Unique identifier for this observation.
+    pub id: String,
+    /// Priority level: "high", "medium", or "low".
+    pub priority: String,
+    /// Timestamp when the observation was created.
+    pub timestamp: String,
+    /// Content of the observation.
+    pub content: String,
+    /// Child observations (hierarchical structure).
+    pub children: Vec<ObservationSnapshot>,
+    /// Whether this observation is pinned by the user.
+    pub pinned: bool,
 }
 
 /// Context passed to agent loop implementations.
@@ -312,6 +405,41 @@ pub struct LoopContext<'a> {
     /// When set, these images should be included with the user message.
     /// Each image contains base64 data and MIME type.
     pub prompt_images: Vec<PromptImage>,
+
+    // =========================================================================
+    // Observational Memory (OM) fields
+    // =========================================================================
+
+    /// Optional memory state for Observational Memory.
+    ///
+    /// When set, the agent loop can use OM to compress messages into
+    /// observations, maintaining a bounded context window.
+    pub memory_state: Option<&'a mut MemoryState>,
+
+    /// Optional token state machine for OM threshold management.
+    ///
+    /// When set, tracks message/observation token counts and triggers
+    /// Observer/Reflector when thresholds are exceeded.
+    pub token_state_machine: Option<&'a mut TokenStateMachine>,
+
+    /// Whether Observational Memory is enabled.
+    ///
+    /// When true and memory_state/token_state_machine are set,
+    /// the agent loop will use OM instead of legacy compaction.
+    pub om_enabled: bool,
+
+    /// Number of messages that existed at the start of the loop.
+    ///
+    /// Used by the agent loop to determine which messages are "new" (added during this turn)
+    /// and need to be persisted before the observer drains them.
+    pub messages_count_at_start: usize,
+    
+    /// Project directory for Observational Memory persistence.
+    ///
+    /// When set, observations are saved to disk continuously after
+    /// Observer and Reflector runs. This ensures observations survive
+    /// unexpected app termination (e.g., Cmd+Q).
+    pub om_project_dir: Option<PathBuf>,
 }
 
 /// Image attached to a prompt.
@@ -360,6 +488,11 @@ impl<'a> LoopContext<'a> {
     /// Get the model info from the provider.
     pub fn model_info(&self) -> &wonopcode_provider::ModelInfo {
         self.provider.model_info()
+    }
+
+    /// Check if Observational Memory is enabled and ready.
+    pub fn is_om_ready(&self) -> bool {
+        self.om_enabled && self.memory_state.is_some() && self.token_state_machine.is_some()
     }
 }
 

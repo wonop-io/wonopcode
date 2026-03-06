@@ -876,9 +876,20 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
             total_chunks: *total_chunks,
             phase: phase.clone(),
         },
+        wonopcode_tui::AppUpdate::ObservationalMemoryUpdate(_) => {
+            // OM updates are handled via the reliable protocol, not iggy
+            // Return a status message as a placeholder
+            ServerPayload::Status {
+                message: "observational_memory_update".to_string(),
+            }
+        }
         // ArtifactsUpdated - desktop-only feature, convert to status for unified protocol
         wonopcode_tui::AppUpdate::ArtifactsUpdated { artifacts } => ServerPayload::Status {
             message: format!("Artifacts updated: {} artifacts", artifacts.len()),
+        },
+        // CompletionRecorded - desktop-only Developer Mode feature, not exposed via iggy
+        wonopcode_tui::AppUpdate::CompletionRecorded { .. } => ServerPayload::Status {
+            message: "completion_recorded".to_string(),
         },
     }
 }

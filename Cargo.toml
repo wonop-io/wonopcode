@@ -31,6 +31,8 @@ members = [
     "crates/wonopcode-tui-widgets",
     "crates/wonopcode-tui-dialog",
     "crates/wonopcode-tui-messages",
+    # Observational Memory
+    "crates/wonopcode-observational-memory",
 ]
 
 [workspace.package]
@@ -81,6 +83,7 @@ wonopcode-tui-render = { path = "crates/wonopcode-tui-render" }
 wonopcode-tui-widgets = { path = "crates/wonopcode-tui-widgets" }
 wonopcode-tui-dialog = { path = "crates/wonopcode-tui-dialog" }
 wonopcode-tui-messages = { path = "crates/wonopcode-tui-messages" }
+wonopcode-observational-memory = { path = "crates/wonopcode-observational-memory" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

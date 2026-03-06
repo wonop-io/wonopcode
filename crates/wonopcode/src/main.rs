@@ -579,6 +579,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
+        observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
     };
 
     // Get MCP config from config file
@@ -988,6 +989,7 @@ async fn run_headless(
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
+        observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
     };
 
     // Get MCP config
@@ -1799,6 +1801,10 @@ async fn run_headless(
                     continue;
                 }
                 wonopcode_tui::AppUpdate::CompactionNotNeeded => {
+                    continue;
+                }
+                // OM state updates are handled internally for TUI display
+                wonopcode_tui::AppUpdate::ObservationalMemoryUpdate(_) => {
                     continue;
                 }
                 // ArtifactsUpdated is desktop-only feature

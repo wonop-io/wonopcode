@@ -26,5 +26,5 @@ pub use runner::{
 // Re-export agent loop types for convenience
 pub use wonopcode_agent_loop::{
     AgentLoop, BoxedAgentLoop, LoopCapabilities, LoopConfig, LoopContext, LoopError, LoopResult,
-    LoopUpdate, StandardLoop,
+    LoopUpdate, ObservationalMemoryConfig, StandardLoop,
 };
