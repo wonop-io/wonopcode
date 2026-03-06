@@ -201,7 +201,14 @@ impl ObservationPersistence {
     pub fn load(&self) -> Result<Option<PersistedObservations>, PersistenceError> {
         let obs_path = self.observations_path();
 
+        tracing::info!(
+            path = %obs_path.display(),
+            exists = obs_path.exists(),
+            "OM: Attempting to load observations"
+        );
+
         if !obs_path.exists() {
+            tracing::info!("OM: No observations file found, starting fresh");
             return Ok(None);
         }
 

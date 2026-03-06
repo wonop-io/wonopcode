@@ -1,6 +1,6 @@
 //! Context passed to agent loop implementations.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -396,6 +396,13 @@ pub struct LoopContext<'a> {
     /// Used by the agent loop to determine which messages are "new" (added during this turn)
     /// and need to be persisted before the observer drains them.
     pub messages_count_at_start: usize,
+    
+    /// Project directory for Observational Memory persistence.
+    ///
+    /// When set, observations are saved to disk continuously after
+    /// Observer and Reflector runs. This ensures observations survive
+    /// unexpected app termination (e.g., Cmd+Q).
+    pub om_project_dir: Option<PathBuf>,
 }
 
 /// Image attached to a prompt.

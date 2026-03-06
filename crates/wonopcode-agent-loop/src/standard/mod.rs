@@ -26,6 +26,7 @@ use tracing::{debug, info, warn};
 
 use wonopcode_observational_memory::{
     ObserverAgent, ObserverConfig, Priority, ReflectorAgent, ReflectorConfig, TokenCounter,
+    persistence::ObservationPersistence,
 };
 use wonopcode_provider::stream::{FinishReason, StreamChunk, Usage};
 use wonopcode_provider::{ContentPart, GenerateOptions, Message as ProviderMessage};
@@ -300,6 +301,25 @@ impl StandardLoop {
                             memory_state.commit_observations(end - start);
                         }
                         
+                        // Save observations to disk immediately (continuous persistence)
+                        // This ensures observations survive Cmd+Q or unexpected termination
+                        if let Some(ref project_dir) = ctx.om_project_dir {
+                            let persistence = ObservationPersistence::new(project_dir);
+                            let memory_state = ctx.memory_state.as_ref().unwrap();
+                            match persistence.save(memory_state) {
+                                Ok(()) => {
+                                    info!(
+                                        "OM: Saved {} observations to {}",
+                                        memory_state.observations.len(),
+                                        persistence.observations_path().display()
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!("OM: Failed to persist observations after observer: {:?}", e);
+                                }
+                            }
+                        }
+                        
                         // CRITICAL: Emit new messages for persistence BEFORE draining!
                         // The runner needs these messages for session persistence.
                         // After the drain, ctx.messages will be empty/reduced.
@@ -416,6 +436,25 @@ impl StandardLoop {
                     };
                     ctx.memory_state.as_mut().unwrap()
                         .commit_reflection(result.observations, reflection_stats);
+                    
+                    // Save observations to disk immediately (continuous persistence)
+                    // This ensures observations survive Cmd+Q or unexpected termination
+                    if let Some(ref project_dir) = ctx.om_project_dir {
+                        let persistence = ObservationPersistence::new(project_dir);
+                        let memory_state = ctx.memory_state.as_ref().unwrap();
+                        match persistence.save(memory_state) {
+                            Ok(()) => {
+                                info!(
+                                    "OM: Saved {} observations to {} (post-reflection)",
+                                    memory_state.observations.len(),
+                                    persistence.observations_path().display()
+                                );
+                            }
+                            Err(e) => {
+                                warn!("OM: Failed to persist observations after reflector: {:?}", e);
+                            }
+                        }
+                    }
                     
                     // Complete reflector in state machine
                     let new_observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;

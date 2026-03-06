@@ -198,6 +198,26 @@ fn convert_observation_snapshot(
     }
 }
 
+/// Convert an Observation from persistence to ObservationSnapshot for UI display.
+/// This is used when loading observations from disk on startup.
+fn observation_to_snapshot(obs: &wonopcode_agent_loop::Observation) -> wonopcode_agent_loop::ObservationSnapshot {
+    use wonopcode_agent_loop::Priority;
+    wonopcode_agent_loop::ObservationSnapshot {
+        id: obs.id.clone(),
+        priority: match obs.priority {
+            Priority::High => "high".to_string(),
+            Priority::Medium => "medium".to_string(),
+            Priority::Low => "low".to_string(),
+        },
+        timestamp: obs.observation_date.format("%H:%M").to_string(),
+        content: obs.content.clone(),
+        children: obs.children.iter()
+            .map(observation_to_snapshot)
+            .collect(),
+        pinned: obs.pinned,
+    }
+}
+
 /// Parse MCP TODO tool output and convert it to PhasedTodos.
 /// This is a simplified parser that handles the common markdown output format from the todowrite tool.
 fn parse_mcp_todo_output_simple(output: &str) -> Result<todo::PhasedTodos, serde_json::Error> {
@@ -724,6 +744,10 @@ impl Runner {
             
             // Try to load observations from disk if project_dir is configured
             let memory_state = if let Some(ref project_dir) = om_config.project_dir {
+                info!(
+                    project_dir = %project_dir.display(),
+                    "OM: Attempting to load observations from project directory"
+                );
                 let persistence = ObservationPersistence::new(project_dir);
                 match persistence.load_into_state(&session_id, context_limit) {
                     Ok((state, loaded_date)) => {
@@ -742,6 +766,7 @@ impl Runner {
                     }
                 }
             } else {
+                info!("OM: No project_dir configured, starting with fresh memory state");
                 MemoryState::new(session_id, context_limit)
             };
             
@@ -1910,6 +1935,8 @@ impl Runner {
             om_enabled: self.om_config.enabled,
             // Track how many messages existed at start for session persistence
             messages_count_at_start: messages_count_before_loop,
+            // Project directory for continuous OM persistence
+            om_project_dir: self.om_config.project_dir.clone(),
         };
 
         // Run the agent loop with emergency compaction on context overflow
@@ -2494,6 +2521,97 @@ impl Runner {
                     messages = history.len(),
                     "Sent initial context status based on loaded history"
                 );
+            }
+        }
+
+        // Send initial Observational Memory state if observations were loaded
+        // This ensures the frontend gets the persisted observations on startup
+        if self.om_config.enabled {
+            if let Some(ref memory_state) = self.memory_state {
+                let state = memory_state.read().await;
+                
+                if !state.observations.is_empty() || state.loaded_from_previous_session {
+                    // Get threshold info from token state machine if available
+                    let (observation_tokens, message_tokens, reflector_threshold, observer_threshold) = 
+                        if let Some(ref tsm) = self.token_state_machine {
+                            let sm = tsm.read().await;
+                            let thresholds = sm.thresholds();
+                            (
+                                sm.observation_tokens(),
+                                sm.message_tokens(),
+                                thresholds.reflector_threshold,
+                                thresholds.observer_threshold,
+                            )
+                        } else {
+                            (state.observation_tokens, state.unobserved_message_tokens, 20_000, 10_000)
+                        };
+                    
+                    let stats = &state.stats;
+                    let avg_compression = if stats.tokens_observed > 0 {
+                        stats.tokens_observed as f32 / stats.tokens_after_compression.max(1) as f32
+                    } else {
+                        1.0
+                    };
+                    
+                    let loaded_session_date = if state.loaded_from_previous_session && !state.observations.is_empty() {
+                        state.observations.first()
+                            .map(|o| o.observation_date.format("%B %d").to_string())
+                    } else {
+                        None
+                    };
+                    
+                    // Convert observations to snapshots
+                    let observations: Vec<wonopcode_agent_loop::ObservationSnapshot> = state.observations.iter()
+                        .map(observation_to_snapshot)
+                        .collect();
+                    
+                    info!(
+                        observations = observations.len(),
+                        observation_tokens = observation_tokens,
+                        loaded_from_previous = state.loaded_from_previous_session,
+                        "Sending initial OM state to frontend"
+                    );
+                    
+                    // Create snapshot and convert to TUI format
+                    let snapshot = wonopcode_agent_loop::ObservationalMemoryStateSnapshot {
+                        enabled: true,
+                        observations,
+                        observation_tokens,
+                        reflector_threshold,
+                        message_tokens,
+                        observer_threshold,
+                        system_tokens: 0,
+                        total_observations: stats.total_observations,
+                        reflections_count: stats.reflections_run,
+                        avg_compression,
+                        cache_savings: 0.0,
+                        loaded_from_previous_session: state.loaded_from_previous_session,
+                        loaded_session_date,
+                    };
+                    
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ObservationalMemoryUpdate(
+                            wonopcode_tui::ObservationalMemoryStateUpdate {
+                                enabled: snapshot.enabled,
+                                observations: snapshot.observations.into_iter()
+                                    .map(convert_observation_snapshot)
+                                    .collect(),
+                                observation_tokens: snapshot.observation_tokens,
+                                reflector_threshold: snapshot.reflector_threshold,
+                                message_tokens: snapshot.message_tokens,
+                                observer_threshold: snapshot.observer_threshold,
+                                system_tokens: snapshot.system_tokens,
+                                total_observations: snapshot.total_observations,
+                                reflections_count: snapshot.reflections_count,
+                                avg_compression: snapshot.avg_compression,
+                                cache_savings: snapshot.cache_savings,
+                                loaded_from_previous_session: snapshot.loaded_from_previous_session,
+                                loaded_session_date: snapshot.loaded_session_date,
+                            },
+                        ),
+                    );
+                }
             }
         }
 
