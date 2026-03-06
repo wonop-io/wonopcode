@@ -570,6 +570,7 @@ impl AgentLoop for StandardLoop {
                 tool_timeout,
                 ctx.ticket_service.clone(),
                 ctx.memory_service.clone(),
+                ctx.ts_permission_checker.clone(),
                 ctx.workstream_ticket_id.clone(),
                 ctx.workstream_default_tracker_id.clone(),
             );

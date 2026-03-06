@@ -9,7 +9,9 @@ use tracing::{debug, info, warn};
 
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
-use wonopcode_tools::{ToolContext, ToolError, ToolEvent, ToolOutput, ToolRegistry};
+use wonopcode_tools::{
+    ToolContext, ToolError, ToolEvent, ToolOutput, ToolRegistry, TsPermissionChecker,
+};
 use wonopcode_util::FileTimeState;
 
 use crate::context::{PermissionCheckRequest, PermissionChecker};
@@ -29,6 +31,9 @@ pub struct ToolExecutor<'a> {
     ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
     /// Optional memory service for memory tools.
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    /// Optional permission checker for TypeScript tools.
+    /// This allows TypeScript code to request fine-grained permissions.
+    ts_permission_checker: Option<Arc<dyn TsPermissionChecker>>,
     /// Optional workstream ticket ID (for default tracker resolution).
     workstream_ticket_id: Option<String>,
     /// Optional default tracker ID for the workstream.
@@ -53,6 +58,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout: None,
             ticket_service: None,
             memory_service: None,
+            ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -79,6 +85,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout: None,
             ticket_service: None,
             memory_service: None,
+            ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -112,6 +119,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout,
             ticket_service: None,
             memory_service: None,
+            ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -131,6 +139,7 @@ impl<'a> ToolExecutor<'a> {
         tool_timeout: Option<std::time::Duration>,
         ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
         memory_service: Option<wonopcode_tools::SharedMemoryService>,
+        ts_permission_checker: Option<Arc<dyn TsPermissionChecker>>,
         workstream_ticket_id: Option<String>,
         workstream_default_tracker_id: Option<String>,
     ) -> Self {
@@ -144,6 +153,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout,
             ticket_service,
             memory_service,
+            ts_permission_checker,
             workstream_ticket_id,
             workstream_default_tracker_id,
         }
@@ -243,6 +253,7 @@ impl<'a> ToolExecutor<'a> {
             event_tx: self.event_tx.clone(),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            permission_checker: self.ts_permission_checker.clone(),
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
         };

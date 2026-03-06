@@ -145,6 +145,7 @@ mod tests {
             event_tx: None,
             ticket_service: Some(mock),
             memory_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -164,6 +165,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }

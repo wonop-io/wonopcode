@@ -10,12 +10,14 @@
 //! - Console output capture
 //! - Configurable timeout and heap limits
 
-use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult};
+use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult, TsPermissionRequest};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn};
-use wonopcode_codemode::{AllowedCommands, CodemodeRuntime, RuntimeConfig, ToolDefinition};
+use wonopcode_codemode::{
+    create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ToolDefinition,
+};
 
 /// Default timeout for script execution in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -111,19 +113,58 @@ console.log(`File has ${lines.length} lines`);
         // Calculate timeout (clamp to max 120 seconds)
         let timeout_secs = args.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).min(120);
 
+        // Create permission bridge if permission checker is available
+        let (permission_bridge, permission_rx) = if ctx.permission_checker.is_some() {
+            let (bridge, rx) = create_permission_channel();
+            (Some(bridge), Some(rx))
+        } else {
+            (None, None)
+        };
+
         // Build runtime configuration
         let config = RuntimeConfig {
             project_root: ctx.root_dir.clone(),
             allowed_commands: AllowedCommands::default(),
             timeout_secs,
+            permission_bridge,
+            session_id: Some(ctx.session_id.clone()),
             ..Default::default()
         };
 
         debug!(
             project_root = %ctx.root_dir.display(),
             timeout_secs = timeout_secs,
+            has_permission_checker = ctx.permission_checker.is_some(),
             "Creating Code Mode runtime"
         );
+
+        // Spawn permission handler task if we have a permission checker
+        let permission_handle = if let (Some(mut rx), Some(checker)) =
+            (permission_rx, ctx.permission_checker.clone())
+        {
+            let session_id = ctx.session_id.clone();
+            Some(tokio::spawn(async move {
+                while let Some(ts_req) = rx.recv().await {
+                    // Convert TsPermissionRequest from codemode to TsPermissionRequest in tools
+                    let request = TsPermissionRequest {
+                        id: ts_req.id.clone(),
+                        tool: ts_req.tool,
+                        action: ts_req.action,
+                        path: ts_req.path,
+                        description: ts_req.description,
+                        details: None,
+                    };
+
+                    // Check permission through the checker
+                    let allowed = checker.check(&session_id, request).await;
+
+                    // Send response back to TypeScript
+                    let _ = ts_req.response_tx.send(allowed);
+                }
+            }))
+        } else {
+            None
+        };
 
         // Create and execute in the runtime
         let runtime = CodemodeRuntime::new(config);
@@ -131,7 +172,14 @@ console.log(`File has ${lines.length} lines`);
         let output = runtime.execute(&args.code).await.map_err(|e| {
             warn!(error = %e, "TypeScript execution failed");
             ToolError::execution_failed(format!("Execution failed: {e}"))
-        })?;
+        });
+
+        // Cancel the permission handler task
+        if let Some(handle) = permission_handle {
+            handle.abort();
+        }
+
+        let output = output?;
 
         // Format the output
         let output_text = if output.is_empty() {
@@ -205,6 +253,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }

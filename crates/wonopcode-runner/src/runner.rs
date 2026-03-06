@@ -115,6 +115,45 @@ impl PermissionChecker for PermissionCheckerAdapter {
     }
 }
 
+/// Adapter that implements `TsPermissionChecker` for `PermissionManager`.
+///
+/// This allows TypeScript tools to check permissions through the same
+/// permission system used by the rest of the agent.
+pub struct TsPermissionCheckerAdapter {
+    permission_manager: Arc<PermissionManager>,
+}
+
+impl TsPermissionCheckerAdapter {
+    /// Create a new adapter wrapping a permission manager.
+    pub fn new(permission_manager: Arc<PermissionManager>) -> Self {
+        Self { permission_manager }
+    }
+}
+
+#[async_trait]
+impl wonopcode_tools::TsPermissionChecker for TsPermissionCheckerAdapter {
+    async fn check(
+        &self,
+        session_id: &str,
+        request: wonopcode_tools::TsPermissionRequest,
+    ) -> bool {
+        // Convert the request to PermissionCheck format used by PermissionManager
+        let check = wonopcode_core::permission::PermissionCheck {
+            id: request.id,
+            tool: request.tool,
+            action: request.action,
+            path: request.path,
+            description: request.description,
+            details: request.details.unwrap_or(serde_json::Value::Null),
+        };
+
+        let has_sandbox = self.permission_manager.is_sandbox_running();
+        self.permission_manager
+            .check_with_sandbox(session_id, check, has_sandbox)
+            .await
+    }
+}
+
 /// Helper to send updates to the TUI with proper error logging.
 /// This replaces `let _ = update_tx.send(...)` to avoid silent failures.
 fn send_update(update_tx: &mpsc::UnboundedSender<AppUpdate>, update: AppUpdate) {
@@ -1699,9 +1738,12 @@ impl Runner {
         // Get provider (read lock)
         let provider = self.provider.read().await;
 
-        // Create permission checker adapter
+        // Create permission checker adapters
         let permission_checker: Arc<dyn PermissionChecker> = Arc::new(
             PermissionCheckerAdapter::new(self.permission_manager.clone()),
+        );
+        let ts_permission_checker: Arc<dyn wonopcode_tools::TsPermissionChecker> = Arc::new(
+            TsPermissionCheckerAdapter::new(self.permission_manager.clone()),
         );
 
         // Load workstream state for default tracker resolution
@@ -1727,6 +1769,7 @@ impl Runner {
             permission_checker: Some(permission_checker),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            ts_permission_checker: Some(ts_permission_checker),
             workstream_ticket_id,
             workstream_default_tracker_id,
             prompt_images: images,

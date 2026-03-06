@@ -289,6 +289,12 @@ pub struct LoopContext<'a> {
     /// persistent storage across global, workstream, and session scopes.
     pub memory_service: Option<wonopcode_tools::SharedMemoryService>,
 
+    /// Optional permission checker for TypeScript tools.
+    ///
+    /// When set, TypeScript code running in the execute_typescript tool
+    /// can request fine-grained permissions for operations like file writes.
+    pub ts_permission_checker: Option<Arc<dyn wonopcode_tools::TsPermissionChecker>>,
+
     /// Optional workstream ticket ID.
     ///
     /// When set, this is the ticket ID associated with the current workstream.

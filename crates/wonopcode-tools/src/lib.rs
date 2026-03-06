@@ -65,6 +65,39 @@ use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
 use wonopcode_util::FileTimeState;
 
+/// Permission check request for TypeScript tools.
+///
+/// This is similar to PermissionCheck in wonopcode-core but defined here
+/// to avoid circular dependencies.
+#[derive(Debug, Clone)]
+pub struct TsPermissionRequest {
+    /// Unique identifier for this request.
+    pub id: String,
+    /// Tool name requesting permission (e.g., "edit", "bash").
+    pub tool: String,
+    /// Action being performed (e.g., "write", "execute").
+    pub action: String,
+    /// Path involved (for file operations).
+    pub path: Option<String>,
+    /// Human-readable description of what's being requested.
+    pub description: String,
+    /// Additional details (like command or file content preview).
+    pub details: Option<serde_json::Value>,
+}
+
+/// Trait for checking permissions from TypeScript code.
+///
+/// This trait abstracts permission checking so tools don't need to depend
+/// directly on wonopcode-core. Implementations wrap the PermissionManager.
+#[async_trait]
+pub trait TsPermissionChecker: Send + Sync {
+    /// Check if an operation is allowed.
+    ///
+    /// Returns `true` if the operation is allowed, `false` if denied.
+    /// Implementations may block waiting for user input.
+    async fn check(&self, session_id: &str, request: TsPermissionRequest) -> bool;
+}
+
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
 pub enum ToolEvent {
@@ -114,6 +147,9 @@ pub struct ToolContext {
     pub ticket_service: Option<Arc<dyn TicketService>>,
     /// Optional memory service for memory tools.
     pub memory_service: Option<SharedMemoryService>,
+    /// Optional permission checker for TypeScript tools.
+    /// When set, TypeScript code can request user permission before performing actions.
+    pub permission_checker: Option<Arc<dyn TsPermissionChecker>>,
     /// Workstream's ticket ID (from .wonopcode/state.yaml).
     /// This is the ticket ID associated with the current workstream.
     pub workstream_ticket_id: Option<String>,
@@ -247,6 +283,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
