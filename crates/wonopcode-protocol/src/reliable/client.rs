@@ -364,6 +364,20 @@ pub enum ClientMessage {
         /// Number of test message pairs (user + assistant) to inject.
         message_pairs: usize,
     },
+
+    // =========================================================================
+    // Developer Mode Features
+    // =========================================================================
+    /// Enable or disable full request/response recording for completions.
+    ///
+    /// When enabled, the server includes the full request and response JSON
+    /// in `CompletionRecorded` events. This is useful for debugging LLM calls.
+    SetRecordingEnabled {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Whether to enable recording.
+        enabled: bool,
+    },
 }
 
 /// Topics that clients can subscribe to.

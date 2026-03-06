@@ -22,7 +22,9 @@ use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use wonopcode_observational_memory::{
     ObserverAgent, ObserverConfig, Priority, ReflectorAgent, ReflectorConfig, TokenCounter,
@@ -646,6 +648,25 @@ impl AgentLoop for StandardLoop {
                 "Calling provider"
             );
 
+            // Timing capture for completion statistics
+            let completion_id = Uuid::new_v4().to_string();
+            let completion_start = Instant::now();
+            let completion_timestamp = Utc::now().timestamp_millis() as f64;
+            let mut first_token_time: Option<Instant> = None;
+
+            // Capture request for developer statistics
+            let request_json = serde_json::json!({
+                "messages": ctx.messages.clone(),
+                "system": options.system.clone(),
+                "tools": options.tools.iter().map(|t| serde_json::json!({
+                    "name": &t.name,
+                    "description": &t.description,
+                    "parameters": &t.parameters,
+                })).collect::<Vec<_>>(),
+                "temperature": options.temperature,
+                "max_tokens": options.max_tokens,
+            }).to_string();
+
             let stream = ctx
                 .provider
                 .generate(ctx.messages.clone(), options)
@@ -706,6 +727,10 @@ impl AgentLoop for StandardLoop {
                 match chunk {
                     StreamChunk::TextStart => {}
                     StreamChunk::TextDelta(delta) => {
+                        // Track first token time for latency measurement
+                        if first_token_time.is_none() {
+                            first_token_time = Some(Instant::now());
+                        }
                         current_text.push_str(&delta);
                         ctx.send_update(LoopUpdate::TextDelta(delta));
                     }
@@ -845,6 +870,47 @@ impl AgentLoop for StandardLoop {
                             last_request_input,
                             last_request_output,
                             last_request_cache_read,
+                        });
+
+                        // Emit CompletionRecorded for developer mode statistics
+                        let total_duration_ms = completion_start.elapsed().as_millis() as u64;
+                        let latency_ms = first_token_time
+                            .map(|t| t.duration_since(completion_start).as_millis() as u64)
+                            .unwrap_or(total_duration_ms); // Fallback to total duration if no tokens
+
+                        let cache_read = last_request_cache_read.unwrap_or(0);
+
+                        // Capture response for developer statistics
+                        let response_json = serde_json::json!({
+                            "text": &current_text,
+                            "tool_calls": tool_calls.iter().map(|(id, name, args)| {
+                                serde_json::json!({
+                                    "id": id,
+                                    "name": name,
+                                    "arguments": serde_json::from_str::<serde_json::Value>(args).unwrap_or(serde_json::Value::String(args.clone())),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "finish_reason": format!("{:?}", reason),
+                            "usage": {
+                                "input_tokens": step_usage.input_tokens,
+                                "output_tokens": step_usage.output_tokens,
+                                "cache_read_tokens": cache_read,
+                            },
+                        }).to_string();
+                        
+                        ctx.send_update(LoopUpdate::CompletionRecorded {
+                            id: completion_id.clone(),
+                            timestamp: completion_timestamp,
+                            model: model_info.name.clone(),
+                            input_tokens: step_usage.input_tokens as u64,
+                            output_tokens: step_usage.output_tokens as u64,
+                            cache_read_tokens: cache_read,
+                            cost: step_cost,
+                            latency_ms,
+                            total_duration_ms,
+                            finish_reason: format!("{:?}", reason),
+                            request: Some(request_json.clone()),
+                            response: Some(response_json),
                         });
                     }
                     StreamChunk::Error(e) => {

@@ -1810,6 +1810,33 @@ impl Runner {
                         }
                         continue; // Don't forward to AppUpdate
                     }
+                    LoopUpdate::CompletionRecorded {
+                        id,
+                        timestamp,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cost,
+                        latency_ms,
+                        total_duration_ms,
+                        finish_reason,
+                        request,
+                        response,
+                    } => AppUpdate::CompletionRecorded {
+                        id,
+                        timestamp,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cost,
+                        latency_ms,
+                        total_duration_ms,
+                        finish_reason,
+                        request,
+                        response,
+                    },
                 };
                 let _ = update_tx_clone.send(app_update);
             }

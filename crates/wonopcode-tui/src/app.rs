@@ -496,6 +496,36 @@ pub enum AppUpdate {
     },
     /// Observational Memory state update.
     ObservationalMemoryUpdate(ObservationalMemoryStateUpdate),
+    /// Completion statistics recorded (Developer Mode feature).
+    ///
+    /// Emitted after each LLM completion finishes, containing timing
+    /// and usage data for debugging and monitoring.
+    CompletionRecorded {
+        /// Unique ID for this completion.
+        id: String,
+        /// Unix timestamp (ms) when completion started.
+        timestamp: f64,
+        /// Model ID used.
+        model: String,
+        /// Input tokens for this completion.
+        input_tokens: u64,
+        /// Output tokens for this completion.
+        output_tokens: u64,
+        /// Cache read tokens (if applicable).
+        cache_read_tokens: u64,
+        /// Estimated cost for this completion.
+        cost: f64,
+        /// Time to first token (ms).
+        latency_ms: u64,
+        /// Total duration from start to finish (ms).
+        total_duration_ms: u64,
+        /// Finish reason (end_turn, tool_use, max_tokens, etc.).
+        finish_reason: String,
+        /// Optional: Full request JSON (if recording enabled).
+        request: Option<String>,
+        /// Optional: Full response JSON (if recording enabled).
+        response: Option<String>,
+    },
 }
 
 /// Observational Memory state update for UI.
@@ -3822,6 +3852,9 @@ async function fetchUserData(userId) {
             }
             AppUpdate::ArtifactsUpdated { .. } => {
                 // TUI doesn't have a Documents View - handled by desktop only
+            }
+            AppUpdate::CompletionRecorded { .. } => {
+                // TUI doesn't have a stats panel - handled by Desktop UI (Developer Mode feature)
             }
         }
     }

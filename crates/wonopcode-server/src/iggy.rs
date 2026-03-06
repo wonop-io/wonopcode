@@ -887,6 +887,10 @@ pub fn app_update_to_server_payload(update: &wonopcode_tui::AppUpdate) -> Server
         wonopcode_tui::AppUpdate::ArtifactsUpdated { artifacts } => ServerPayload::Status {
             message: format!("Artifacts updated: {} artifacts", artifacts.len()),
         },
+        // CompletionRecorded - desktop-only Developer Mode feature, not exposed via iggy
+        wonopcode_tui::AppUpdate::CompletionRecorded { .. } => ServerPayload::Status {
+            message: "completion_recorded".to_string(),
+        },
     }
 }
 
