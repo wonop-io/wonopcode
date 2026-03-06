@@ -13,6 +13,7 @@ pub mod footer;
 pub mod help_overlay;
 pub mod input;
 pub mod logo;
+pub mod memory_panel;
 pub mod mode_indicator;
 pub mod onboarding;
 pub mod search;
@@ -45,3 +46,10 @@ pub use timeline::{TimelineAction, TimelineEntry, TimelineWidget};
 pub use toast::{Toast, ToastManager, ToastType};
 pub use topbar::TopBarWidget;
 pub use which_key::{KeyBinding, WhichKeyOverlay};
+
+// Memory panel types
+pub use memory_panel::{
+    DisplayObservation, MemoryEvent, MemoryEventIndicator, MemoryPanelWidget, MemoryStats,
+    ObservationPriority, ReflectionChangeType, ReflectionDiffEntry, ReflectionDiffWidget,
+    TokenBudget,
+};

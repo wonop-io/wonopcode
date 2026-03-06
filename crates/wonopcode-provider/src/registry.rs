@@ -889,6 +889,7 @@ fn create_fallback_model_info(model_id: &str, provider_id: &str) -> ModelInfo {
             output,
         },
         status: ModelStatus::Active,
+        tokenizer: crate::model::TokenizerInfo::default(),
     }
 }
 

@@ -15,7 +15,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
-    LoopUpdate, PermissionCheckRequest, PermissionChecker,
+    LoopUpdate, MemoryState, ObservationalMemoryConfig, PermissionCheckRequest, PermissionChecker,
+    TokenStateMachine,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
@@ -179,6 +180,22 @@ fn convert_phased_todos_to_updates(
         .collect();
 
     (phases, todos)
+}
+
+/// Convert LoopUpdate observation snapshot to TUI observation update.
+fn convert_observation_snapshot(
+    snapshot: wonopcode_agent_loop::ObservationSnapshot,
+) -> wonopcode_tui::ObservationUpdate {
+    wonopcode_tui::ObservationUpdate {
+        id: snapshot.id,
+        priority: snapshot.priority,
+        timestamp: snapshot.timestamp,
+        content: snapshot.content,
+        children: snapshot.children.into_iter()
+            .map(convert_observation_snapshot)
+            .collect(),
+        pinned: snapshot.pinned,
+    }
 }
 
 /// Parse MCP TODO tool output and convert it to PhasedTodos.
@@ -501,6 +518,9 @@ pub struct RunnerConfig {
     /// Working directory for the provider (used by Claude CLI).
     /// This sets the current working directory when spawning external processes.
     pub working_directory: Option<std::path::PathBuf>,
+    /// Observational Memory configuration.
+    /// When enabled, uses OM for context compression instead of legacy compaction.
+    pub observational_memory: ObservationalMemoryConfig,
 }
 
 impl Default for RunnerConfig {
@@ -520,6 +540,7 @@ impl Default for RunnerConfig {
             mcp_secret: None,
             external_mcp_servers: HashMap::new(),
             working_directory: None,
+            observational_memory: ObservationalMemoryConfig::enabled(), // OM enabled by default
         }
     }
 }
@@ -573,6 +594,17 @@ pub struct Runner {
     /// Optional memory service for memory tools.
     /// When set, memory tools can store and retrieve information across scopes.
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    // =========================================================================
+    // Observational Memory (OM) state
+    // =========================================================================
+    /// Observational Memory configuration.
+    om_config: ObservationalMemoryConfig,
+    /// Memory state for OM (observations and statistics).
+    /// Only initialized when OM is enabled.
+    memory_state: Option<RwLock<MemoryState>>,
+    /// Token state machine for OM threshold management.
+    /// Only initialized when OM is enabled.
+    token_state_machine: Option<RwLock<TokenStateMachine>>,
 }
 
 impl Runner {
@@ -676,6 +708,30 @@ impl Runner {
         // Get context limit from provider for initial context state
         let context_limit = provider.model_info().limit.context;
 
+        // Extract OM config before wrapping in Arc<RwLock<>>
+        let om_config = config.observational_memory.clone();
+
+        // Initialize Observational Memory state if enabled
+        let (memory_state, token_state_machine) = if om_config.enabled {
+            info!(
+                context_limit,
+                observer_ratio = om_config.thresholds.observer_ratio,
+                reflector_ratio = om_config.thresholds.reflector_ratio,
+                "Observational Memory enabled"
+            );
+            let session_id = format!("session-{}", uuid::Uuid::new_v4());
+            let memory_state = MemoryState::new(session_id, context_limit);
+            let token_state_machine =
+                TokenStateMachine::from_config(&om_config.thresholds, context_limit);
+            (
+                Some(RwLock::new(memory_state)),
+                Some(RwLock::new(token_state_machine)),
+            )
+        } else {
+            debug!("Observational Memory disabled, using legacy compaction");
+            (None, None)
+        };
+
         Ok(Self {
             agent_loop: tokio::sync::Mutex::new(agent_loop),
             config: Arc::new(RwLock::new(config)),
@@ -700,6 +756,10 @@ impl Runner {
             context_state: RwLock::new(ContextState::new(context_limit)),
             ticket_service: None, // Will be set by new_with_shared
             memory_service: None, // Will be set by new_with_shared
+            // Observational Memory state
+            om_config,
+            memory_state,
+            token_state_machine,
         })
     }
 
@@ -1583,6 +1643,14 @@ impl Runner {
         // Get MCP TODO tool mappings for intercepting TODO tool completions
         let mcp_todo_mappings = self.mcp_todo_adapter.as_ref().map(|a| a.tool_mappings());
 
+        // Collector for messages that need to be persisted.
+        // The OM observer drains messages from ctx.messages, so we need to collect
+        // new messages BEFORE they're drained. The agent loop emits MessagesForPersistence
+        // with these messages.
+        let messages_for_persistence: Arc<std::sync::Mutex<Vec<ProviderMessage>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let messages_for_persistence_clone = Arc::clone(&messages_for_persistence);
+
         // Spawn a task to forward LoopUpdate events to AppUpdate
         let update_tx_clone = update_tx.clone();
         let forward_task = tokio::spawn(async move {
@@ -1666,6 +1734,44 @@ impl Runner {
                     },
                     LoopUpdate::Status(status) => AppUpdate::Status(status),
                     LoopUpdate::Error(error) => AppUpdate::Error(error),
+                    LoopUpdate::ObservationalMemoryUpdate(snapshot) => {
+                        tracing::info!(
+                            "🧠 [Runner] Converting LoopUpdate::ObservationalMemoryUpdate: {} observations, {} tokens, enabled={}",
+                            snapshot.observations.len(),
+                            snapshot.observation_tokens,
+                            snapshot.enabled
+                        );
+                        AppUpdate::ObservationalMemoryUpdate(
+                            wonopcode_tui::ObservationalMemoryStateUpdate {
+                                enabled: snapshot.enabled,
+                                observations: snapshot.observations.into_iter()
+                                    .map(convert_observation_snapshot)
+                                    .collect(),
+                                observation_tokens: snapshot.observation_tokens,
+                                reflector_threshold: snapshot.reflector_threshold,
+                                message_tokens: snapshot.message_tokens,
+                                observer_threshold: snapshot.observer_threshold,
+                                system_tokens: snapshot.system_tokens,
+                                total_observations: snapshot.total_observations,
+                                reflections_count: snapshot.reflections_count,
+                                avg_compression: snapshot.avg_compression,
+                                cache_savings: snapshot.cache_savings,
+                            }
+                        )
+                    }
+                    LoopUpdate::MessagesForPersistence(msgs) => {
+                        // Collect messages for session persistence.
+                        // The OM observer drains ctx.messages, so these are emitted BEFORE
+                        // the drain to preserve them for persistence.
+                        tracing::info!(
+                            "🧠 [Runner] Received MessagesForPersistence: {} messages",
+                            msgs.len()
+                        );
+                        if let Ok(mut guard) = messages_for_persistence_clone.lock() {
+                            guard.extend(msgs);
+                        }
+                        continue; // Don't forward to AppUpdate
+                    }
                 };
                 let _ = update_tx_clone.send(app_update);
             }
@@ -1726,7 +1832,26 @@ impl Runner {
         let (workstream_ticket_id, workstream_default_tracker_id) =
             Self::load_workstream_context(cwd);
 
-        // Build LoopContext
+        // Acquire OM locks if enabled - these must live for the duration of run_prompt
+        // We use .write().await since we're in an async context (not blocking_write which panics in async)
+        let mut memory_state_guard = if self.om_config.enabled {
+            match self.memory_state.as_ref() {
+                Some(ms) => Some(ms.write().await),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let mut token_state_machine_guard = if self.om_config.enabled {
+            match self.token_state_machine.as_ref() {
+                Some(tsm) => Some(tsm.write().await),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        // Build LoopContext with OM state references
         let mut ctx = LoopContext {
             cwd,
             messages: &mut messages,
@@ -1748,6 +1873,12 @@ impl Runner {
             workstream_ticket_id,
             workstream_default_tracker_id,
             prompt_images: images,
+            // Observational Memory state - enabled if config says so and guards are acquired
+            memory_state: memory_state_guard.as_mut().map(|g| &mut **g),
+            token_state_machine: token_state_machine_guard.as_mut().map(|g| &mut **g),
+            om_enabled: self.om_config.enabled,
+            // Track how many messages existed at start for session persistence
+            messages_count_at_start: messages_count_before_loop,
         };
 
         // Run the agent loop with emergency compaction on context overflow
@@ -1916,15 +2047,32 @@ impl Runner {
         if result.is_ok() {
             if let Some(ref svc) = self.session_service {
                 if let Some(ref parent_id) = user_msg_id {
-                    // Only process messages that were added during this turn
-                    // (skip the ones that existed before the loop ran)
-                    let new_messages: Vec<_> =
-                        messages.iter().skip(messages_count_before_loop).collect();
+                    // Get new messages for persistence.
+                    // PRIORITY 1: Use messages collected from OM's MessagesForPersistence (emitted BEFORE drain)
+                    // PRIORITY 2: Fallback to ctx.messages if OM didn't run (no drain happened)
+                    let collected_messages = messages_for_persistence
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
+                    
+                    let new_messages: Vec<_> = if !collected_messages.is_empty() {
+                        // Use messages collected from OM before the drain
+                        info!(
+                            "SESSION PERSISTENCE: Using {} messages from MessagesForPersistence collector",
+                            collected_messages.len()
+                        );
+                        collected_messages.iter().collect()
+                    } else {
+                        // Fallback: OM didn't run or didn't emit messages, use ctx.messages
+                        // (this happens when OM is disabled or threshold wasn't reached)
+                        messages.iter().skip(messages_count_before_loop).collect()
+                    };
 
                     trace!(
                         messages_before = messages_count_before_loop,
                         messages_after = messages.len(),
                         new_message_count = new_messages.len(),
+                        collected_count = collected_messages.len(),
                         "SESSION PERSISTENCE: Processing new messages for storage"
                     );
 
@@ -2114,6 +2262,7 @@ impl Runner {
                 mcp_secret: old_config.mcp_secret.clone(),
                 external_mcp_servers: old_config.external_mcp_servers.clone(),
                 working_directory: old_config.working_directory.clone(),
+                observational_memory: old_config.observational_memory.clone(),
             }
         };
 

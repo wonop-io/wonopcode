@@ -248,6 +248,35 @@ pub enum WorkstreamEventData {
         /// Phase: "summarizing" or "combining".
         phase: String,
     },
+
+    // =========================================================================
+    // Observational Memory
+    // =========================================================================
+    /// Observational Memory state update.
+    ObservationalMemoryUpdate {
+        /// Whether OM is enabled.
+        enabled: bool,
+        /// Current observations.
+        observations: Vec<super::ObservationSnapshot>,
+        /// Token count for observations.
+        observation_tokens: u32,
+        /// Reflector token threshold.
+        reflector_threshold: u32,
+        /// Token count for unobserved messages.
+        message_tokens: u32,
+        /// Observer token threshold.
+        observer_threshold: u32,
+        /// System prompt token estimate.
+        system_tokens: u32,
+        /// Total observations created.
+        total_observations: u32,
+        /// Number of reflections performed.
+        reflections_count: u32,
+        /// Average compression ratio achieved.
+        avg_compression: f32,
+        /// Estimated cost savings from caching.
+        cache_savings: f64,
+    },
 }
 
 /// A part of a message (for rich reconstruction).

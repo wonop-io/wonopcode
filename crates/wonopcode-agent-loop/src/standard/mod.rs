@@ -2,20 +2,35 @@
 //!
 //! This module provides `StandardLoop`, the default `AgentLoop` implementation
 //! that replicates the current behavior of the runner's `run_prompt()` method.
+//!
+//! # Observational Memory Support
+//!
+//! When `LoopContext.om_enabled` is true and the memory state fields are set,
+//! StandardLoop uses Observational Memory (OM) for context compression instead
+//! of legacy message compaction. OM provides:
+//!
+//! - Bounded context window via token-based thresholds
+//! - Event-level observation extraction (not summaries)
+//! - Prompt cache optimization
 
 mod streaming;
 mod tools;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
+use wonopcode_observational_memory::{
+    ObserverAgent, ObserverConfig, Priority, ReflectorAgent, ReflectorConfig, TokenCounter,
+};
 use wonopcode_provider::stream::{FinishReason, StreamChunk, Usage};
 use wonopcode_provider::{ContentPart, GenerateOptions, Message as ProviderMessage};
 
+use crate::context::{ObservationalMemoryStateSnapshot, ObservationSnapshot};
 use crate::{AgentLoop, LoopCapabilities, LoopContext, LoopError, LoopUpdate};
 
 pub use streaming::StreamProcessor;
@@ -94,7 +109,7 @@ impl DoomLoopDetector {
 ///
 /// - Streaming responses from the provider
 /// - Parallel tool execution
-/// - Automatic message compaction (TODO)
+/// - Observational Memory for context compression (when enabled)
 /// - Doom loop detection
 /// - Extended thinking support
 ///
@@ -127,6 +142,287 @@ impl StandardLoop {
             max_iterations,
             doom_detector: Mutex::new(DoomLoopDetector::new()),
         }
+    }
+
+    /// Create an OM snapshot from the current context for UI updates.
+    fn create_om_snapshot(ctx: &LoopContext<'_>) -> ObservationalMemoryStateSnapshot {
+        let (observations, stats) = if let Some(ref ms) = ctx.memory_state {
+            let obs: Vec<ObservationSnapshot> = ms.observations.iter()
+                .map(|o| Self::observation_to_snapshot(o))
+                .collect();
+            (obs, ms.stats.clone())
+        } else {
+            (Vec::new(), wonopcode_observational_memory::MemoryStats::default())
+        };
+
+        let (observation_tokens, message_tokens, reflector_threshold, observer_threshold) = 
+            if let Some(ref sm) = ctx.token_state_machine {
+                let thresholds = sm.thresholds();
+                (
+                    sm.observation_tokens(),
+                    sm.message_tokens(),
+                    thresholds.reflector_threshold,
+                    thresholds.observer_threshold,
+                )
+            } else {
+                (0, 0, 40_000, 30_000)
+            };
+
+        let avg_compression = if stats.tokens_observed > 0 {
+            stats.tokens_observed as f32 / stats.tokens_after_compression.max(1) as f32
+        } else {
+            1.0
+        };
+
+        ObservationalMemoryStateSnapshot {
+            enabled: ctx.om_enabled,
+            observations,
+            observation_tokens,
+            reflector_threshold,
+            message_tokens,
+            observer_threshold,
+            system_tokens: 0,
+            total_observations: stats.total_observations,
+            reflections_count: stats.reflections_run,
+            avg_compression,
+            cache_savings: 0.0,
+        }
+    }
+
+    /// Convert an Observation to an ObservationSnapshot for UI display.
+    fn observation_to_snapshot(obs: &wonopcode_observational_memory::Observation) -> ObservationSnapshot {
+        ObservationSnapshot {
+            id: obs.id.clone(),
+            priority: match obs.priority {
+                Priority::High => "high".to_string(),
+                Priority::Medium => "medium".to_string(),
+                Priority::Low => "low".to_string(),
+            },
+            timestamp: obs.observation_date.format("%H:%M").to_string(),
+            content: obs.content.clone(),
+            children: obs.children.iter()
+                .map(|c| Self::observation_to_snapshot(c))
+                .collect(),
+            pinned: obs.pinned,
+        }
+    }
+
+    /// Run Observer/Reflector if thresholds are met.
+    ///
+    /// This is called after each prompt turn when OM is enabled.
+    /// Returns true if observation or reflection was triggered.
+    async fn maybe_observe_and_reflect(
+        ctx: &mut LoopContext<'_>,
+    ) -> Result<bool, LoopError> {
+        // Check if OM is enabled and ready
+        if !ctx.is_om_ready() {
+            return Ok(false);
+        }
+
+        let mut any_triggered = false;
+
+        // First, count message tokens (read-only access to ctx)
+        let chars_per_token = ctx.provider.model_info().tokenizer.chars_per_token;
+        let token_counter = TokenCounter::from_ratio(chars_per_token);
+        let message_tokens: u32 = ctx.messages.iter()
+            .map(|m| {
+                m.content.iter()
+                    .map(|p| match p {
+                        ContentPart::Text { text } => token_counter.count_str(text),
+                        ContentPart::ToolUse { input, .. } => {
+                            token_counter.count_str(&input.to_string())
+                        }
+                        ContentPart::ToolResult { content, .. } => {
+                            token_counter.count_str(content)
+                        }
+                        _ => 0,
+                    })
+                    .sum::<u32>()
+            })
+            .sum();
+
+        // Get thresholds (needs token_state_machine)
+        let thresholds = ctx.token_state_machine.as_ref().unwrap().thresholds();
+        let should_observe = thresholds.should_observe(message_tokens);
+        
+        // Update token state machine
+        ctx.token_state_machine.as_mut().unwrap().update_message_tokens(message_tokens);
+
+        // Check if observation should be triggered
+        if should_observe {
+            debug!("OM: Observer threshold reached ({} tokens)", message_tokens);
+            
+            // Get messages to observe (read memory_state)
+            let (start, end) = ctx.memory_state.as_ref().unwrap()
+                .unobserved_message_range
+                .unwrap_or((0, ctx.messages.len()));
+            
+            if start < end && start < ctx.messages.len() {
+                let messages_to_observe: Vec<_> = ctx.messages[start..end.min(ctx.messages.len())]
+                    .to_vec();
+                
+                // Run Observer (release mutable borrow during async call)
+                ctx.token_state_machine.as_mut().unwrap().start_observer();
+                
+                let provider = ctx.provider.clone();
+                let observer = ObserverAgent::new(ObserverConfig::default(), provider);
+                
+                match observer.run(&messages_to_observe, Utc::now()).await {
+                    Ok(result) => {
+                        let obs_count = result.observations.len();
+                        let compression = result.compression_ratio();
+                        
+                        info!(
+                            "OM: Observer completed: {} messages → {} observations ({:.1}x compression)",
+                            end - start, obs_count, compression
+                        );
+                        
+                        // Update memory state with new observations
+                        {
+                            let memory_state = ctx.memory_state.as_mut().unwrap();
+                            memory_state.add_pending_batch(result.observations);
+                            memory_state.commit_observations(end - start);
+                        }
+                        
+                        // CRITICAL: Emit new messages for persistence BEFORE draining!
+                        // The runner needs these messages for session persistence.
+                        // After the drain, ctx.messages will be empty/reduced.
+                        {
+                            let new_messages: Vec<_> = ctx.messages
+                                .iter()
+                                .skip(ctx.messages_count_at_start)
+                                .cloned()
+                                .collect();
+                            
+                            if !new_messages.is_empty() {
+                                info!(
+                                    "OM: Emitting {} new messages for persistence before drain",
+                                    new_messages.len()
+                                );
+                                ctx.send_update(LoopUpdate::MessagesForPersistence(new_messages));
+                            }
+                        }
+                        
+                        // Remove observed messages from context, keeping recent ones.
+                        // This is the key step that bounds the context window!
+                        // We keep the system message (if any) and the most recent messages
+                        // that weren't observed yet.
+                        let messages_to_remove = end - start;
+                        if messages_to_remove > 0 && obs_count > 0 {
+                            // Find system message if present (always at index 0)
+                            let has_system = ctx.messages.first()
+                                .map(|m| matches!(m.role, wonopcode_provider::Role::System))
+                                .unwrap_or(false);
+                            
+                            // Determine how many recent messages to keep (unobserved)
+                            let _keep_recent = ctx.messages.len().saturating_sub(end);
+                            
+                            if has_system {
+                                // Keep system message, remove observed, keep recent
+                                // [system][observed...][recent...] -> [system][recent...]
+                                let system_msg = ctx.messages.remove(0);
+                                ctx.messages.drain(0..messages_to_remove.min(ctx.messages.len()));
+                                ctx.messages.insert(0, system_msg);
+                            } else {
+                                // No system message, just remove observed
+                                ctx.messages.drain(start..end.min(ctx.messages.len()));
+                            }
+                            
+                            info!(
+                                "OM: Removed {} observed messages, {} messages remain",
+                                messages_to_remove, ctx.messages.len()
+                            );
+                            
+                            // Reset unobserved range to track all remaining messages
+                            // (excluding system message at index 0 if present)
+                            let new_start = if has_system { 1 } else { 0 };
+                            ctx.memory_state.as_mut().unwrap().unobserved_message_range = 
+                                Some((new_start, ctx.messages.len()));
+                        }
+                        
+                        // Complete observer in state machine
+                        let observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
+                        ctx.token_state_machine.as_mut().unwrap()
+                            .complete_observer(message_tokens, observation_tokens);
+                        
+                        // Send OM snapshot to UI
+                        let snapshot = Self::create_om_snapshot(ctx);
+                        let total_obs = snapshot.observations.len();
+                        info!(
+                            "🧠 [StandardLoop] Sending OM update after observer: {} observations",
+                            total_obs
+                        );
+                        ctx.send_update(LoopUpdate::ObservationalMemoryUpdate(snapshot));
+                        
+                        // Also send a status message for the chat indicator
+                        ctx.send_update(LoopUpdate::Status(format!(
+                            "Memory updated: {} observations", total_obs
+                        )));
+                        
+                        any_triggered = true;
+                    }
+                    Err(e) => {
+                        warn!("OM: Observer failed: {:?}", e);
+                    }
+                }
+            }
+        }
+
+        // Check if reflection should be triggered
+        let observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
+        let obs_count = ctx.memory_state.as_ref().unwrap().observations.len();
+        let should_reflect = ctx.token_state_machine.as_ref().unwrap()
+            .thresholds().should_reflect(observation_tokens) && obs_count >= 10;
+        
+        if should_reflect {
+            debug!("OM: Reflector threshold reached ({} tokens)", observation_tokens);
+            
+            ctx.token_state_machine.as_mut().unwrap().start_reflector();
+            
+            let observations_to_reflect = ctx.memory_state.as_ref().unwrap().observations.clone();
+            let provider = ctx.provider.clone();
+            let reflector = ReflectorAgent::new(ReflectorConfig::default(), provider);
+            
+            match reflector.run(&observations_to_reflect, Utc::now()).await {
+                Ok(result) => {
+                    info!(
+                        "OM: Reflector completed: {} → {} observations ({:.0}% reduction)",
+                        result.input_count,
+                        result.output_count,
+                        (1.0 - result.compression_ratio()) * 100.0
+                    );
+                    
+                    // Update memory state with restructured observations
+                    let reflection_stats = wonopcode_observational_memory::ReflectionStats {
+                        merged: result.merged_count as u32,
+                        dropped: result.dropped_count as u32,
+                        meta_added: result.patterns.len() as u32,
+                    };
+                    ctx.memory_state.as_mut().unwrap()
+                        .commit_reflection(result.observations, reflection_stats);
+                    
+                    // Complete reflector in state machine
+                    let new_observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
+                    ctx.token_state_machine.as_mut().unwrap()
+                        .complete_reflector(new_observation_tokens);
+                    
+                    // Send OM snapshot to UI after reflection
+                    let snapshot = Self::create_om_snapshot(ctx);
+                    info!(
+                        "🧠 [StandardLoop] Sending OM update after reflector: {} observations",
+                        snapshot.observations.len()
+                    );
+                    ctx.send_update(LoopUpdate::ObservationalMemoryUpdate(snapshot));
+                    
+                    any_triggered = true;
+                }
+                Err(e) => {
+                    warn!("OM: Reflector failed: {:?}", e);
+                }
+            }
+        }
+
+        Ok(any_triggered)
     }
 }
 
@@ -235,11 +531,47 @@ impl AgentLoop for StandardLoop {
 
             debug!(iteration, "Starting loop iteration");
 
-            // Build generation options with optional RAG context
-            let system_prompt = match (&ctx.config.system_prompt, &memory_context) {
-                (Some(base), Some(rag)) if iteration == 1 => Some(format!("{}{}", base, rag)),
-                (None, Some(rag)) if iteration == 1 => Some(rag.clone()),
-                (system, _) => system.clone(),
+            // Build generation options with optional RAG context and OM observations
+            // 
+            // The prompt structure for optimal cache hits:
+            // 1. System prompt (static) - cached
+            // 2. Observations (semi-static, changes after Observer runs) - cached  
+            // 3. RAG context (changes per query) - not cached
+            // 4. Messages (changes every turn) - not cached
+            let system_prompt = {
+                let mut parts: Vec<String> = Vec::new();
+                
+                // 1. Base system prompt
+                if let Some(base) = &ctx.config.system_prompt {
+                    parts.push(base.clone());
+                }
+                
+                // 2. Observational Memory observations (if enabled and have observations)
+                if ctx.is_om_ready() {
+                    let observations_block = ctx.memory_state.as_ref().unwrap().format_for_prompt();
+                    if !observations_block.is_empty() {
+                        let obs_count = ctx.memory_state.as_ref().unwrap().observations.len();
+                        let obs_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
+                        debug!(
+                            "OM: Injecting {} observations ({} tokens) into system prompt",
+                            obs_count, obs_tokens
+                        );
+                        parts.push(observations_block);
+                    }
+                }
+                
+                // 3. RAG context (only on first iteration)
+                if iteration == 1 {
+                    if let Some(rag) = &memory_context {
+                        parts.push(rag.clone());
+                    }
+                }
+                
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join("\n\n"))
+                }
             };
 
             let options = GenerateOptions {
@@ -679,6 +1011,14 @@ impl AgentLoop for StandardLoop {
             response_len = final_text.len(),
             "Prompt execution complete"
         );
+
+        // Run Observational Memory compression if enabled
+        if ctx.is_om_ready() {
+            if let Err(e) = Self::maybe_observe_and_reflect(ctx).await {
+                warn!("OM: Error during observation/reflection: {:?}", e);
+                // Don't fail the prompt, just log the error
+            }
+        }
 
         // Send completion signal to TUI to exit "thinking" state
         ctx.send_update(LoopUpdate::ResponseComplete {

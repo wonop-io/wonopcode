@@ -1,0 +1,31 @@
+[package]
+name = "wonopcode-observational-memory"
+version = "0.1.0"
+edition = "2021"
+description = "Observational Memory for Wonop Code - context compression via event-level observations"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/wonop-io/wonop-ng-2"
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Async
+futures = "0.3"
+tokio = { version = "1", features = ["sync"] }
+
+# Logging
+tracing = "0.1"
+
+# LLM Provider (for Observer/Reflector agents)
+wonopcode-provider = { path = "../wonopcode-provider" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

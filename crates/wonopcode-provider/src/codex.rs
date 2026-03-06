@@ -668,7 +668,7 @@ impl LanguageModel for CodexProvider {
 /// Codex model definitions.
 pub mod models {
     use super::*;
-    use crate::model::{ModelCapabilities, ModelCost, ModelLimit, ModelStatus, ModalitySupport};
+    use crate::model::{ModelCapabilities, ModelCost, ModelLimit, ModelStatus, ModalitySupport, TokenizerInfo};
 
     // ========================================================================
     // GPT-5.x Codex Family (Current - Recommended)
@@ -702,6 +702,10 @@ pub mod models {
                 output: 128000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -732,6 +736,10 @@ pub mod models {
                 output: 128000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -762,6 +770,10 @@ pub mod models {
                 output: 100000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -792,6 +804,10 @@ pub mod models {
                 output: 150000, // Extended output for long tasks
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -822,6 +838,10 @@ pub mod models {
                 output: 100000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -852,6 +872,10 @@ pub mod models {
                 output: 64000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -887,6 +911,10 @@ pub mod models {
                 output: 100000,
             },
             status: ModelStatus::Deprecated,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -929,6 +957,10 @@ pub mod models {
                 output: 100000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -959,6 +991,10 @@ pub mod models {
                 output: 100000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 

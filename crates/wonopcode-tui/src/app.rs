@@ -488,6 +488,52 @@ pub enum AppUpdate {
         /// Phase: "summarizing" or "combining".
         phase: String,
     },
+    /// Observational Memory state update.
+    ObservationalMemoryUpdate(ObservationalMemoryStateUpdate),
+}
+
+/// Observational Memory state update for UI.
+#[derive(Debug, Clone)]
+pub struct ObservationalMemoryStateUpdate {
+    /// Whether OM is enabled.
+    pub enabled: bool,
+    /// Current observations.
+    pub observations: Vec<ObservationUpdate>,
+    /// Token count for observations.
+    pub observation_tokens: u32,
+    /// Reflector token threshold.
+    pub reflector_threshold: u32,
+    /// Token count for unobserved messages.
+    pub message_tokens: u32,
+    /// Observer token threshold.
+    pub observer_threshold: u32,
+    /// System prompt token estimate.
+    pub system_tokens: u32,
+    /// Total observations created.
+    pub total_observations: u32,
+    /// Number of reflections performed.
+    pub reflections_count: u32,
+    /// Average compression ratio achieved.
+    pub avg_compression: f32,
+    /// Estimated cost savings from caching.
+    pub cache_savings: f64,
+}
+
+/// Single observation update for UI.
+#[derive(Debug, Clone)]
+pub struct ObservationUpdate {
+    /// Unique identifier for this observation.
+    pub id: String,
+    /// Priority level: "high", "medium", or "low".
+    pub priority: String,
+    /// Timestamp when the observation was created.
+    pub timestamp: String,
+    /// Content of the observation.
+    pub content: String,
+    /// Child observations (hierarchical structure).
+    pub children: Vec<ObservationUpdate>,
+    /// Whether this observation is pinned by the user.
+    pub pinned: bool,
 }
 
 /// Git status update from the runner.
@@ -3760,6 +3806,9 @@ async function fetchUserData(userId) {
                 phase: _,
             } => {
                 // TUI doesn't have a visible progress indicator yet
+            }
+            AppUpdate::ObservationalMemoryUpdate(_) => {
+                // TUI doesn't have an OM memory panel - handled by Desktop UI
             }
         }
     }
