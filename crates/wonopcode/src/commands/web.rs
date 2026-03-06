@@ -288,15 +288,9 @@ pub async fn create_mcp_http_state(
     // Initialize file time tracker
     let file_time = Arc::new(FileTimeState::new());
 
-    // Use ACE-backed todo store (todos are stored as ACE Task artifacts)
-    // Create tool registry with all tools
-    // Note: Memory tools are included in with_builtins() and access the service
-    // through ctx.memory_service at execution time (same pattern as ticket tools)
-    // ACE-backed todoread/todowrite are included in with_builtins()
-    let mut tools = ToolRegistry::with_builtins();
-    tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-    tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-    tools.register(Arc::new(wonopcode_tools::lsp::LspTool::new()));
+    // Create tool registry with execute_typescript only
+    // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are accessible via wonop.* API
+    let tools = ToolRegistry::with_builtins();
 
     // Create memory service and initialize workstream
     // The service is passed to ToolExecutorWrapper so tools can access it via ctx.memory_service

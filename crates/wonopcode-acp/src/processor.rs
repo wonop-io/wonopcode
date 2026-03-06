@@ -64,11 +64,9 @@ impl Processor {
         // Create provider
         let provider = create_provider(&config)?;
 
-        // Create tool registry
-        // ACE-backed todoread/todowrite are included in with_builtins()
-        let mut tools = ToolRegistry::with_builtins();
-        tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-        tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
+        // Create tool registry with execute_typescript only
+        // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are accessible via wonop.* API
+        let tools = ToolRegistry::with_builtins();
 
         Ok(Self {
             config,

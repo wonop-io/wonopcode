@@ -671,14 +671,10 @@ impl Runner {
         // Create shared LSP client for status reporting
         let lsp_client = Arc::new(wonopcode_lsp::LspClient::with_defaults());
 
-        // Create tool registry with all tools
-        // Note: with_builtins() includes ACE-backed todoread/todowrite and other ACE tools
+        // Create tool registry with execute_typescript only
+        // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are now accessible
+        // through the wonop.* API inside TypeScript code
         let mut tools = ToolRegistry::with_builtins();
-        tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-        tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-        tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
-            lsp_client.clone(),
-        )));
         tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
         tools.register(Arc::new(
             wonopcode_tools::plan_mode::EnterPlanModeTool::new(),
@@ -1143,13 +1139,8 @@ impl Runner {
             }
 
             // We need a mutable tools registry - create a new one with MCP tools
-            // Note: with_builtins() includes ACE-backed todoread/todowrite and other ACE tools
+            // All standard tools (bash, webfetch, lsp) are now accessible via wonop.* API
             let mut new_tools = ToolRegistry::with_builtins();
-            new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-            new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-            new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
-                self.lsp_client.clone(),
-            )));
             new_tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
             new_tools.register(Arc::new(
                 wonopcode_tools::plan_mode::EnterPlanModeTool::new(),

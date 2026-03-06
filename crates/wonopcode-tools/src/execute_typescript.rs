@@ -53,10 +53,13 @@ The code runs in an isolated V8 sandbox with no network access.
 
 The `wonop` global object provides:
 
-- `wonop.read_file({ path: string })` - Read a file (path relative to project root)
-- `wonop.write_file({ path: string, content: string })` - Write a file
-- `wonop.list_dir({ path: string })` - List directory contents
-- `wonop.shell_exec({ command: string, args: string[], cwd?: string })` - Run shell command
+- `wonop.fs.read(path, options?)` - Read a file (path relative to project root)
+- `wonop.fs.write(path, content)` - Write a file
+- `wonop.fs.list(dir?, options?)` - List directory contents
+- `wonop.fs.glob(pattern, dir?)` - Find files by pattern
+- `wonop.fs.grep(pattern, options?)` - Search file contents
+- `wonop.fs.edit(path, oldText, newText, options?)` - Edit file
+- `wonop.exec(command, args?, options?)` - Run shell command
 
 ## Rules
 
@@ -69,7 +72,7 @@ The `wonop` global object provides:
 ## Example
 
 ```typescript
-const result = await wonop.read_file({ path: "src/main.rs" });
+const result = await wonop.fs.read("src/main.rs");
 const lines = result.content.split("\n");
 console.log(`File has ${lines.length} lines`);
 ```"#
@@ -475,7 +478,7 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        const result = await wonop.read_file({ path: "test.txt" });
+                        const result = await wonop.fs.read("test.txt");
                         console.log(result.content);
                     "#,
                     "description": "Read test file"
@@ -512,7 +515,7 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        await wonop.write_file({ path: "output.txt", content: "Created by TypeScript" });
+                        await wonop.fs.write("output.txt", "Created by TypeScript");
                         console.log("File written");
                     "#,
                     "description": "Write test file"
@@ -554,8 +557,8 @@ mod tests {
             .execute(
                 json!({
                     "code": r#"
-                        const result = await wonop.list_dir({ path: "." });
-                        console.log(result.entries.join(", "));
+                        const result = await wonop.fs.list(".");
+                        console.log(result.entries.map(e => e.name).join(", "));
                     "#,
                     "description": "List directory"
                 }),

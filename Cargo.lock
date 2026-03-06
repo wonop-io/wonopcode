@@ -8194,6 +8194,7 @@ dependencies = [
  "deno_core",
  "deno_error",
  "glob",
+ "globset",
  "ignore",
  "regex",
  "serde",
