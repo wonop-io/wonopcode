@@ -1803,6 +1803,10 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::CompactionNotNeeded => {
                     continue;
                 }
+                // OM state updates are handled internally for TUI display
+                wonopcode_tui::AppUpdate::ObservationalMemoryUpdate(_) => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);

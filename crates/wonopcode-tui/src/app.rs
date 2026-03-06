@@ -517,6 +517,10 @@ pub struct ObservationalMemoryStateUpdate {
     pub avg_compression: f32,
     /// Estimated cost savings from caching.
     pub cache_savings: f64,
+    /// Whether observations were loaded from a previous session.
+    pub loaded_from_previous_session: bool,
+    /// When the previous session was saved (human-readable).
+    pub loaded_session_date: Option<String>,
 }
 
 /// Single observation update for UI.

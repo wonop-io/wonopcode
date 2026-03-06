@@ -16,7 +16,7 @@ use tracing::{debug, error, info, trace, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
     LoopUpdate, MemoryState, ObservationalMemoryConfig, PermissionCheckRequest, PermissionChecker,
-    TokenStateMachine,
+    TokenStateMachine, persistence::ObservationPersistence,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
@@ -717,10 +717,34 @@ impl Runner {
                 context_limit,
                 observer_ratio = om_config.thresholds.observer_ratio,
                 reflector_ratio = om_config.thresholds.reflector_ratio,
+                project_dir = ?om_config.project_dir,
                 "Observational Memory enabled"
             );
             let session_id = format!("session-{}", uuid::Uuid::new_v4());
-            let memory_state = MemoryState::new(session_id, context_limit);
+            
+            // Try to load observations from disk if project_dir is configured
+            let memory_state = if let Some(ref project_dir) = om_config.project_dir {
+                let persistence = ObservationPersistence::new(project_dir);
+                match persistence.load_into_state(&session_id, context_limit) {
+                    Ok((state, loaded_date)) => {
+                        if state.loaded_from_previous_session {
+                            info!(
+                                observations = state.observations.len(),
+                                loaded_date = ?loaded_date,
+                                "Loaded observations from previous session"
+                            );
+                        }
+                        state
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to load observations from disk, starting fresh");
+                        MemoryState::new(session_id, context_limit)
+                    }
+                }
+            } else {
+                MemoryState::new(session_id, context_limit)
+            };
+            
             let token_state_machine =
                 TokenStateMachine::from_config(&om_config.thresholds, context_limit);
             (
@@ -1756,6 +1780,8 @@ impl Runner {
                                 reflections_count: snapshot.reflections_count,
                                 avg_compression: snapshot.avg_compression,
                                 cache_savings: snapshot.cache_savings,
+                                loaded_from_previous_session: snapshot.loaded_from_previous_session,
+                                loaded_session_date: snapshot.loaded_session_date.clone(),
                             }
                         )
                     }
@@ -3396,6 +3422,29 @@ impl Runner {
                 }
                 AppAction::GitPull => {
                     self.handle_git_pull(&update_tx).await;
+                }
+            }
+        }
+
+        // Save Observational Memory state to disk before shutdown
+        if self.om_config.enabled {
+            if let Some(ref project_dir) = self.om_config.project_dir {
+                if let Some(ref memory_state) = self.memory_state {
+                    let state = memory_state.read().await;
+                    if !state.observations.is_empty() {
+                        let persistence = ObservationPersistence::new(project_dir);
+                        match persistence.save(&state) {
+                            Ok(()) => {
+                                info!(
+                                    observations = state.observations.len(),
+                                    "Saved observations for cross-session memory"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to save observations to disk");
+                            }
+                        }
+                    }
                 }
             }
         }

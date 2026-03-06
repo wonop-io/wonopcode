@@ -100,6 +100,32 @@ impl ThresholdConfig {
         }
     }
     
+    /// Create a config with explicit token thresholds.
+    /// 
+    /// This converts absolute token values to ratios based on a reference context of 200k tokens.
+    /// Use this when you want to test with specific token counts.
+    /// 
+    /// # Arguments
+    /// * `observer_tokens` - Trigger Observer when unobserved messages reach this count
+    /// * `reflector_tokens` - Trigger Reflector when observations reach this count
+    pub fn with_absolute_thresholds(observer_tokens: u32, reflector_tokens: u32) -> Self {
+        // Reference context size (200k tokens, typical for Claude models)
+        const REFERENCE_CONTEXT: f32 = 200_000.0;
+        
+        let observer_ratio = observer_tokens as f32 / REFERENCE_CONTEXT;
+        let reflector_ratio = reflector_tokens as f32 / REFERENCE_CONTEXT;
+        // Set observation budget to be slightly higher than reflector threshold
+        let observation_budget_ratio = reflector_ratio * 1.1;
+        
+        Self {
+            observer_ratio,
+            observation_budget_ratio,
+            reflector_ratio,
+            minimum_observer_tokens: observer_tokens.min(1000), // Don't exceed the threshold as minimum
+            ..Default::default()
+        }
+    }
+    
     /// Calculate absolute thresholds from a context limit.
     pub fn compute_thresholds(&self, context_limit: u32) -> ComputedThresholds {
         let observer_threshold = (context_limit as f32 * self.observer_ratio) as u32;

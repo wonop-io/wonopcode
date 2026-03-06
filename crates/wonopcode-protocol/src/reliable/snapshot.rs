@@ -283,6 +283,14 @@ pub struct ObservationalMemorySnapshot {
     /// Estimated cost savings from prompt caching.
     #[serde(default)]
     pub cache_savings: f64,
+
+    /// Whether observations were loaded from a previous session.
+    #[serde(default)]
+    pub loaded_from_previous_session: bool,
+
+    /// When the previous session was saved (human-readable, e.g., "March 2nd" or "2 days ago").
+    #[serde(default)]
+    pub loaded_session_date: Option<String>,
 }
 
 /// Single observation in the OM system.

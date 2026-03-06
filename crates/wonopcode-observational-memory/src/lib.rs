@@ -54,6 +54,7 @@ mod memory_state;
 mod observation;
 mod observation_parser;
 mod observer;
+pub mod persistence;
 mod reflector;
 mod threshold;
 mod token_counter;
@@ -89,6 +90,9 @@ pub struct ObservationalMemoryConfig {
     pub observer: ObserverConfig,
     /// Reflector configuration.
     pub reflector: ReflectorConfig,
+    /// Project directory for cross-session persistence.
+    /// If set, observations are saved to .wonopcode/memory/ when the session ends.
+    pub project_dir: Option<std::path::PathBuf>,
 }
 
 impl ObservationalMemoryConfig {
@@ -99,6 +103,15 @@ impl ObservationalMemoryConfig {
             ..Default::default()
         }
     }
+    
+    /// Create a new config with OM enabled and cross-session persistence.
+    pub fn enabled_with_persistence(project_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            enabled: true,
+            project_dir: Some(project_dir.into()),
+            ..Default::default()
+        }
+    }
 
     /// Create a new config with OM disabled (uses legacy compaction).
     pub fn disabled() -> Self {
@@ -106,6 +119,44 @@ impl ObservationalMemoryConfig {
             enabled: false,
             ..Default::default()
         }
+    }
+    
+    /// Set the project directory for cross-session persistence.
+    pub fn with_project_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.project_dir = Some(dir.into());
+        self
+    }
+    
+    /// Set custom token thresholds for Observer and Reflector.
+    /// 
+    /// # Arguments
+    /// * `observer_tokens` - Trigger Observer when unobserved messages reach this count
+    /// * `reflector_tokens` - Trigger Reflector when observations reach this count
+    pub fn with_thresholds(mut self, observer_tokens: u32, reflector_tokens: u32) -> Self {
+        self.thresholds = ThresholdConfig::with_absolute_thresholds(observer_tokens, reflector_tokens);
+        self
+    }
+    
+    /// Set custom token thresholds from optional values.
+    /// Uses default thresholds for any None values.
+    pub fn with_optional_thresholds(mut self, observer_tokens: Option<u32>, reflector_tokens: Option<u32>) -> Self {
+        match (observer_tokens, reflector_tokens) {
+            (Some(obs), Some(ref_)) => {
+                self.thresholds = ThresholdConfig::with_absolute_thresholds(obs, ref_);
+            }
+            (Some(obs), None) => {
+                // Use custom observer threshold with default reflector
+                self.thresholds = ThresholdConfig::with_absolute_thresholds(obs, 40_000);
+            }
+            (None, Some(ref_)) => {
+                // Use default observer threshold with custom reflector  
+                self.thresholds = ThresholdConfig::with_absolute_thresholds(30_000, ref_);
+            }
+            (None, None) => {
+                // Keep defaults
+            }
+        }
+        self
     }
 }
 

@@ -174,6 +174,20 @@ impl StandardLoop {
             1.0
         };
 
+        // Get cross-session info from memory state
+        let (loaded_from_previous_session, loaded_session_date) = if let Some(ref ms) = ctx.memory_state {
+            let date = if ms.loaded_from_previous_session && !ms.observations.is_empty() {
+                // Format the oldest observation date as the session date
+                ms.observations.first()
+                    .map(|o| o.observation_date.format("%B %d").to_string())
+            } else {
+                None
+            };
+            (ms.loaded_from_previous_session, date)
+        } else {
+            (false, None)
+        };
+
         ObservationalMemoryStateSnapshot {
             enabled: ctx.om_enabled,
             observations,
@@ -186,6 +200,8 @@ impl StandardLoop {
             reflections_count: stats.reflections_run,
             avg_compression,
             cache_savings: 0.0,
+            loaded_from_previous_session,
+            loaded_session_date,
         }
     }
 

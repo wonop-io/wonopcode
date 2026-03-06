@@ -69,4 +69,6 @@ pub use wonopcode_observational_memory::{
     ComputedThresholds, TokenState, TokenStateMachine,
     // Token counting
     TokenCounter, TokenCounterConfig,
+    // Persistence (re-export the module for full access)
+    persistence,
 };

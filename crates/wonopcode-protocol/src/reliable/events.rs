@@ -276,6 +276,12 @@ pub enum WorkstreamEventData {
         avg_compression: f32,
         /// Estimated cost savings from caching.
         cache_savings: f64,
+        /// Whether observations were loaded from a previous session.
+        #[serde(default)]
+        loaded_from_previous_session: bool,
+        /// When the previous session was saved (human-readable).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        loaded_session_date: Option<String>,
     },
 }
 
