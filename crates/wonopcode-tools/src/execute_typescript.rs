@@ -12,6 +12,10 @@
 
 use crate::ace::FileAceService;
 use crate::hms::HmsServiceAdapter;
+use crate::ticket::{
+    TicketDetails, TicketError, TicketFilter, TicketStatus, TicketSummary, NewTicket,
+    TicketService as ToolsTicketService,
+};
 use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult, TsPermissionRequest};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -20,7 +24,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 use wonopcode_codemode::{
     create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ServiceHandles,
-    ToolDefinition,
+    NewTicket as CodemodeNewTicket, Ticket as CodemodeTicket, TicketFilter as CodemodeTicketFilter,
+    TicketService as CodemodeTicketService, TicketStatus as CodemodeTicketStatus,
+    TrackerInfo as CodemodeTrackerInfo, ServiceError, ServiceResult, ToolDefinition,
 };
 
 /// Default timeout for script execution in seconds.
@@ -106,6 +112,12 @@ impl Tool for ExecuteTypescriptTool {
             .clone()
             .unwrap_or_else(|| FileAceService::shared(ctx.root_dir.clone()));
         let mut services = ServiceHandles::new().with_ace(ace_service);
+
+        // Wire up ticket service if available (via adapter to bridge trait types)
+        if let Some(ticket_service) = &ctx.ticket_service {
+            let adapter = TicketServiceAdapter::new(ticket_service.clone());
+            services = services.with_tickets(Arc::new(adapter));
+        }
 
         // Wire up HMS service if available
         if let Some(hms_service) = &ctx.hms_service {
@@ -226,6 +238,141 @@ fn truncate_description(desc: &str) -> String {
         format!("{}...", &first_line[..57])
     } else {
         first_line.to_string()
+    }
+}
+
+// ============================================================================
+// TicketServiceAdapter: bridges wonopcode_tools::TicketService -> wonopcode_codemode::TicketService
+// ============================================================================
+
+struct TicketServiceAdapter {
+    service: Arc<dyn ToolsTicketService>,
+}
+
+impl TicketServiceAdapter {
+    fn new(service: Arc<dyn ToolsTicketService>) -> Self {
+        Self { service }
+    }
+
+    fn convert_error(err: TicketError) -> ServiceError {
+        match &err {
+            TicketError::NoTrackers => ServiceError::new("NO_TRACKERS", err.to_string()),
+            TicketError::TrackerNotFound(_) => ServiceError::new("TRACKER_NOT_FOUND", err.to_string()),
+            TicketError::TicketNotFound(_) => ServiceError::new("TICKET_NOT_FOUND", err.to_string()),
+            TicketError::TrackerError(_) => ServiceError::new("TRACKER_ERROR", err.to_string()),
+            TicketError::ValidationError(_) => ServiceError::new("VALIDATION_ERROR", err.to_string()),
+        }
+    }
+
+    fn status_to_tools(status: &CodemodeTicketStatus) -> TicketStatus {
+        match status {
+            CodemodeTicketStatus::Open => TicketStatus::Open,
+            CodemodeTicketStatus::InProgress => TicketStatus::InProgress,
+            CodemodeTicketStatus::Review => TicketStatus::Review,
+            CodemodeTicketStatus::Closed => TicketStatus::Closed,
+        }
+    }
+
+    fn status_from_tools(status: &TicketStatus) -> CodemodeTicketStatus {
+        match status {
+            TicketStatus::Open => CodemodeTicketStatus::Open,
+            TicketStatus::InProgress => CodemodeTicketStatus::InProgress,
+            TicketStatus::Review => CodemodeTicketStatus::Review,
+            TicketStatus::Closed => CodemodeTicketStatus::Closed,
+            TicketStatus::Custom(_) => CodemodeTicketStatus::Open,
+        }
+    }
+
+    fn summary_to_codemode(s: TicketSummary) -> CodemodeTicket {
+        CodemodeTicket {
+            id: s.id,
+            title: s.title,
+            description: None,
+            status: Self::status_from_tools(&s.status),
+            assignee: s.assignee.map(|u| u.username),
+            labels: s.labels,
+            tracker_id: None,
+        }
+    }
+
+    fn details_to_codemode(d: TicketDetails) -> CodemodeTicket {
+        CodemodeTicket {
+            id: d.id,
+            title: d.title,
+            description: d.description,
+            status: Self::status_from_tools(&d.status),
+            assignee: d.assignee.map(|u| u.username),
+            labels: d.labels,
+            tracker_id: None,
+        }
+    }
+}
+
+#[async_trait]
+impl CodemodeTicketService for TicketServiceAdapter {
+    async fn list_trackers(&self) -> ServiceResult<Vec<CodemodeTrackerInfo>> {
+        self.service
+            .list_trackers()
+            .await
+            .map(|ts| ts.into_iter().map(|t| CodemodeTrackerInfo {
+                id: t.id, name: t.name, tracker_type: t.tracker_type, enabled: t.enabled,
+            }).collect())
+            .map_err(Self::convert_error)
+    }
+
+    async fn list_tickets(&self, filter: CodemodeTicketFilter) -> ServiceResult<Vec<CodemodeTicket>> {
+        let f = TicketFilter {
+            status: filter.status.map(|ss| ss.iter().map(Self::status_to_tools).collect()),
+            assignee: filter.assignee,
+            labels: filter.labels.unwrap_or_default(),
+            limit: filter.limit.unwrap_or(50),
+            tracker_id: filter.tracker_id,
+        };
+        self.service.list_tickets(f).await
+            .map(|ts| ts.into_iter().map(Self::summary_to_codemode).collect())
+            .map_err(Self::convert_error)
+    }
+
+    async fn read_ticket(&self, ticket_id: &str) -> ServiceResult<CodemodeTicket> {
+        self.service.get_ticket(ticket_id, true, false).await
+            .map(Self::details_to_codemode)
+            .map_err(Self::convert_error)
+    }
+
+    async fn create_ticket(&self, ticket: CodemodeNewTicket) -> ServiceResult<CodemodeTicket> {
+        let new = NewTicket {
+            title: ticket.title,
+            description: ticket.description,
+            tracker_id: ticket.tracker_id,
+            assignee: ticket.assignee,
+            labels: ticket.labels.unwrap_or_default(),
+            status: None,
+        };
+        self.service.create_ticket(new).await
+            .map(|c| CodemodeTicket {
+                id: c.id, title: c.title, description: None,
+                status: CodemodeTicketStatus::Open, assignee: None,
+                labels: Vec::new(), tracker_id: None,
+            })
+            .map_err(Self::convert_error)
+    }
+
+    async fn search_tickets(&self, query: &str, limit: Option<usize>) -> ServiceResult<Vec<CodemodeTicket>> {
+        self.service.search_tickets(query, limit.unwrap_or(20), None).await
+            .map(|ts| ts.into_iter().map(Self::summary_to_codemode).collect())
+            .map_err(Self::convert_error)
+    }
+
+    async fn add_labels(&self, ticket_id: &str, labels: Vec<String>) -> ServiceResult<CodemodeTicket> {
+        self.service.add_labels(ticket_id, labels).await
+            .map(Self::details_to_codemode)
+            .map_err(Self::convert_error)
+    }
+
+    async fn remove_labels(&self, ticket_id: &str, labels: Vec<String>) -> ServiceResult<CodemodeTicket> {
+        self.service.remove_labels(ticket_id, labels).await
+            .map(Self::details_to_codemode)
+            .map_err(Self::convert_error)
     }
 }
 
