@@ -422,7 +422,11 @@ impl ArtifactStore {
         std::fs::create_dir_all(&target_dir)?;
 
         // New path in specs
-        let new_path = target_dir.join(artifact.path.file_name().unwrap());
+        let file_name = artifact
+            .path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("Artifact path has no file name: {:?}", artifact.path))?;
+        let new_path = target_dir.join(file_name);
 
         // Move file
         std::fs::rename(&artifact.path, &new_path)?;
