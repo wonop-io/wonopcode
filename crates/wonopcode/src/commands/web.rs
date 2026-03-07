@@ -18,6 +18,8 @@ struct ToolExecutorWrapper {
     cancel: tokio_util::sync::CancellationToken,
     permissions: Arc<wonopcode_core::permission::PermissionManager>,
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    /// TypeScript permission checker for execute_typescript tool
+    ts_permission_checker: Arc<dyn wonopcode_tools::TsPermissionChecker>,
 }
 
 #[async_trait::async_trait]
@@ -121,7 +123,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             memory_service: self.memory_service.clone(),  // Share memory service with tools
             ace_service: None,                            // ACE service created lazily from root_dir
             hms_service: None,                            // No HMS service in MCP HTTP
-            permission_checker: None,                     // No permission checker in MCP HTTP
+            permission_checker: Some(self.ts_permission_checker.clone()),
             workstream_ticket_id: None,                   // No workstream in MCP HTTP
             workstream_default_tracker_id: None,          // No workstream tracker in MCP HTTP
         };
@@ -321,6 +323,12 @@ pub async fn create_mcp_http_state(
     let mut mcp_tools = std::collections::HashMap::new();
     let cancel = CancellationToken::new();
 
+    // Create TypeScript permission checker adapter for execute_typescript tool
+    // This allows TypeScript code to request permissions from the user
+    let ts_permission_checker: Arc<dyn wonopcode_tools::TsPermissionChecker> = Arc::new(
+        wonopcode_runner::TsPermissionCheckerAdapter::new(permission_manager.clone()),
+    );
+
     for tool in tools.all() {
         let tool_clone = tool.clone();
         let snapshot = snapshot_store.clone();
@@ -328,6 +336,7 @@ pub async fn create_mcp_http_state(
         let cancel_clone = cancel.clone();
         let perm = permission_manager.clone();
         let mem_svc = memory_service.clone();
+        let ts_perm = ts_permission_checker.clone();
 
         let executor = ToolExecutorWrapper {
             tool: tool_clone,
@@ -336,6 +345,7 @@ pub async fn create_mcp_http_state(
             cancel: cancel_clone,
             permissions: perm,
             memory_service: mem_svc,
+            ts_permission_checker: ts_perm,
         };
 
         mcp_tools.insert(
