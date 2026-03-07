@@ -23,6 +23,7 @@
 //! ```
 
 pub mod config;
+pub mod service;
 pub mod state;
 pub mod store;
 pub mod tools;
@@ -30,6 +31,7 @@ pub mod types;
 
 // Re-export commonly used types
 pub use config::{AceConfig, WonopCodeConfig};
+pub use service::{FileAceService, SharedAceService};
 pub use state::WorkstreamState;
 pub use store::ArtifactStore;
 pub use types::{

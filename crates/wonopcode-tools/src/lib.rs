@@ -38,7 +38,8 @@ pub use registry::ToolRegistry;
 // Re-export ACE tools for convenience
 pub use ace::{
     AceCreateArtifactTool, AceReadArtifactTool, AceSessionLogTool, AceSubmitCheckpointTool,
-    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool, FileAceService,
+    SharedAceService,
 };
 pub use ace_todo_store::AceTodoStore;
 
@@ -147,6 +148,8 @@ pub struct ToolContext {
     pub ticket_service: Option<Arc<dyn TicketService>>,
     /// Optional memory service for memory tools.
     pub memory_service: Option<SharedMemoryService>,
+    /// Optional ACE service for planning/workflow tools.
+    pub ace_service: Option<SharedAceService>,
     /// Optional permission checker for TypeScript tools.
     /// When set, TypeScript code can request user permission before performing actions.
     pub permission_checker: Option<Arc<dyn TsPermissionChecker>>,
@@ -283,6 +286,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            ace_service: None,
             permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,

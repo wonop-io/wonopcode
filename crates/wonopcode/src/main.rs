@@ -1811,6 +1811,10 @@ async fn run_headless(
                 wonopcode_tui::AppUpdate::ArtifactsUpdated { .. } => {
                     continue;
                 }
+                // CompletionRecorded is internal state for completion tracking
+                wonopcode_tui::AppUpdate::CompletionRecorded { .. } => {
+                    continue;
+                }
             };
 
             let _ = update_broadcast.send(protocol_update);

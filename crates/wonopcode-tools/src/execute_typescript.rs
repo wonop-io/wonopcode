@@ -10,13 +10,15 @@
 //! - Console output capture
 //! - Configurable timeout and heap limits
 
+use crate::ace::FileAceService;
 use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult, TsPermissionRequest};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{debug, info, warn};
 use wonopcode_codemode::{
-    create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ToolDefinition,
+    create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ServiceHandles,
+    ToolDefinition,
 };
 
 /// Default timeout for script execution in seconds.
@@ -95,6 +97,14 @@ impl Tool for ExecuteTypescriptTool {
             (None, None)
         };
 
+        // Build service handles from context
+        // Create ACE service from context or fall back to file-based service
+        let ace_service = ctx
+            .ace_service
+            .clone()
+            .unwrap_or_else(|| FileAceService::shared(ctx.root_dir.clone()));
+        let services = ServiceHandles::new().with_ace(ace_service);
+
         // Build runtime configuration
         let config = RuntimeConfig {
             project_root: ctx.root_dir.clone(),
@@ -102,6 +112,7 @@ impl Tool for ExecuteTypescriptTool {
             timeout_secs,
             permission_bridge,
             session_id: Some(ctx.session_id.clone()),
+            services,
             ..Default::default()
         };
 
@@ -179,7 +190,11 @@ impl Tool for ExecuteTypescriptTool {
     }
 
     fn requires_permission(&self) -> bool {
-        // Requires permission since it can execute code that modifies files
+        // The execute_typescript tool itself is auto-allowed by default rules.
+        // Dangerous operations inside the runtime (fs.write, exec, etc.) will
+        // request their own permissions via the permission bridge.
+        // We still return true so it goes through the permission system,
+        // but the default rules will auto-approve it.
         true
     }
 }
@@ -227,6 +242,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            ace_service: None,
             permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,

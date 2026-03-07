@@ -591,13 +591,16 @@ impl PermissionManager {
             .await;
     }
 
-    /// Create default rules for read-only operations.
+    /// Create default rules for safe operations.
     ///
-    /// These are safe operations that don't modify files or execute commands.
-    /// Write operations (edit, bash, etc.) are not included and will trigger
-    /// permission prompts unless sandbox rules are applied.
+    /// These are operations that are safe to auto-approve. The execute_typescript
+    /// tool is included because the runtime itself is trusted - dangerous operations
+    /// inside the runtime (fs.write, exec, etc.) will request their own permissions.
     pub fn default_rules() -> Vec<PermissionRule> {
         vec![
+            // TypeScript runtime - the sandbox is trusted, individual operations
+            // inside the sandbox will request their own permissions as needed
+            PermissionRule::allow("execute_typescript"),
             // Read-only file tools
             PermissionRule::allow("read"),
             PermissionRule::allow("glob"),
@@ -617,8 +620,6 @@ impl PermissionManager {
             // ACE tools (spec document management - low risk, only modifies specs/ directory)
             PermissionRule::allow("ace_create_artifact"),
             PermissionRule::allow("ace_read_artifact"),
-            PermissionRule::allow("todoread"),
-            PermissionRule::allow("todowrite"),
             PermissionRule::allow("ace_todo_update"),
             PermissionRule::allow("ace_what_now"),
             PermissionRule::allow("ace_submit_checkpoint"),
@@ -1036,6 +1037,10 @@ mod tests {
         assert!(rules.iter().any(|r| r.tool == "read"));
         assert!(rules.iter().any(|r| r.tool == "glob"));
         assert!(rules.iter().any(|r| r.tool == "grep"));
+
+        // execute_typescript is auto-allowed - the runtime is trusted,
+        // but operations inside it (fs.write, exec) request their own permissions
+        assert!(rules.iter().any(|r| r.tool == "execute_typescript"));
 
         // All default rules should be Allow
         assert!(rules.iter().all(|r| r.decision == Decision::Allow));

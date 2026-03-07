@@ -240,6 +240,8 @@ impl<'a> ToolExecutor<'a> {
         }
 
         // Build context
+        // Note: ace_service is set to None here - the execute_typescript tool
+        // creates a FileAceService lazily from root_dir if needed.
         let ctx = ToolContext {
             session_id: session_id.to_string(),
             message_id: format!("msg-{}", uuid::Uuid::new_v4()),
@@ -253,6 +255,7 @@ impl<'a> ToolExecutor<'a> {
             event_tx: self.event_tx.clone(),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            ace_service: None,
             permission_checker: self.ts_permission_checker.clone(),
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
