@@ -16,6 +16,7 @@ wonopcode-tools.workspace = true
 wonopcode-util.workspace = true
 wonopcode-snapshot.workspace = true
 wonopcode-sandbox.workspace = true
+wonopcode-codemode.workspace = true
 wonop-memory.workspace = true
 wonopcode-observational-memory.workspace = true
 chrono.workspace = true

@@ -726,9 +726,9 @@ impl Runner {
         // Create tool registry with execute_typescript only
         // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are now accessible
         // through the wonop.* API inside TypeScript code
-        // Agents (task, plan_mode) are now accessible via agents.* API in TypeScript
+        // Agents (task, plan_mode) are accessible via agents.* API in TypeScript
+        // Skills are accessible via skills.* namespace in TypeScript
         let tools = ToolRegistry::with_builtins();
-        // Note: skill and batch tools require async initialization, done in new_with_features
 
         // Use shared bus/permission_manager or create new ones
         let bus = shared_bus.unwrap_or_default();
@@ -1076,18 +1076,8 @@ impl Runner {
             }
         }
 
-        // Initialize skill tool (discovers skills from project directories)
-        let skill_dirs = vec![cwd.to_path_buf()];
-        let skill_tool = wonopcode_tools::skill::SkillTool::discover(&skill_dirs).await;
-
-        // Re-register tools with skill support
-        // This should always succeed since we just created the runner and haven't shared the Arc yet
-        if let Some(tools) = Arc::get_mut(&mut runner.tools) {
-            tools.register(Arc::new(skill_tool));
-        } else {
-            // This should never happen during initialization, but log if it does
-            warn!("Could not register skill tool: tools registry already shared");
-        }
+        // Note: Skills are now accessible through the skills.* namespace in TypeScript
+        // via the execute_typescript tool, not as a separate MCP tool.
 
         // Store memory service BEFORE MCP initialization
         // Also initialize workstream for memory service based on project directory
@@ -1246,16 +1236,8 @@ impl Runner {
             // We need a mutable tools registry - create a new one with MCP tools
             // All standard tools (bash, webfetch, lsp) are now accessible via wonop.* API
             // Agents (task, plan_mode) are now accessible via agents.* API in TypeScript
+            // Skills are accessible via skills.* namespace in TypeScript
             let mut new_tools = ToolRegistry::with_builtins();
-
-            // Re-discover skills for the new registry
-            let cwd = self.instance.directory();
-            let skill_dirs = vec![cwd.to_path_buf()];
-            let skill_tool = wonopcode_tools::skill::SkillTool::discover(&skill_dirs).await;
-            new_tools.register(Arc::new(skill_tool));
-
-            // Note: Memory tools are already registered in ToolRegistry::with_builtins()
-            // They access the service through ctx.memory_service (same pattern as ticket tools)
 
             // Register MCP tools
             for tool in mcp_tools {

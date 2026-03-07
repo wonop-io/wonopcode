@@ -33,6 +33,8 @@ use wonopcode_observational_memory::{
 use wonopcode_provider::stream::{FinishReason, StreamChunk, Usage};
 use wonopcode_provider::{ContentPart, GenerateOptions, Message as ProviderMessage};
 
+use wonopcode_codemode::{format_hints_for_injection, select_hints};
+
 use crate::context::{ObservationalMemoryStateSnapshot, ObservationSnapshot};
 use crate::{AgentLoop, LoopCapabilities, LoopContext, LoopError, LoopUpdate};
 
@@ -503,9 +505,23 @@ impl AgentLoop for StandardLoop {
             detector.reset();
         }
 
+        // Select contextual hints based on user message and inject into the prompt
+        let hints = select_hints(user_input, &[]);
+        let hints_text = format_hints_for_injection(&hints);
+        let augmented_input = if hints_text.is_empty() {
+            debug!("No contextual hints matched for user input");
+            user_input.to_string()
+        } else {
+            debug!(
+                hints_count = hints.len(),
+                "Injecting contextual hints into user message"
+            );
+            format!("{}\n\n{}", user_input, hints_text)
+        };
+
         // Add user message with optional images
         let user_msg = if ctx.prompt_images.is_empty() {
-            ProviderMessage::user(user_input)
+            ProviderMessage::user(&augmented_input)
         } else {
             // Build multi-part message with images first, then text
             let mut content = Vec::with_capacity(ctx.prompt_images.len() + 1);
@@ -515,8 +531,8 @@ impl AgentLoop for StandardLoop {
                 content.push(ContentPart::image_base64(&image.media_type, &image.data));
             }
 
-            // Add text
-            content.push(ContentPart::text(user_input));
+            // Add text (with hints)
+            content.push(ContentPart::text(&augmented_input));
 
             ProviderMessage {
                 role: wonopcode_provider::Role::User,

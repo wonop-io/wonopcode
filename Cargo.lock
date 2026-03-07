@@ -8166,6 +8166,7 @@ dependencies = [
  "tracing",
  "uuid",
  "wonop-memory",
+ "wonopcode-codemode",
  "wonopcode-observational-memory",
  "wonopcode-provider",
  "wonopcode-sandbox",
