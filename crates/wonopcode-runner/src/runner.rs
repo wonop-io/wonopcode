@@ -726,12 +726,8 @@ impl Runner {
         // Create tool registry with execute_typescript only
         // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are now accessible
         // through the wonop.* API inside TypeScript code
-        let mut tools = ToolRegistry::with_builtins();
-        tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
-        tools.register(Arc::new(
-            wonopcode_tools::plan_mode::EnterPlanModeTool::new(),
-        ));
-        tools.register(Arc::new(wonopcode_tools::plan_mode::ExitPlanModeTool::new()));
+        // Agents (task, plan_mode) are now accessible via agents.* API in TypeScript
+        let tools = ToolRegistry::with_builtins();
         // Note: skill and batch tools require async initialization, done in new_with_features
 
         // Use shared bus/permission_manager or create new ones
@@ -1249,12 +1245,8 @@ impl Runner {
 
             // We need a mutable tools registry - create a new one with MCP tools
             // All standard tools (bash, webfetch, lsp) are now accessible via wonop.* API
+            // Agents (task, plan_mode) are now accessible via agents.* API in TypeScript
             let mut new_tools = ToolRegistry::with_builtins();
-            new_tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
-            new_tools.register(Arc::new(
-                wonopcode_tools::plan_mode::EnterPlanModeTool::new(),
-            ));
-            new_tools.register(Arc::new(wonopcode_tools::plan_mode::ExitPlanModeTool::new()));
 
             // Re-discover skills for the new registry
             let cwd = self.instance.directory();

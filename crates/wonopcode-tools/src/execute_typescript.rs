@@ -44,51 +44,9 @@ impl Tool for ExecuteTypescriptTool {
     }
 
     fn description(&self) -> &str {
-        r#"Execute TypeScript code in a sandboxed runtime.
-
-This tool provides a typed API for file operations, shell commands, and more.
-The code runs in an isolated V8 sandbox with no network access.
-
-## Discovery
-
-Call `help()` or `help("topic")` to get API documentation:
-- `help()` — List all namespaces
-- `help("fs")` — File system docs
-- `help("ace")` — ACE workflow docs
-- `help("lsp")` — Code intelligence docs
-
-## Available API
-
-All APIs are flat globals:
-
-- fs.read/write/list/glob/grep/edit — File operations
-- exec(command, args?, options?) — Shell commands
-- lsp.definition/references/symbols/hover — Code intelligence
-- memory.store/recall/search/clear — Persistent storage
-- web.search/fetch/codeSearch — HTTP requests
-- ace.createArtifact/submitCheckpoint/whatNow — Spec-first TDD
-- tasks.create/list — Task tracking
-- tickets.list/get/create/search — Issue tracking
-- context.projectRoot/sessionId — Session info
-
-## Rules
-
-1. Use `console.log()` to output results
-2. All file paths are relative to the project root
-3. Wrap risky operations in try/catch
-4. Do NOT use `import` or `require`
-5. Network access is blocked
-
-## Example
-
-```typescript
-// Get help first if unsure about an API
-console.log(help("fs"));
-
-// Then use the API
-const file = await fs.read("src/main.rs");
-console.log(`File has ${file.totalLines} lines`);
-```"#
+        // Description is maintained in wonopcode-codemode/src/docs/execute_typescript.md
+        // to stay in sync with runtime.js API changes
+        include_str!("../../../../../../crates/wonopcode-codemode/src/docs/execute_typescript.md")
     }
 
     fn parameters_schema(&self) -> Value {

@@ -936,9 +936,10 @@ impl ClaudeCliProvider {
         // doesn't work when Claude CLI is spawned programmatically.
         // EnterPlanMode/ExitPlanMode are disabled because we provide our own
         // implementation via MCP that properly switches the agent mode.
+        // EnterWorktree is disabled because we manage worktrees/workstreams ourselves.
         // TaskOutput, NotebookEdit, KillShell, Skill are disabled because we don't
         // support these features or provide our own implementations.
-        "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,Task,TodoRead,TodoWrite,AskUserQuestion,EnterPlanMode,ExitPlanMode,TaskOutput,NotebookEdit,KillShell,Skill"
+        "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,Task,TodoRead,TodoWrite,AskUserQuestion,EnterPlanMode,ExitPlanMode,EnterWorktree,TaskOutput,NotebookEdit,KillShell,Skill"
     }
 }
 

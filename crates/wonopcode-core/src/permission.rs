@@ -613,9 +613,7 @@ impl PermissionManager {
             PermissionRule::allow("websearch"),
             // Todo tracking (low risk)
             PermissionRule::allow("todowrite"),
-            // Plan mode tools (safe, just switch agent mode)
-            PermissionRule::allow("enterplanmode"),
-            PermissionRule::allow("exitplanmode"),
+            // Plan mode is now accessible via agents.enterPlanMode/exitPlanMode in TypeScript
             // ACE tools (spec document management - low risk, only modifies specs/ directory)
             PermissionRule::allow("ace_create_artifact"),
             PermissionRule::allow("ace_read_artifact"),
