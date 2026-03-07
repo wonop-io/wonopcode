@@ -87,7 +87,7 @@ impl UserInputRequest {
     ) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as u64;
 
         let expires_at = ttl.map(|d| now + d.as_millis() as u64);
@@ -107,7 +107,7 @@ impl UserInputRequest {
         if let Some(expires_at) = self.expires_at {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis() as u64;
             now > expires_at
         } else {
