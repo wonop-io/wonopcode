@@ -573,6 +573,9 @@ pub struct Runner {
     /// Optional memory service for memory tools.
     /// When set, memory tools can store and retrieve information across scopes.
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    /// Optional HMS (Hierarchical Memory System) service for file-based memory tools.
+    /// When set, HMS tools can read/write memory.yaml files in directory hierarchies.
+    hms_service: Option<wonopcode_tools::SharedHmsService>,
 }
 
 impl Runner {
@@ -700,6 +703,7 @@ impl Runner {
             context_state: RwLock::new(ContextState::new(context_limit)),
             ticket_service: None, // Will be set by new_with_shared
             memory_service: None, // Will be set by new_with_shared
+            hms_service: None,    // Will be set by new_with_shared
         })
     }
 
@@ -719,7 +723,7 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None, None, None).await
     }
 
     /// Create a new runner with optional shared Bus, PermissionManager, SessionService, and AgentLoop.
@@ -747,6 +751,7 @@ impl Runner {
         agent_loop: Option<BoxedAgentLoop>,
         ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
         memory_service: Option<wonopcode_tools::SharedMemoryService>,
+        hms_service: Option<wonopcode_tools::SharedHmsService>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -971,6 +976,7 @@ impl Runner {
             }
         }
         runner.memory_service = memory_service;
+        runner.hms_service = hms_service;
 
         // Initialize MCP client if configured
         // NOTE: This may replace the entire tool registry, so memory tools are also added there
@@ -1682,6 +1688,10 @@ impl Runner {
             })
             .collect();
 
+        // Regenerate AGENTS.md from HMS before building system prompt
+        // This ensures the latest memory context is included
+        self.regenerate_agents_md(cwd).await;
+
         // Build loop config
         let loop_config = {
             let config = self.config.read().await;
@@ -1745,6 +1755,7 @@ impl Runner {
             permission_checker: Some(permission_checker),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            hms_service: self.hms_service.clone(),
             workstream_ticket_id,
             workstream_default_tracker_id,
             prompt_images: images,
@@ -3513,6 +3524,32 @@ impl Runner {
         }
     }
 
+    /// Regenerate AGENTS.md from HMS (Hierarchical Memory System).
+    ///
+    /// This is called before building the system prompt to ensure the agent
+    /// receives the latest context from resolved memories. If HMS is not
+    /// configured or encounters an error, this silently continues (the agent
+    /// will work without HMS context).
+    async fn regenerate_agents_md(&self, cwd: &std::path::Path) {
+        let Some(ref hms_service) = self.hms_service else {
+            return; // HMS not configured
+        };
+
+        // Need mutable access to the service for generation
+        let mut service = hms_service.write().await;
+
+        // Generate and write AGENTS.md
+        match service.write_agents_md(cwd).await {
+            Ok(path) => {
+                debug!(path = %path.display(), "Regenerated AGENTS.md from HMS");
+            }
+            Err(e) => {
+                // Log but don't fail - HMS is optional
+                debug!(error = %e, "Failed to regenerate AGENTS.md from HMS");
+            }
+        }
+    }
+
     /// Handle git status action.
     async fn handle_git_status(&self, update_tx: &mpsc::UnboundedSender<AppUpdate>) {
         let cwd = self.instance.directory();
@@ -4237,39 +4274,40 @@ fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<
 }
 
 /// Load custom instructions from common instruction files.
+///
+/// Returns the content of the FIRST instruction file found (in priority order).
+/// This prevents duplicate content when multiple files exist with the same content.
+///
+/// Note: Claude CLI automatically reads CLAUDE.md from the working directory,
+/// so we don't pass custom instructions via --system-prompt for that provider.
+/// For other providers (anthropic API, openai, etc.), this function provides
+/// the custom instructions to include in the system prompt.
 fn load_custom_instructions(cwd: &Path) -> Option<String> {
     // Look for custom instruction files in order of priority
+    // Only the first one found is used to avoid duplicates
     let instruction_files = [
-        ".wonopcode/AGENTS.md",
-        "AGENTS.md",
-        ".claude/CLAUDE.md",
-        "CLAUDE.md",
+        ".wonopcode/AGENTS.md",   // Our primary location
+        ".wonopcode/CLAUDE.md",   // Claude Code compatibility (in .wonopcode)
+        "AGENTS.md",              // Root fallback
+        "CLAUDE.md",              // Claude Code compatibility (root)
+        ".claude/CLAUDE.md",      // Claude's standard location
         ".wonopcode/instructions.md",
-        ".cursor/rules",
+        ".cursor/rules",          // Cursor compatibility
     ];
-
-    let mut instructions = Vec::new();
 
     for file in &instruction_files {
         let path = cwd.join(file);
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                if !content.trim().is_empty() {
-                    instructions.push(format!(
-                        "# Instructions from {}\n\n{}",
-                        file,
-                        content.trim()
-                    ));
+                let content = content.trim();
+                if !content.is_empty() {
+                    return Some(format!("# Instructions from {}\n\n{}", file, content));
                 }
             }
         }
     }
 
-    if instructions.is_empty() {
-        None
-    } else {
-        Some(instructions.join("\n\n"))
-    }
+    None
 }
 
 /// Load API key from environment or credentials file.

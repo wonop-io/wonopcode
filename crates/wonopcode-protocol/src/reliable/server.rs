@@ -383,6 +383,37 @@ pub enum ResponseData {
         /// The rendered preview content.
         rendered_content: String,
     },
+
+    // =========================================================================
+    // Context Settings Responses
+    // =========================================================================
+    /// Response to GetContextSettings.
+    ContextSettings {
+        /// Current initial context directory (relative to project root).
+        /// None means using workstream root.
+        initial_context_directory: Option<String>,
+        /// Available memory locations that can be selected.
+        available_locations: Vec<ContextLocation>,
+    },
+
+    /// Response to SetInitialContextDirectory.
+    ContextSettingsUpdated {
+        /// New initial context directory.
+        initial_context_directory: Option<String>,
+    },
+}
+
+/// A memory location that can be used as initial context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextLocation {
+    /// Full path to the .wonopcode directory.
+    pub path: String,
+    /// Relative path from project root for display.
+    pub relative_path: String,
+    /// Whether this location has AGENTS.md or AGENTS.TEMPLATE.md.
+    pub has_agents_file: bool,
+    /// Whether this location has memory.yaml.
+    pub has_memory_file: bool,
 }
 
 /// Git file status.

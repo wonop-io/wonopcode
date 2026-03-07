@@ -150,6 +150,14 @@ pub async fn run_command(
             }
         };
 
+    // Initialize HMS (Hierarchical Memory System) service for AGENTS.md generation
+    let hms_service: Option<wonopcode_tools::SharedHmsService> = {
+        let project_root = instance.directory().to_path_buf();
+        let service = wonopcode_tools::HmsService::new(project_root);
+        info!("HMS service initialized for run command");
+        Some(std::sync::Arc::new(tokio::sync::RwLock::new(service)))
+    };
+
     // Get API key for MCP server authentication
     // Priority: CLI arg > environment variable > config file
     let secret = cli_secret
@@ -205,6 +213,7 @@ pub async fn run_command(
         None, // Use default StandardLoop
         None, // No ticket service in run command
         memory_service, // Memory service for persistent memory
+        hms_service, // HMS service for AGENTS.md generation
     )
     .await
     {

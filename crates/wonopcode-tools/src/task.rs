@@ -204,6 +204,7 @@ Usage notes:
             event_tx: ctx.event_tx.clone(),
             ticket_service: ctx.ticket_service.clone(),
             memory_service: ctx.memory_service.clone(),
+            hms_service: ctx.hms_service.clone(),
             workstream_ticket_id: ctx.workstream_ticket_id.clone(),
             workstream_default_tracker_id: ctx.workstream_default_tracker_id.clone(),
         };
@@ -319,6 +320,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            hms_service: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }

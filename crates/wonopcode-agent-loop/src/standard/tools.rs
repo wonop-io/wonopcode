@@ -29,6 +29,8 @@ pub struct ToolExecutor<'a> {
     ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
     /// Optional memory service for memory tools.
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    /// Optional HMS service for hierarchical memory tools.
+    hms_service: Option<wonopcode_tools::SharedHmsService>,
     /// Optional workstream ticket ID (for default tracker resolution).
     workstream_ticket_id: Option<String>,
     /// Optional default tracker ID for the workstream.
@@ -53,6 +55,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout: None,
             ticket_service: None,
             memory_service: None,
+            hms_service: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -79,6 +82,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout: None,
             ticket_service: None,
             memory_service: None,
+            hms_service: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -112,6 +116,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout,
             ticket_service: None,
             memory_service: None,
+            hms_service: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -131,6 +136,7 @@ impl<'a> ToolExecutor<'a> {
         tool_timeout: Option<std::time::Duration>,
         ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
         memory_service: Option<wonopcode_tools::SharedMemoryService>,
+        hms_service: Option<wonopcode_tools::SharedHmsService>,
         workstream_ticket_id: Option<String>,
         workstream_default_tracker_id: Option<String>,
     ) -> Self {
@@ -144,6 +150,7 @@ impl<'a> ToolExecutor<'a> {
             tool_timeout,
             ticket_service,
             memory_service,
+            hms_service,
             workstream_ticket_id,
             workstream_default_tracker_id,
         }
@@ -243,6 +250,7 @@ impl<'a> ToolExecutor<'a> {
             event_tx: self.event_tx.clone(),
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
+            hms_service: self.hms_service.clone(),
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
         };

@@ -59,6 +59,13 @@ impl ToolRegistry {
         registry.register(Arc::new(crate::memory::MemorySearchTool));
         registry.register(Arc::new(crate::memory::MemoryClearTool));
 
+        // Register HMS (Hierarchical Memory System) tools
+        registry.register(Arc::new(crate::hms::HmsSetTool));
+        registry.register(Arc::new(crate::hms::HmsGetTool));
+        registry.register(Arc::new(crate::hms::HmsDeleteTool));
+        registry.register(Arc::new(crate::hms::HmsListTool));
+        registry.register(Arc::new(crate::hms::HmsRenderTool));
+
         registry
     }
 

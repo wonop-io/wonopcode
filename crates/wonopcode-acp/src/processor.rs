@@ -372,6 +372,7 @@ impl Processor {
             event_tx: None,
             ticket_service: None, // ACP tools run without ticket service for now
             memory_service: None, // ACP tools run without memory service for now
+            hms_service: None, // ACP tools run without HMS service for now
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         };

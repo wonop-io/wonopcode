@@ -13,6 +13,7 @@ pub mod batch;
 pub mod edit;
 pub mod glob;
 pub mod grep;
+pub mod hms;
 pub mod list;
 pub mod lsp;
 pub mod mcp;
@@ -47,6 +48,11 @@ pub use ticket::{
 // Re-export memory tools for convenience
 pub use memory::{
     MemoryClearTool, MemoryRecallTool, MemorySearchTool, MemoryStoreTool, SharedMemoryService,
+};
+
+// Re-export HMS tools for convenience
+pub use hms::{
+    HmsDeleteTool, HmsGetTool, HmsListTool, HmsRenderTool, HmsService, HmsSetTool, SharedHmsService,
 };
 
 use async_trait::async_trait;
@@ -108,6 +114,8 @@ pub struct ToolContext {
     pub ticket_service: Option<Arc<dyn TicketService>>,
     /// Optional memory service for memory tools.
     pub memory_service: Option<SharedMemoryService>,
+    /// Optional HMS service for hierarchical memory tools.
+    pub hms_service: Option<SharedHmsService>,
     /// Workstream's ticket ID (from .wonopcode/state.yaml).
     /// This is the ticket ID associated with the current workstream.
     pub workstream_ticket_id: Option<String>,
@@ -241,6 +249,7 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            hms_service: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }

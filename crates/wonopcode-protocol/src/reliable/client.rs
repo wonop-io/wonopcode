@@ -344,6 +344,25 @@ pub enum ClientMessage {
     },
 
     // =========================================================================
+    // Context Settings (Initial context directory for agent)
+    // =========================================================================
+    /// Get the current context settings for a workstream.
+    GetContextSettings {
+        /// Workstream ID.
+        workstream_id: String,
+    },
+
+    /// Set the initial context directory for a workstream.
+    /// This directory's AGENTS.md will be loaded when the agent starts.
+    SetInitialContextDirectory {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Relative path from project root (e.g., "wonop/apps/wonopcode").
+        /// None means use workstream root.
+        directory: Option<String>,
+    },
+
+    // =========================================================================
     // Context Management
     // =========================================================================
     /// Trigger manual context compaction.

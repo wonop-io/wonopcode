@@ -149,6 +149,9 @@ rand = "0.8"
 arboard = "3"
 walkdir = "2"
 serde_yaml = "0.9"
+tera = "1"
+indexmap = { version = "2", features = ["serde"] }
+dashmap = "6"
 bollard = "0.18"
 bytesize = "1"
 

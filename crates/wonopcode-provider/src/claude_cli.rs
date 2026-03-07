@@ -1285,17 +1285,25 @@ impl LanguageModel for ClaudeCliProvider {
             args.push("--resume".to_string());
             args.push(session.clone());
             debug!(session_id = %session, "Resuming previous CLI session");
-        } else {
-            // Only set system prompt on new sessions (not when resuming)
-            // When resuming, Claude CLI already has the system prompt from the original session
-            if let Some(ref system) = options.system {
-                if !system.is_empty() {
-                    args.push("--system-prompt".to_string());
-                    args.push(system.clone());
-                    debug!(system_len = system.len(), "Setting system prompt");
-                }
-            }
         }
+        // NOTE: We intentionally do NOT pass --system-prompt to Claude CLI.
+        // 
+        // Claude CLI automatically reads CLAUDE.md from the working directory and
+        // incorporates it into its system prompt. Our HMS (Hierarchical Memory System)
+        // writes CLAUDE.md to the project root before starting each session, so Claude
+        // CLI will pick up the rendered memory context automatically.
+        //
+        // Using --system-prompt would REPLACE Claude CLI's entire system prompt
+        // (except tool definitions), which would:
+        // 1. Override Claude Code's built-in coding guidelines and safety instructions
+        // 2. Create confusion if CLAUDE.md also exists (double loading)
+        //
+        // By not passing --system-prompt, we get the best of both worlds:
+        // - Claude Code's full default system prompt
+        // - Our custom instructions via CLAUDE.md
+        //
+        // For non-CLI providers (anthropic API, openai, etc.), the system prompt
+        // is passed directly via the API, which is handled in the standard agent loop.
 
         // Add MCP config if using custom tools
         if let Some(ref config_path) = mcp_config_path {

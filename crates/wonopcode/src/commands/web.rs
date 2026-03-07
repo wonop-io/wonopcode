@@ -18,6 +18,7 @@ struct ToolExecutorWrapper {
     cancel: tokio_util::sync::CancellationToken,
     permissions: Arc<wonopcode_core::permission::PermissionManager>,
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
+    hms_service: Option<wonopcode_tools::SharedHmsService>,
 }
 
 #[async_trait::async_trait]
@@ -119,6 +120,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             event_tx: None,                               // MCP HTTP doesn't need event_tx
             ticket_service: None,                         // No ticket service in MCP HTTP
             memory_service: self.memory_service.clone(),  // Share memory service with tools
+            hms_service: self.hms_service.clone(),        // Share HMS service with tools
             workstream_ticket_id: None,                   // No workstream in MCP HTTP
             workstream_default_tracker_id: None,          // No workstream tracker in MCP HTTP
         };
@@ -338,6 +340,13 @@ pub async fn create_mcp_http_state(
             }
         };
 
+    // Initialize HMS (Hierarchical Memory System) service for AGENTS.md generation
+    let hms_service: Option<wonopcode_tools::SharedHmsService> = {
+        let service = wonopcode_tools::HmsService::new(cwd.to_path_buf());
+        tracing::info!("HMS service initialized for MCP HTTP");
+        Some(std::sync::Arc::new(tokio::sync::RwLock::new(service)))
+    };
+
     // Build MCP server tools map
     let mut mcp_tools = std::collections::HashMap::new();
     let cancel = CancellationToken::new();
@@ -349,6 +358,7 @@ pub async fn create_mcp_http_state(
         let cancel_clone = cancel.clone();
         let perm = permission_manager.clone();
         let mem_svc = memory_service.clone();
+        let hms_svc = hms_service.clone();
 
         let executor = ToolExecutorWrapper {
             tool: tool_clone,
@@ -357,6 +367,7 @@ pub async fn create_mcp_http_state(
             cancel: cancel_clone,
             permissions: perm,
             memory_service: mem_svc,
+            hms_service: hms_svc,
         };
 
         mcp_tools.insert(

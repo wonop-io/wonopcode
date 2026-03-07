@@ -289,6 +289,12 @@ pub struct LoopContext<'a> {
     /// persistent storage across global, workstream, and session scopes.
     pub memory_service: Option<wonopcode_tools::SharedMemoryService>,
 
+    /// Optional HMS service for hierarchical memory tools.
+    ///
+    /// When set, HMS tools can access the file-based hierarchical memory
+    /// system for directory-scoped agent context.
+    pub hms_service: Option<wonopcode_tools::SharedHmsService>,
+
     /// Optional workstream ticket ID.
     ///
     /// When set, this is the ticket ID associated with the current workstream.
