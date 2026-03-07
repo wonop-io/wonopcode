@@ -665,7 +665,7 @@ impl AgentLoop for StandardLoop {
                 })).collect::<Vec<_>>(),
                 "temperature": options.temperature,
                 "max_tokens": options.max_tokens,
-            }).to_string();
+            });
 
             let stream = ctx
                 .provider
@@ -871,47 +871,8 @@ impl AgentLoop for StandardLoop {
                             last_request_output,
                             last_request_cache_read,
                         });
-
-                        // Emit CompletionRecorded for developer mode statistics
-                        let total_duration_ms = completion_start.elapsed().as_millis() as u64;
-                        let latency_ms = first_token_time
-                            .map(|t| t.duration_since(completion_start).as_millis() as u64)
-                            .unwrap_or(total_duration_ms); // Fallback to total duration if no tokens
-
-                        let cache_read = last_request_cache_read.unwrap_or(0);
-
-                        // Capture response for developer statistics
-                        let response_json = serde_json::json!({
-                            "text": &current_text,
-                            "tool_calls": tool_calls.iter().map(|(id, name, args)| {
-                                serde_json::json!({
-                                    "id": id,
-                                    "name": name,
-                                    "arguments": serde_json::from_str::<serde_json::Value>(args).unwrap_or(serde_json::Value::String(args.clone())),
-                                })
-                            }).collect::<Vec<_>>(),
-                            "finish_reason": format!("{:?}", reason),
-                            "usage": {
-                                "input_tokens": step_usage.input_tokens,
-                                "output_tokens": step_usage.output_tokens,
-                                "cache_read_tokens": cache_read,
-                            },
-                        }).to_string();
-                        
-                        ctx.send_update(LoopUpdate::CompletionRecorded {
-                            id: completion_id.clone(),
-                            timestamp: completion_timestamp,
-                            model: model_info.name.clone(),
-                            input_tokens: step_usage.input_tokens as u64,
-                            output_tokens: step_usage.output_tokens as u64,
-                            cache_read_tokens: cache_read,
-                            cost: step_cost,
-                            latency_ms,
-                            total_duration_ms,
-                            finish_reason: format!("{:?}", reason),
-                            request: Some(request_json.clone()),
-                            response: Some(response_json),
-                        });
+                        // Note: CompletionRecorded is emitted after the stream loop completes
+                        // to avoid duplicate events from providers that send multiple FinishStep chunks
                     }
                     StreamChunk::Error(e) => {
                         // Send error to UI so the user sees it
@@ -933,6 +894,53 @@ impl AgentLoop for StandardLoop {
                 if !tool_calls.iter().any(|(tid, _, _)| tid == &id) {
                     tool_calls.push((id, name, args));
                 }
+            }
+
+            // Emit CompletionRecorded after the stream loop completes (once per completion)
+            // This avoids duplicate events from providers that send multiple FinishStep chunks
+            {
+                let model_info = ctx.model_info();
+                let step_cost = model_info
+                    .cost
+                    .calculate(step_usage.input_tokens, step_usage.output_tokens);
+                let total_duration_ms = completion_start.elapsed().as_millis() as u64;
+                let latency_ms = first_token_time
+                    .map(|t| t.duration_since(completion_start).as_millis() as u64)
+                    .unwrap_or(total_duration_ms);
+                let cache_read = step_usage.cache_read_tokens as u64;
+
+                // Capture response for developer statistics
+                let response_json = serde_json::json!({
+                    "text": &current_text,
+                    "tool_calls": tool_calls.iter().map(|(id, name, args)| {
+                        serde_json::json!({
+                            "id": id,
+                            "name": name,
+                            "arguments": serde_json::from_str::<serde_json::Value>(args).unwrap_or(serde_json::Value::String(args.clone())),
+                        })
+                    }).collect::<Vec<_>>(),
+                    "finish_reason": format!("{:?}", finish_reason),
+                    "usage": {
+                        "input_tokens": step_usage.input_tokens,
+                        "output_tokens": step_usage.output_tokens,
+                        "cache_read_tokens": cache_read,
+                    },
+                });
+
+                ctx.send_update(LoopUpdate::CompletionRecorded {
+                    id: completion_id.clone(),
+                    timestamp: completion_timestamp,
+                    model: model_info.name.clone(),
+                    input_tokens: step_usage.input_tokens as u64,
+                    output_tokens: step_usage.output_tokens as u64,
+                    cache_read_tokens: cache_read,
+                    cost: step_cost,
+                    latency_ms,
+                    total_duration_ms,
+                    finish_reason: format!("{:?}", finish_reason),
+                    request: Some(request_json.clone()),
+                    response: Some(response_json),
+                });
             }
 
             debug!(

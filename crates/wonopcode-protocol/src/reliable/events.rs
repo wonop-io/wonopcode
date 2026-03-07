@@ -314,10 +314,10 @@ pub enum WorkstreamEventData {
         finish_reason: String,
         /// Optional: Full request JSON (if recording enabled).
         #[serde(skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
+        request: Option<serde_json::Value>,
         /// Optional: Full response JSON (if recording enabled).
         #[serde(skip_serializing_if = "Option::is_none")]
-        response: Option<String>,
+        response: Option<serde_json::Value>,
     },
 }
 

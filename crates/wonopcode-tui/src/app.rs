@@ -522,9 +522,9 @@ pub enum AppUpdate {
         /// Finish reason (end_turn, tool_use, max_tokens, etc.).
         finish_reason: String,
         /// Optional: Full request JSON (if recording enabled).
-        request: Option<String>,
+        request: Option<serde_json::Value>,
         /// Optional: Full response JSON (if recording enabled).
-        response: Option<String>,
+        response: Option<serde_json::Value>,
     },
 }
 
