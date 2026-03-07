@@ -59,12 +59,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::OnceCell;
 use tokio::process::Command as TokioCommand;
 use tracing::{debug, info, trace, warn};
 
 /// Cache for the Claude CLI binary path.
 /// This is cached because finding the binary can be slow if it's not in PATH.
 static CLAUDE_CLI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Cache for discovered Claude CLI built-in tools.
+/// This is populated once at startup by querying Claude CLI.
+static DISCOVERED_TOOLS: OnceCell<Vec<String>> = OnceCell::const_new();
 
 /// Clear the Claude CLI path cache.
 /// Call this after changing the custom Claude CLI path in settings.
@@ -915,7 +920,11 @@ impl ClaudeCliProvider {
 
     /// Get the pattern for allowed tools.
     fn get_allowed_tools_pattern(&self) -> String {
-        let mut patterns = vec!["mcp__wonopcode-tools__*".to_string()];
+        // ToolSearch must be included to allow loading deferred tools
+        let mut patterns = vec![
+            "ToolSearch".to_string(),
+            "mcp__wonopcode-tools__*".to_string(),
+        ];
 
         // Add patterns for external servers
         if let Some(mcp_config) = &self.mcp_config {
@@ -927,19 +936,104 @@ impl ClaudeCliProvider {
         patterns.join(",")
     }
 
-    /// Get the list of Claude CLI's built-in tools to disable.
+    /// Get the list of Claude CLI's built-in tools to disable (hardcoded fallback).
+    /// Prefer using get_tools_to_disable() for dynamic discovery.
     fn builtin_tools_to_disable() -> &'static str {
-        // Disable all built-in tools when using our custom tools
-        // Note: Using "Bash" not "Bash(*)" - the pattern syntax only restricts
-        // specific subpatterns, it doesn't disable the entire tool.
-        // AskUserQuestion is disabled because it requires interactive stdin which
-        // doesn't work when Claude CLI is spawned programmatically.
-        // EnterPlanMode/ExitPlanMode are disabled because we provide our own
-        // implementation via MCP that properly switches the agent mode.
-        // EnterWorktree is disabled because we manage worktrees/workstreams ourselves.
-        // TaskOutput, NotebookEdit, KillShell, Skill are disabled because we don't
-        // support these features or provide our own implementations.
-        "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,Task,TodoRead,TodoWrite,AskUserQuestion,EnterPlanMode,ExitPlanMode,EnterWorktree,TaskOutput,NotebookEdit,KillShell,Skill"
+        // Disable all built-in tools when using our custom tools.
+        // This list is updated with tools discovered from Claude CLI.
+        // For dynamic discovery that handles new tools automatically, use get_tools_to_disable().
+        //
+        // Tools: Agent, Bash, Edit, Glob, Grep, MultiEdit, Read, Write (file/shell ops)
+        // AskUserQuestion (requires interactive stdin), CronCreate/Delete/List (scheduling)
+        // EnterPlanMode/ExitPlanMode (we provide our own), EnterWorktree (we manage ourselves)
+        // KillShell, LSP, NotebookEdit, Skill, Task, TaskOutput, TaskStop, TodoRead/Write, WebFetch/Search
+        "Agent,AskUserQuestion,Bash,CronCreate,CronDelete,CronList,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,Glob,Grep,KillShell,LSP,MultiEdit,NotebookEdit,Read,Skill,Task,TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write"
+    }
+
+    /// Discover available built-in tools by querying Claude CLI.
+    /// Runs once and caches the result. Falls back to hardcoded list if discovery fails.
+    pub async fn discover_builtin_tools() -> Vec<String> {
+        DISCOVERED_TOOLS
+            .get_or_init(|| async {
+                match Self::discover_tools_uncached().await {
+                    Ok(tools) => {
+                        info!(count = tools.len(), tools = ?tools, "Discovered Claude CLI built-in tools");
+                        tools
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to discover tools dynamically, using hardcoded fallback");
+                        Self::hardcoded_builtin_tools()
+                    }
+                }
+            })
+            .await
+            .clone()
+    }
+
+    /// Perform the actual tool discovery by querying Claude CLI (uncached).
+    async fn discover_tools_uncached() -> Result<Vec<String>, ProviderError> {
+        let Some(cli_path) = find_claude_cli() else {
+            return Err(ProviderError::internal("Claude CLI not found for tool discovery".to_string()));
+        };
+
+        let output = TokioCommand::new(cli_path)
+            .args([
+                "-p",
+                "List ONLY your tool names, one per line. No descriptions, no markdown, no bullets - just the exact tool names.",
+                "--output-format", "json",
+                "--max-turns", "1",
+                "--dangerously-skip-permissions",
+            ])
+            .output()
+            .await
+            .map_err(|e| ProviderError::internal(format!("Failed to run tool discovery: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ProviderError::internal(format!("Tool discovery query failed: {stderr}")));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let json: serde_json::Value = serde_json::from_str(&stdout)
+            .map_err(|e| ProviderError::internal(format!("Failed to parse discovery response: {e}")))?;
+
+        let result = json.get("result")
+            .and_then(|r| r.as_str())
+            .ok_or_else(|| ProviderError::internal("No result in discovery response".to_string()))?;
+
+        let tools: Vec<String> = result
+            .lines()
+            .map(|line| line.trim())
+            .map(|line| {
+                line.trim_start_matches(|c: char| c == '-' || c == '*' || c == '•' || c.is_whitespace())
+                    .trim_end_matches(|c: char| c == '*')
+                    .trim()
+            })
+            .filter(|line| {
+                !line.is_empty()
+                    && line.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+                    && line.chars().all(|c| c.is_ascii_alphanumeric())
+            })
+            .map(String::from)
+            .collect();
+
+        if tools.is_empty() {
+            return Err(ProviderError::internal("No valid tool names found in discovery response".to_string()));
+        }
+
+        debug!(count = tools.len(), "Parsed tool names from discovery response");
+        Ok(tools.into_iter().filter(|t| t != "ToolSearch").collect())
+    }
+
+    /// Get hardcoded list of built-in tools as a Vec.
+    fn hardcoded_builtin_tools() -> Vec<String> {
+        Self::builtin_tools_to_disable().split(',').map(String::from).collect()
+    }
+
+    /// Get the comma-separated list of tools to disable (dynamic or fallback).
+    pub async fn get_tools_to_disable() -> String {
+        Self::discover_builtin_tools().await.join(",")
     }
 }
 
@@ -1307,9 +1401,10 @@ impl LanguageModel for ClaudeCliProvider {
             args.push("--allowedTools".to_string());
             args.push(self.get_allowed_tools_pattern());
 
-            // Disallow Claude's built-in tools
+            // Disallow Claude's built-in tools (dynamically discovered or hardcoded fallback)
             args.push("--disallowedTools".to_string());
-            args.push(Self::builtin_tools_to_disable().to_string());
+            let tools_to_disable = Self::get_tools_to_disable().await;
+            args.push(tools_to_disable.clone());
 
             // Use acceptEdits permission mode to auto-accept MCP tool calls
             // This is needed because --allowedTools only controls visibility,
@@ -1321,7 +1416,7 @@ impl LanguageModel for ClaudeCliProvider {
             debug!(
                 mcp_config = %config_path.display(),
                 allowed_tools = %self.get_allowed_tools_pattern(),
-                disallowed_tools = %Self::builtin_tools_to_disable(),
+                disallowed_tools = %tools_to_disable,
                 "Using MCP config for custom tools"
             );
         }
