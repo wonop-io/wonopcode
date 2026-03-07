@@ -15,7 +15,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
-    LoopUpdate, PermissionCheckRequest, PermissionChecker,
+    LoopUpdate, MemoryState, ObservationalMemoryConfig, PermissionCheckRequest, PermissionChecker,
+    TokenStateMachine, persistence::ObservationPersistence,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
@@ -115,6 +116,45 @@ impl PermissionChecker for PermissionCheckerAdapter {
     }
 }
 
+/// Adapter that implements `TsPermissionChecker` for `PermissionManager`.
+///
+/// This allows TypeScript tools to check permissions through the same
+/// permission system used by the rest of the agent.
+pub struct TsPermissionCheckerAdapter {
+    permission_manager: Arc<PermissionManager>,
+}
+
+impl TsPermissionCheckerAdapter {
+    /// Create a new adapter wrapping a permission manager.
+    pub fn new(permission_manager: Arc<PermissionManager>) -> Self {
+        Self { permission_manager }
+    }
+}
+
+#[async_trait]
+impl wonopcode_tools::TsPermissionChecker for TsPermissionCheckerAdapter {
+    async fn check(
+        &self,
+        session_id: &str,
+        request: wonopcode_tools::TsPermissionRequest,
+    ) -> bool {
+        // Convert the request to PermissionCheck format used by PermissionManager
+        let check = wonopcode_core::permission::PermissionCheck {
+            id: request.id,
+            tool: request.tool,
+            action: request.action,
+            path: request.path,
+            description: request.description,
+            details: request.details.unwrap_or(serde_json::Value::Null),
+        };
+
+        let has_sandbox = self.permission_manager.is_sandbox_running();
+        self.permission_manager
+            .check_with_sandbox(session_id, check, has_sandbox)
+            .await
+    }
+}
+
 /// Helper to send updates to the TUI with proper error logging.
 /// This replaces `let _ = update_tx.send(...)` to avoid silent failures.
 fn send_update(update_tx: &mpsc::UnboundedSender<AppUpdate>, update: AppUpdate) {
@@ -179,6 +219,42 @@ fn convert_phased_todos_to_updates(
         .collect();
 
     (phases, todos)
+}
+
+/// Convert LoopUpdate observation snapshot to TUI observation update.
+fn convert_observation_snapshot(
+    snapshot: wonopcode_agent_loop::ObservationSnapshot,
+) -> wonopcode_tui::ObservationUpdate {
+    wonopcode_tui::ObservationUpdate {
+        id: snapshot.id,
+        priority: snapshot.priority,
+        timestamp: snapshot.timestamp,
+        content: snapshot.content,
+        children: snapshot.children.into_iter()
+            .map(convert_observation_snapshot)
+            .collect(),
+        pinned: snapshot.pinned,
+    }
+}
+
+/// Convert an Observation from persistence to ObservationSnapshot for UI display.
+/// This is used when loading observations from disk on startup.
+fn observation_to_snapshot(obs: &wonopcode_agent_loop::Observation) -> wonopcode_agent_loop::ObservationSnapshot {
+    use wonopcode_agent_loop::Priority;
+    wonopcode_agent_loop::ObservationSnapshot {
+        id: obs.id.clone(),
+        priority: match obs.priority {
+            Priority::High => "high".to_string(),
+            Priority::Medium => "medium".to_string(),
+            Priority::Low => "low".to_string(),
+        },
+        timestamp: obs.observation_date.format("%H:%M").to_string(),
+        content: obs.content.clone(),
+        children: obs.children.iter()
+            .map(observation_to_snapshot)
+            .collect(),
+        pinned: obs.pinned,
+    }
 }
 
 /// Parse MCP TODO tool output and convert it to PhasedTodos.
@@ -501,6 +577,9 @@ pub struct RunnerConfig {
     /// Working directory for the provider (used by Claude CLI).
     /// This sets the current working directory when spawning external processes.
     pub working_directory: Option<std::path::PathBuf>,
+    /// Observational Memory configuration.
+    /// When enabled, uses OM for context compression instead of legacy compaction.
+    pub observational_memory: ObservationalMemoryConfig,
 }
 
 impl Default for RunnerConfig {
@@ -520,6 +599,7 @@ impl Default for RunnerConfig {
             mcp_secret: None,
             external_mcp_servers: HashMap::new(),
             working_directory: None,
+            observational_memory: ObservationalMemoryConfig::enabled(), // OM enabled by default
         }
     }
 }
@@ -573,9 +653,20 @@ pub struct Runner {
     /// Optional memory service for memory tools.
     /// When set, memory tools can store and retrieve information across scopes.
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
-    /// Optional HMS (Hierarchical Memory System) service for file-based memory tools.
-    /// When set, HMS tools can read/write memory.yaml files in directory hierarchies.
+    /// Optional HMS service for hierarchical memory system.
+    /// When set, HMS tools can access memory.yaml files and render AGENTS.md.
     hms_service: Option<wonopcode_tools::SharedHmsService>,
+    // =========================================================================
+    // Observational Memory (OM) state
+    // =========================================================================
+    /// Observational Memory configuration.
+    om_config: ObservationalMemoryConfig,
+    /// Memory state for OM (observations and statistics).
+    /// Only initialized when OM is enabled.
+    memory_state: Option<RwLock<MemoryState>>,
+    /// Token state machine for OM threshold management.
+    /// Only initialized when OM is enabled.
+    token_state_machine: Option<RwLock<TokenStateMachine>>,
 }
 
 impl Runner {
@@ -635,29 +726,12 @@ impl Runner {
         // Create shared LSP client for status reporting
         let lsp_client = Arc::new(wonopcode_lsp::LspClient::with_defaults());
 
-        // Create tool registry with all tools
-        let mut tools = ToolRegistry::with_builtins();
-        tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-        tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-
-        // ACE tools for structured workflow (replaces legacy todowrite/todoread)
-        tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
-        tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
-        tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
-        tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
-        tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
-        tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
-        tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
-
-        tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
-            lsp_client.clone(),
-        )));
-        tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
-        tools.register(Arc::new(
-            wonopcode_tools::plan_mode::EnterPlanModeTool::new(),
-        ));
-        tools.register(Arc::new(wonopcode_tools::plan_mode::ExitPlanModeTool::new()));
-        // Note: skill and batch tools require async initialization, done in new_with_features
+        // Create tool registry with execute_typescript only
+        // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are now accessible
+        // through the wonop.* API inside TypeScript code
+        // Agents (task, plan_mode) are accessible via agents.* API in TypeScript
+        // Skills are accessible via skills.* namespace in TypeScript
+        let tools = ToolRegistry::with_builtins();
 
         // Use shared bus/permission_manager or create new ones
         let bus = shared_bus.unwrap_or_default();
@@ -678,6 +752,59 @@ impl Runner {
 
         // Get context limit from provider for initial context state
         let context_limit = provider.model_info().limit.context;
+
+        // Extract OM config before wrapping in Arc<RwLock<>>
+        let om_config = config.observational_memory.clone();
+
+        // Initialize Observational Memory state if enabled
+        let (memory_state, token_state_machine) = if om_config.enabled {
+            info!(
+                context_limit,
+                observer_ratio = om_config.thresholds.observer_ratio,
+                reflector_ratio = om_config.thresholds.reflector_ratio,
+                project_dir = ?om_config.project_dir,
+                "Observational Memory enabled"
+            );
+            let session_id = format!("session-{}", uuid::Uuid::new_v4());
+            
+            // Try to load observations from disk if project_dir is configured
+            let memory_state = if let Some(ref project_dir) = om_config.project_dir {
+                info!(
+                    project_dir = %project_dir.display(),
+                    "OM: Attempting to load observations from project directory"
+                );
+                let persistence = ObservationPersistence::new(project_dir);
+                match persistence.load_into_state(&session_id, context_limit) {
+                    Ok((state, loaded_date)) => {
+                        if state.loaded_from_previous_session {
+                            info!(
+                                observations = state.observations.len(),
+                                loaded_date = ?loaded_date,
+                                "Loaded observations from previous session"
+                            );
+                        }
+                        state
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to load observations from disk, starting fresh");
+                        MemoryState::new(session_id, context_limit)
+                    }
+                }
+            } else {
+                info!("OM: No project_dir configured, starting with fresh memory state");
+                MemoryState::new(session_id, context_limit)
+            };
+            
+            let token_state_machine =
+                TokenStateMachine::from_config(&om_config.thresholds, context_limit);
+            (
+                Some(RwLock::new(memory_state)),
+                Some(RwLock::new(token_state_machine)),
+            )
+        } else {
+            debug!("Observational Memory disabled, using legacy compaction");
+            (None, None)
+        };
 
         Ok(Self {
             agent_loop: tokio::sync::Mutex::new(agent_loop),
@@ -703,7 +830,11 @@ impl Runner {
             context_state: RwLock::new(ContextState::new(context_limit)),
             ticket_service: None, // Will be set by new_with_shared
             memory_service: None, // Will be set by new_with_shared
-            hms_service: None,    // Will be set by new_with_shared
+            hms_service: None, // Will be set by new_with_shared
+            // Observational Memory state
+            om_config,
+            memory_state,
+            token_state_machine,
         })
     }
 
@@ -950,18 +1081,8 @@ impl Runner {
             }
         }
 
-        // Initialize skill tool (discovers skills from project directories)
-        let skill_dirs = vec![cwd.to_path_buf()];
-        let skill_tool = wonopcode_tools::skill::SkillTool::discover(&skill_dirs).await;
-
-        // Re-register tools with skill support
-        // This should always succeed since we just created the runner and haven't shared the Arc yet
-        if let Some(tools) = Arc::get_mut(&mut runner.tools) {
-            tools.register(Arc::new(skill_tool));
-        } else {
-            // This should never happen during initialization, but log if it does
-            warn!("Could not register skill tool: tools registry already shared");
-        }
+        // Note: Skills are now accessible through the skills.* namespace in TypeScript
+        // via the execute_typescript tool, not as a separate MCP tool.
 
         // Store memory service BEFORE MCP initialization
         // Also initialize workstream for memory service based on project directory
@@ -1119,36 +1240,10 @@ impl Runner {
             }
 
             // We need a mutable tools registry - create a new one with MCP tools
+            // All standard tools (bash, webfetch, lsp) are now accessible via wonop.* API
+            // Agents (task, plan_mode) are now accessible via agents.* API in TypeScript
+            // Skills are accessible via skills.* namespace in TypeScript
             let mut new_tools = ToolRegistry::with_builtins();
-            new_tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-            new_tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-
-            // ACE tools for structured workflow (replaces legacy todowrite/todoread)
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoReadTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoWriteTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceTodoUpdateTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceCreateArtifactTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceReadArtifactTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceWhatNowTool));
-            new_tools.register(Arc::new(wonopcode_tools::AceSubmitCheckpointTool));
-
-            new_tools.register(Arc::new(wonopcode_tools::lsp::LspTool::with_client(
-                self.lsp_client.clone(),
-            )));
-            new_tools.register(Arc::new(wonopcode_tools::task::TaskTool::new()));
-            new_tools.register(Arc::new(
-                wonopcode_tools::plan_mode::EnterPlanModeTool::new(),
-            ));
-            new_tools.register(Arc::new(wonopcode_tools::plan_mode::ExitPlanModeTool::new()));
-
-            // Re-discover skills for the new registry
-            let cwd = self.instance.directory();
-            let skill_dirs = vec![cwd.to_path_buf()];
-            let skill_tool = wonopcode_tools::skill::SkillTool::discover(&skill_dirs).await;
-            new_tools.register(Arc::new(skill_tool));
-
-            // Note: Memory tools are already registered in ToolRegistry::with_builtins()
-            // They access the service through ctx.memory_service (same pattern as ticket tools)
 
             // Register MCP tools
             for tool in mcp_tools {
@@ -1273,6 +1368,10 @@ impl Runner {
         };
 
         // === PRE-PROMPT COMPACTION ===
+        // Skip legacy compaction when Observational Memory is enabled.
+        // OM handles context management via observations/reflections.
+        let om_enabled = self.om_config.enabled;
+        
         // Check if compaction is needed based on TOKEN count (primary) or message count (fallback)
         let context_limit = {
             let provider = self.provider.read().await;
@@ -1291,13 +1390,14 @@ impl Runner {
             0
         };
 
-        // Compaction thresholds
+        // Compaction thresholds (only used when OM is disabled)
         const TOKEN_COMPACTION_THRESHOLD_PERCENT: u8 = 80; // Compact at 80% context usage
         const MESSAGE_COMPACTION_THRESHOLD: usize = 100; // Fallback: also compact at 100+ messages
 
         let needs_token_compaction = usage_percent >= TOKEN_COMPACTION_THRESHOLD_PERCENT;
         let needs_message_compaction = messages.len() > MESSAGE_COMPACTION_THRESHOLD;
-        let needs_compaction = needs_token_compaction || needs_message_compaction;
+        // Only trigger legacy compaction when OM is disabled
+        let needs_compaction = !om_enabled && (needs_token_compaction || needs_message_compaction);
 
         if needs_compaction {
             let reason = if needs_token_compaction {
@@ -1589,6 +1689,14 @@ impl Runner {
         // Get MCP TODO tool mappings for intercepting TODO tool completions
         let mcp_todo_mappings = self.mcp_todo_adapter.as_ref().map(|a| a.tool_mappings());
 
+        // Collector for messages that need to be persisted.
+        // The OM observer drains messages from ctx.messages, so we need to collect
+        // new messages BEFORE they're drained. The agent loop emits MessagesForPersistence
+        // with these messages.
+        let messages_for_persistence: Arc<std::sync::Mutex<Vec<ProviderMessage>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let messages_for_persistence_clone = Arc::clone(&messages_for_persistence);
+
         // Spawn a task to forward LoopUpdate events to AppUpdate
         let update_tx_clone = update_tx.clone();
         let forward_task = tokio::spawn(async move {
@@ -1607,7 +1715,7 @@ impl Runner {
                         metadata,
                     } => {
                         // Check if this is a legacy TODO tool (from MCP) and emit TodosUpdated if so.
-                        // Note: ACE tools (ace_todo_write, ace_todo_update) emit events directly
+                        // Note: ACE tools (todowrite, ace_todo_update) emit events directly
                         // through the tool_event_tx channel, so they don't need interception here.
                         let is_legacy_todo_tool = if let Some(ref mappings) = mcp_todo_mappings {
                             // Check registered MCP TODO tools
@@ -1672,6 +1780,73 @@ impl Runner {
                     },
                     LoopUpdate::Status(status) => AppUpdate::Status(status),
                     LoopUpdate::Error(error) => AppUpdate::Error(error),
+                    LoopUpdate::ObservationalMemoryUpdate(snapshot) => {
+                        tracing::info!(
+                            "🧠 [Runner] Converting LoopUpdate::ObservationalMemoryUpdate: {} observations, {} tokens, enabled={}",
+                            snapshot.observations.len(),
+                            snapshot.observation_tokens,
+                            snapshot.enabled
+                        );
+                        AppUpdate::ObservationalMemoryUpdate(
+                            wonopcode_tui::ObservationalMemoryStateUpdate {
+                                enabled: snapshot.enabled,
+                                observations: snapshot.observations.into_iter()
+                                    .map(convert_observation_snapshot)
+                                    .collect(),
+                                observation_tokens: snapshot.observation_tokens,
+                                reflector_threshold: snapshot.reflector_threshold,
+                                message_tokens: snapshot.message_tokens,
+                                observer_threshold: snapshot.observer_threshold,
+                                system_tokens: snapshot.system_tokens,
+                                total_observations: snapshot.total_observations,
+                                reflections_count: snapshot.reflections_count,
+                                avg_compression: snapshot.avg_compression,
+                                cache_savings: snapshot.cache_savings,
+                                loaded_from_previous_session: snapshot.loaded_from_previous_session,
+                                loaded_session_date: snapshot.loaded_session_date.clone(),
+                            }
+                        )
+                    }
+                    LoopUpdate::MessagesForPersistence(msgs) => {
+                        // Collect messages for session persistence.
+                        // The OM observer drains ctx.messages, so these are emitted BEFORE
+                        // the drain to preserve them for persistence.
+                        tracing::info!(
+                            "🧠 [Runner] Received MessagesForPersistence: {} messages",
+                            msgs.len()
+                        );
+                        if let Ok(mut guard) = messages_for_persistence_clone.lock() {
+                            guard.extend(msgs);
+                        }
+                        continue; // Don't forward to AppUpdate
+                    }
+                    LoopUpdate::CompletionRecorded {
+                        id,
+                        timestamp,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cost,
+                        latency_ms,
+                        total_duration_ms,
+                        finish_reason,
+                        request,
+                        response,
+                    } => AppUpdate::CompletionRecorded {
+                        id,
+                        timestamp,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cost,
+                        latency_ms,
+                        total_duration_ms,
+                        finish_reason,
+                        request,
+                        response,
+                    },
                 };
                 let _ = update_tx_clone.send(app_update);
             }
@@ -1687,10 +1862,6 @@ impl Runner {
                 parameters: t.parameters_schema(),
             })
             .collect();
-
-        // Regenerate AGENTS.md from HMS before building system prompt
-        // This ensures the latest memory context is included
-        self.regenerate_agents_md(cwd).await;
 
         // Build loop config
         let loop_config = {
@@ -1727,16 +1898,38 @@ impl Runner {
         // Get provider (read lock)
         let provider = self.provider.read().await;
 
-        // Create permission checker adapter
+        // Create permission checker adapters
         let permission_checker: Arc<dyn PermissionChecker> = Arc::new(
             PermissionCheckerAdapter::new(self.permission_manager.clone()),
+        );
+        let ts_permission_checker: Arc<dyn wonopcode_tools::TsPermissionChecker> = Arc::new(
+            TsPermissionCheckerAdapter::new(self.permission_manager.clone()),
         );
 
         // Load workstream state for default tracker resolution
         let (workstream_ticket_id, workstream_default_tracker_id) =
             Self::load_workstream_context(cwd);
 
-        // Build LoopContext
+        // Acquire OM locks if enabled - these must live for the duration of run_prompt
+        // We use .write().await since we're in an async context (not blocking_write which panics in async)
+        let mut memory_state_guard = if self.om_config.enabled {
+            match self.memory_state.as_ref() {
+                Some(ms) => Some(ms.write().await),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let mut token_state_machine_guard = if self.om_config.enabled {
+            match self.token_state_machine.as_ref() {
+                Some(tsm) => Some(tsm.write().await),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        // Build LoopContext with OM state references
         let mut ctx = LoopContext {
             cwd,
             messages: &mut messages,
@@ -1756,9 +1949,18 @@ impl Runner {
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
             hms_service: self.hms_service.clone(),
+            ts_permission_checker: Some(ts_permission_checker),
             workstream_ticket_id,
             workstream_default_tracker_id,
             prompt_images: images,
+            // Observational Memory state - enabled if config says so and guards are acquired
+            memory_state: memory_state_guard.as_mut().map(|g| &mut **g),
+            token_state_machine: token_state_machine_guard.as_mut().map(|g| &mut **g),
+            om_enabled: self.om_config.enabled,
+            // Track how many messages existed at start for session persistence
+            messages_count_at_start: messages_count_before_loop,
+            // Project directory for continuous OM persistence
+            om_project_dir: self.om_config.project_dir.clone(),
         };
 
         // Run the agent loop with emergency compaction on context overflow
@@ -1780,6 +1982,19 @@ impl Runner {
             match &loop_result {
                 Err(LoopError::ContextOverflow) if overflow_retries < MAX_OVERFLOW_RETRIES => {
                     overflow_retries += 1;
+                    
+                    // When OM is enabled, context overflow is unexpected (OM should manage context).
+                    // Skip legacy compaction and report the error - OM needs investigation.
+                    if om_enabled {
+                        warn!(
+                            retry = overflow_retries,
+                            "Context overflow detected with Observational Memory enabled - this is unexpected. \
+                             OM should have compressed context before overflow. Skipping legacy compaction."
+                        );
+                        result = loop_result;
+                        break;
+                    }
+                    
                     warn!(
                         retry = overflow_retries,
                         "Context overflow detected, performing emergency compaction"
@@ -1927,15 +2142,32 @@ impl Runner {
         if result.is_ok() {
             if let Some(ref svc) = self.session_service {
                 if let Some(ref parent_id) = user_msg_id {
-                    // Only process messages that were added during this turn
-                    // (skip the ones that existed before the loop ran)
-                    let new_messages: Vec<_> =
-                        messages.iter().skip(messages_count_before_loop).collect();
+                    // Get new messages for persistence.
+                    // PRIORITY 1: Use messages collected from OM's MessagesForPersistence (emitted BEFORE drain)
+                    // PRIORITY 2: Fallback to ctx.messages if OM didn't run (no drain happened)
+                    let collected_messages = messages_for_persistence
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
+                    
+                    let new_messages: Vec<_> = if !collected_messages.is_empty() {
+                        // Use messages collected from OM before the drain
+                        info!(
+                            "SESSION PERSISTENCE: Using {} messages from MessagesForPersistence collector",
+                            collected_messages.len()
+                        );
+                        collected_messages.iter().collect()
+                    } else {
+                        // Fallback: OM didn't run or didn't emit messages, use ctx.messages
+                        // (this happens when OM is disabled or threshold wasn't reached)
+                        messages.iter().skip(messages_count_before_loop).collect()
+                    };
 
                     trace!(
                         messages_before = messages_count_before_loop,
                         messages_after = messages.len(),
                         new_message_count = new_messages.len(),
+                        collected_count = collected_messages.len(),
                         "SESSION PERSISTENCE: Processing new messages for storage"
                     );
 
@@ -2125,6 +2357,7 @@ impl Runner {
                 mcp_secret: old_config.mcp_secret.clone(),
                 external_mcp_servers: old_config.external_mcp_servers.clone(),
                 working_directory: old_config.working_directory.clone(),
+                observational_memory: old_config.observational_memory.clone(),
             }
         };
 
@@ -2312,6 +2545,97 @@ impl Runner {
                     messages = history.len(),
                     "Sent initial context status based on loaded history"
                 );
+            }
+        }
+
+        // Send initial Observational Memory state if observations were loaded
+        // This ensures the frontend gets the persisted observations on startup
+        if self.om_config.enabled {
+            if let Some(ref memory_state) = self.memory_state {
+                let state = memory_state.read().await;
+                
+                if !state.observations.is_empty() || state.loaded_from_previous_session {
+                    // Get threshold info from token state machine if available
+                    let (observation_tokens, message_tokens, reflector_threshold, observer_threshold) = 
+                        if let Some(ref tsm) = self.token_state_machine {
+                            let sm = tsm.read().await;
+                            let thresholds = sm.thresholds();
+                            (
+                                sm.observation_tokens(),
+                                sm.message_tokens(),
+                                thresholds.reflector_threshold,
+                                thresholds.observer_threshold,
+                            )
+                        } else {
+                            (state.observation_tokens, state.unobserved_message_tokens, 20_000, 10_000)
+                        };
+                    
+                    let stats = &state.stats;
+                    let avg_compression = if stats.tokens_observed > 0 {
+                        stats.tokens_observed as f32 / stats.tokens_after_compression.max(1) as f32
+                    } else {
+                        1.0
+                    };
+                    
+                    let loaded_session_date = if state.loaded_from_previous_session && !state.observations.is_empty() {
+                        state.observations.first()
+                            .map(|o| o.observation_date.format("%B %d").to_string())
+                    } else {
+                        None
+                    };
+                    
+                    // Convert observations to snapshots
+                    let observations: Vec<wonopcode_agent_loop::ObservationSnapshot> = state.observations.iter()
+                        .map(observation_to_snapshot)
+                        .collect();
+                    
+                    info!(
+                        observations = observations.len(),
+                        observation_tokens = observation_tokens,
+                        loaded_from_previous = state.loaded_from_previous_session,
+                        "Sending initial OM state to frontend"
+                    );
+                    
+                    // Create snapshot and convert to TUI format
+                    let snapshot = wonopcode_agent_loop::ObservationalMemoryStateSnapshot {
+                        enabled: true,
+                        observations,
+                        observation_tokens,
+                        reflector_threshold,
+                        message_tokens,
+                        observer_threshold,
+                        system_tokens: 0,
+                        total_observations: stats.total_observations,
+                        reflections_count: stats.reflections_run,
+                        avg_compression,
+                        cache_savings: 0.0,
+                        loaded_from_previous_session: state.loaded_from_previous_session,
+                        loaded_session_date,
+                    };
+                    
+                    send_update(
+                        &update_tx,
+                        AppUpdate::ObservationalMemoryUpdate(
+                            wonopcode_tui::ObservationalMemoryStateUpdate {
+                                enabled: snapshot.enabled,
+                                observations: snapshot.observations.into_iter()
+                                    .map(convert_observation_snapshot)
+                                    .collect(),
+                                observation_tokens: snapshot.observation_tokens,
+                                reflector_threshold: snapshot.reflector_threshold,
+                                message_tokens: snapshot.message_tokens,
+                                observer_threshold: snapshot.observer_threshold,
+                                system_tokens: snapshot.system_tokens,
+                                total_observations: snapshot.total_observations,
+                                reflections_count: snapshot.reflections_count,
+                                avg_compression: snapshot.avg_compression,
+                                cache_savings: snapshot.cache_savings,
+                                loaded_from_previous_session: snapshot.loaded_from_previous_session,
+                                loaded_session_date: snapshot.loaded_session_date,
+                            },
+                        ),
+                    );
+                }
             }
         }
 
@@ -3262,6 +3586,29 @@ impl Runner {
             }
         }
 
+        // Save Observational Memory state to disk before shutdown
+        if self.om_config.enabled {
+            if let Some(ref project_dir) = self.om_config.project_dir {
+                if let Some(ref memory_state) = self.memory_state {
+                    let state = memory_state.read().await;
+                    if !state.observations.is_empty() {
+                        let persistence = ObservationPersistence::new(project_dir);
+                        match persistence.save(&state) {
+                            Ok(()) => {
+                                info!(
+                                    observations = state.observations.len(),
+                                    "Saved observations for cross-session memory"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to save observations to disk");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Cleanup: stop sandbox container on exit
         self.cleanup_sandbox().await;
 
@@ -3521,32 +3868,6 @@ impl Runner {
                     container_id: None,
                 }),
             );
-        }
-    }
-
-    /// Regenerate AGENTS.md from HMS (Hierarchical Memory System).
-    ///
-    /// This is called before building the system prompt to ensure the agent
-    /// receives the latest context from resolved memories. If HMS is not
-    /// configured or encounters an error, this silently continues (the agent
-    /// will work without HMS context).
-    async fn regenerate_agents_md(&self, cwd: &std::path::Path) {
-        let Some(ref hms_service) = self.hms_service else {
-            return; // HMS not configured
-        };
-
-        // Need mutable access to the service for generation
-        let mut service = hms_service.write().await;
-
-        // Generate and write AGENTS.md
-        match service.write_agents_md(cwd).await {
-            Ok(path) => {
-                debug!(path = %path.display(), "Regenerated AGENTS.md from HMS");
-            }
-            Err(e) => {
-                // Log but don't fail - HMS is optional
-                debug!(error = %e, "Failed to regenerate AGENTS.md from HMS");
-            }
         }
     }
 
@@ -4274,40 +4595,39 @@ fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<
 }
 
 /// Load custom instructions from common instruction files.
-///
-/// Returns the content of the FIRST instruction file found (in priority order).
-/// This prevents duplicate content when multiple files exist with the same content.
-///
-/// Note: Claude CLI automatically reads CLAUDE.md from the working directory,
-/// so we don't pass custom instructions via --system-prompt for that provider.
-/// For other providers (anthropic API, openai, etc.), this function provides
-/// the custom instructions to include in the system prompt.
 fn load_custom_instructions(cwd: &Path) -> Option<String> {
     // Look for custom instruction files in order of priority
-    // Only the first one found is used to avoid duplicates
     let instruction_files = [
-        ".wonopcode/AGENTS.md",   // Our primary location
-        ".wonopcode/CLAUDE.md",   // Claude Code compatibility (in .wonopcode)
-        "AGENTS.md",              // Root fallback
-        "CLAUDE.md",              // Claude Code compatibility (root)
-        ".claude/CLAUDE.md",      // Claude's standard location
+        ".wonopcode/AGENTS.md",
+        "AGENTS.md",
+        ".claude/CLAUDE.md",
+        "CLAUDE.md",
         ".wonopcode/instructions.md",
-        ".cursor/rules",          // Cursor compatibility
+        ".cursor/rules",
     ];
+
+    let mut instructions = Vec::new();
 
     for file in &instruction_files {
         let path = cwd.join(file);
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
-                let content = content.trim();
-                if !content.is_empty() {
-                    return Some(format!("# Instructions from {}\n\n{}", file, content));
+                if !content.trim().is_empty() {
+                    instructions.push(format!(
+                        "# Instructions from {}\n\n{}",
+                        file,
+                        content.trim()
+                    ));
                 }
             }
         }
     }
 
-    None
+    if instructions.is_empty() {
+        None
+    } else {
+        Some(instructions.join("\n\n"))
+    }
 }
 
 /// Load API key from environment or credentials file.

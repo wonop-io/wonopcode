@@ -4,7 +4,7 @@
 //! and provides a unified view of all available models across providers.
 
 use crate::model::{
-    ModalitySupport, ModelCapabilities, ModelCost, ModelInfo, ModelLimit, ModelStatus,
+    ModalitySupport, ModelCapabilities, ModelCost, ModelInfo, ModelLimit, ModelStatus, TokenizerInfo,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -448,6 +448,7 @@ fn model_to_info(provider_id: &str, model: &ModelsDevModel) -> ModelInfo {
             output: model.limit.output,
         },
         status,
+        tokenizer: TokenizerInfo::default(),
     }
 }
 

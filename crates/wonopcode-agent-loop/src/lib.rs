@@ -50,9 +50,25 @@ pub mod traits;
 // Re-exports for convenience
 pub use capabilities::LoopCapabilities;
 pub use context::{
-    CompactionConfig, LoopConfig, LoopContext, LoopUpdate, PermissionCheckRequest,
-    PermissionChecker, PromptImage,
+    CompactionConfig, LoopConfig, LoopContext, LoopUpdate, ObservationalMemoryStateSnapshot,
+    ObservationSnapshot, PermissionCheckRequest, PermissionChecker, PromptImage,
 };
 pub use error::{LoopError, LoopResult};
 pub use standard::StandardLoop;
 pub use traits::{AgentLoop, BoxedAgentLoop};
+
+// Re-export OM types for convenience
+pub use wonopcode_observational_memory::{
+    // Core types
+    MemoryState, MemoryStats, Observation, ObservationCategory, Priority, ReflectionStats,
+    // Configuration
+    ObservationalMemoryConfig, ThresholdConfig,
+    // Agents
+    ObserverAgent, ObserverConfig, ReflectorAgent, ReflectorConfig,
+    // State machine
+    ComputedThresholds, TokenState, TokenStateMachine,
+    // Token counting
+    TokenCounter, TokenCounterConfig,
+    // Persistence (re-export the module for full access)
+    persistence,
+};

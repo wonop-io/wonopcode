@@ -23,6 +23,7 @@
 //! ```
 
 pub mod config;
+pub mod service;
 pub mod state;
 pub mod store;
 pub mod tools;
@@ -30,14 +31,16 @@ pub mod types;
 
 // Re-export commonly used types
 pub use config::{AceConfig, WonopCodeConfig};
+pub use service::{FileAceService, SharedAceService};
 pub use state::WorkstreamState;
 pub use store::ArtifactStore;
 pub use types::{
-    Artifact, ArtifactMetadata, ArtifactType, PhaseStatus, Priority, Progress, WorkflowPhase,
+    Artifact, ArtifactMetadata, ArtifactType, PhaseStatus, Priority, Progress,
+    SessionLogImportance, WorkflowPhase,
 };
 
 // Re-export tools for registration
 pub use tools::{
-    AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
-    AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+    AceCreateArtifactTool, AceReadArtifactTool, AceSessionLogTool, AceSubmitCheckpointTool,
+    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
 };

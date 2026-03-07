@@ -17,6 +17,7 @@ use wonopcode_provider::{
     model::ModelInfo, stream::StreamChunk, BoxedLanguageModel, GenerateOptions,
     Message as ProviderMessage, ToolDefinition,
 };
+use wonopcode_codemode::{format_hints_for_injection, select_hints};
 use wonopcode_tools::ToolRegistry;
 
 /// Processor configuration.
@@ -64,19 +65,9 @@ impl Processor {
         // Create provider
         let provider = create_provider(&config)?;
 
-        // Create in-memory todo store
-        let todo_store = Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new());
-
-        // Create tool registry
-        let mut tools = ToolRegistry::with_builtins();
-        tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-        tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-        tools.register(Arc::new(wonopcode_tools::todo::TodoWriteTool::new(
-            todo_store.clone(),
-        )));
-        tools.register(Arc::new(wonopcode_tools::todo::TodoReadTool::new(
-            todo_store,
-        )));
+        // Create tool registry with execute_typescript only
+        // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are accessible via wonop.* API
+        let tools = ToolRegistry::with_builtins();
 
         Ok(Self {
             config,
@@ -130,10 +121,19 @@ impl Processor {
             &environment,
         );
 
-        // Add user message to history
+        // Add user message with hints to history
         {
+            // Select contextual hints based on user message
+            let hints = select_hints(prompt, &[]);
+            let hints_text = format_hints_for_injection(&hints);
+            let augmented_prompt = if hints_text.is_empty() {
+                prompt.to_string()
+            } else {
+                format!("{}\n\n{}", prompt, hints_text)
+            };
+
             let mut history = self.history.write().await;
-            history.push(ProviderMessage::user(prompt));
+            history.push(ProviderMessage::user(&augmented_prompt));
         }
 
         // Get tool definitions
@@ -372,7 +372,9 @@ impl Processor {
             event_tx: None,
             ticket_service: None, // ACP tools run without ticket service for now
             memory_service: None, // ACP tools run without memory service for now
+            ace_service: None, // ACE service is created lazily from root_dir
             hms_service: None, // ACP tools run without HMS service for now
+            permission_checker: None, // ACP tools run without permission checker for now
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         };

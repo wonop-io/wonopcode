@@ -34,11 +34,11 @@ impl Tool for AceCreateArtifactTool {
         r#"Create a new artifact within the ticket scope.
 
 Artifact types and their parent requirements:
-- use-case: Describes a user interaction scenario. No parents required.
+- use-case: Describes a user interaction scenario. Parents to session (auto-assigned if not specified).
 - requirement: A specific, testable requirement. Parent: use-case
 - design: Technical design documentation. Parent: requirement
 - test-case: Verification criteria. Parent: requirement
-- task: Atomic unit of work. Parent: requirement, design, or test-case
+- task: Atomic unit of work. Parent: session, requirement, design, or test-case
 
 The artifact ID is automatically generated: {TYPE}-{TICKET_ID}-{SEQUENCE}
 Example: UC-WON-122-001, REQ-WON-122-003
@@ -108,6 +108,21 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
             ToolError::execution_failed(format!("Failed to create directories: {e}"))
         })?;
 
+        // Ensure session exists (auto-creates if needed)
+        let session_id = store
+            .ensure_session(&mut state, &ctx.root_dir)
+            .map_err(|e| ToolError::execution_failed(format!("Failed to ensure session: {e}")))?;
+
+        // Auto-assign session as parent for use-cases and tasks if no parent specified
+        let parents = if args.parents.is_empty() {
+            match artifact_type {
+                ArtifactType::UseCase | ArtifactType::Task => vec![session_id],
+                _ => args.parents.clone(),
+            }
+        } else {
+            args.parents.clone()
+        };
+
         let staging = args.staging.unwrap_or(true);
         let artifact = store
             .create_artifact(
@@ -115,7 +130,7 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
                 artifact_type,
                 &args.title,
                 &args.content,
-                args.parents.clone(),
+                parents.clone(),
                 priority,
                 staging,
             )
@@ -127,6 +142,18 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
             .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
 
         let location = if staging { "staging" } else { "specs" };
+
+        // Emit ArtifactCreated event so Documents View updates
+        if let Some(ref event_tx) = ctx.event_tx {
+            tracing::debug!(
+                "📝 ace_create_artifact: Emitting ArtifactCreated for {}",
+                artifact.metadata.id
+            );
+            let _ = event_tx.send(crate::ToolEvent::ArtifactCreated {
+                id: artifact.metadata.id.clone(),
+                artifact_type: args.artifact_type.clone(),
+            });
+        }
 
         Ok(ToolOutput::new(
             format!(
@@ -144,10 +171,10 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
                 artifact.metadata.id,
                 artifact.title,
                 location,
-                if args.parents.is_empty() {
+                if parents.is_empty() {
                     "(none)".to_string()
                 } else {
-                    args.parents.join(", ")
+                    parents.join(", ")
                 },
                 artifact.path.display()
             ),
@@ -157,6 +184,7 @@ Artifacts are created in staging by default. Use ace_submit_checkpoint to reques
             "type": args.artifact_type,
             "path": artifact.path.to_string_lossy(),
             "staging": staging,
+            "parents": parents,
         })))
     }
 }
@@ -277,7 +305,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
-            hms_service: None,
+            ace_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -292,7 +321,7 @@ mod tests {
         let mut state = WorkstreamState::new("WON-123");
         state.save(dir.path()).unwrap();
 
-        // Create artifact
+        // Create UseCase (session will be auto-created via ensure_session)
         let tool = AceCreateArtifactTool;
         let result = tool
             .execute(
@@ -308,6 +337,8 @@ mod tests {
             .unwrap();
 
         assert!(result.output.contains("UC-WON-123-001"));
+        // Verify session was auto-assigned as parent
+        assert!(result.output.contains("SESSION-WON-123-001"));
 
         // Read artifact
         let read_tool = AceReadArtifactTool;

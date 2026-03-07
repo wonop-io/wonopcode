@@ -430,6 +430,7 @@ impl LanguageModel for CompoundCodersProvider {
 /// Built-in model definitions for Compound Coders.
 pub mod models {
     use super::*;
+    use crate::model::TokenizerInfo;
 
     /// Wonop GPT - General purpose GPT model.
     pub fn wonop_gpt() -> ModelInfo {
@@ -467,6 +468,7 @@ pub mod models {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 
@@ -506,6 +508,7 @@ pub mod models {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 }

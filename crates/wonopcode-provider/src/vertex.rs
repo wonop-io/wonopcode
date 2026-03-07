@@ -441,6 +441,10 @@ pub mod models {
                 output: 8192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 
@@ -480,6 +484,10 @@ pub mod models {
                 output: 8192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 
@@ -519,6 +527,10 @@ pub mod models {
                 output: 8192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 
@@ -557,6 +569,10 @@ pub mod models {
                 output: 8192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -595,6 +611,10 @@ pub mod models {
                 output: 8192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 }

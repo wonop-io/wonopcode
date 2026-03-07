@@ -28,6 +28,7 @@
 //! - `local`: `.wonopcode-local/memory.yaml` - gitignored
 //! - `user`: `~/.config/wonopcode/memory.yaml` - global user preferences
 
+mod codemode_adapter;
 mod error;
 mod renderer;
 mod resolver;
@@ -35,6 +36,7 @@ mod service;
 mod tools;
 mod types;
 
+pub use codemode_adapter::HmsServiceAdapter;
 pub use error::HmsError;
 pub use renderer::{AgentsGenerator, TemplateRenderer};
 pub use resolver::{CachedResolver, MemoryResolver};

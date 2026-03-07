@@ -78,6 +78,7 @@ pub mod models {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 
@@ -113,6 +114,7 @@ pub mod models {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 
@@ -148,6 +150,7 @@ pub mod models {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 
@@ -183,6 +186,7 @@ pub mod models {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo::default(),
         }
     }
 }

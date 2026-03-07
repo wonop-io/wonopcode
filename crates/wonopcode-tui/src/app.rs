@@ -415,6 +415,12 @@ pub enum AppUpdate {
         phases: Vec<PhaseUpdate>,
         todos: Vec<TodoUpdate>,
     },
+    /// Artifacts updated (from ACE tools).
+    /// Used by desktop to update Documents view.
+    ArtifactsUpdated {
+        /// List of artifact summaries (id, type, title, progress, priority, parents, is_staged).
+        artifacts: Vec<(String, String, String, String, String, Vec<String>, bool)>,
+    },
     /// LSP servers updated.
     LspUpdated(Vec<LspStatusUpdate>),
     /// MCP servers updated.
@@ -488,6 +494,86 @@ pub enum AppUpdate {
         /// Phase: "summarizing" or "combining".
         phase: String,
     },
+    /// Observational Memory state update.
+    ObservationalMemoryUpdate(ObservationalMemoryStateUpdate),
+    /// Completion statistics recorded (Developer Mode feature).
+    ///
+    /// Emitted after each LLM completion finishes, containing timing
+    /// and usage data for debugging and monitoring.
+    CompletionRecorded {
+        /// Unique ID for this completion.
+        id: String,
+        /// Unix timestamp (ms) when completion started.
+        timestamp: f64,
+        /// Model ID used.
+        model: String,
+        /// Input tokens for this completion.
+        input_tokens: u64,
+        /// Output tokens for this completion.
+        output_tokens: u64,
+        /// Cache read tokens (if applicable).
+        cache_read_tokens: u64,
+        /// Estimated cost for this completion.
+        cost: f64,
+        /// Time to first token (ms).
+        latency_ms: u64,
+        /// Total duration from start to finish (ms).
+        total_duration_ms: u64,
+        /// Finish reason (end_turn, tool_use, max_tokens, etc.).
+        finish_reason: String,
+        /// Optional: Full request JSON (if recording enabled).
+        request: Option<serde_json::Value>,
+        /// Optional: Full response JSON (if recording enabled).
+        response: Option<serde_json::Value>,
+    },
+}
+
+/// Observational Memory state update for UI.
+#[derive(Debug, Clone)]
+pub struct ObservationalMemoryStateUpdate {
+    /// Whether OM is enabled.
+    pub enabled: bool,
+    /// Current observations.
+    pub observations: Vec<ObservationUpdate>,
+    /// Token count for observations.
+    pub observation_tokens: u32,
+    /// Reflector token threshold.
+    pub reflector_threshold: u32,
+    /// Token count for unobserved messages.
+    pub message_tokens: u32,
+    /// Observer token threshold.
+    pub observer_threshold: u32,
+    /// System prompt token estimate.
+    pub system_tokens: u32,
+    /// Total observations created.
+    pub total_observations: u32,
+    /// Number of reflections performed.
+    pub reflections_count: u32,
+    /// Average compression ratio achieved.
+    pub avg_compression: f32,
+    /// Estimated cost savings from caching.
+    pub cache_savings: f64,
+    /// Whether observations were loaded from a previous session.
+    pub loaded_from_previous_session: bool,
+    /// When the previous session was saved (human-readable).
+    pub loaded_session_date: Option<String>,
+}
+
+/// Single observation update for UI.
+#[derive(Debug, Clone)]
+pub struct ObservationUpdate {
+    /// Unique identifier for this observation.
+    pub id: String,
+    /// Priority level: "high", "medium", or "low".
+    pub priority: String,
+    /// Timestamp when the observation was created.
+    pub timestamp: String,
+    /// Content of the observation.
+    pub content: String,
+    /// Child observations (hierarchical structure).
+    pub children: Vec<ObservationUpdate>,
+    /// Whether this observation is pinned by the user.
+    pub pinned: bool,
 }
 
 /// Git status update from the runner.
@@ -3760,6 +3846,15 @@ async function fetchUserData(userId) {
                 phase: _,
             } => {
                 // TUI doesn't have a visible progress indicator yet
+            }
+            AppUpdate::ObservationalMemoryUpdate(_) => {
+                // TUI doesn't have an OM memory panel - handled by Desktop UI
+            }
+            AppUpdate::ArtifactsUpdated { .. } => {
+                // TUI doesn't have a Documents View - handled by desktop only
+            }
+            AppUpdate::CompletionRecorded { .. } => {
+                // TUI doesn't have a stats panel - handled by Desktop UI (Developer Mode feature)
             }
         }
     }

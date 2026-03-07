@@ -18,7 +18,6 @@ struct ToolExecutorWrapper {
     cancel: tokio_util::sync::CancellationToken,
     permissions: Arc<wonopcode_core::permission::PermissionManager>,
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
-    hms_service: Option<wonopcode_tools::SharedHmsService>,
 }
 
 #[async_trait::async_trait]
@@ -120,7 +119,9 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             event_tx: None,                               // MCP HTTP doesn't need event_tx
             ticket_service: None,                         // No ticket service in MCP HTTP
             memory_service: self.memory_service.clone(),  // Share memory service with tools
-            hms_service: self.hms_service.clone(),        // Share HMS service with tools
+            ace_service: None,                            // ACE service created lazily from root_dir
+            hms_service: None,                            // No HMS service in MCP HTTP
+            permission_checker: None,                     // No permission checker in MCP HTTP
             workstream_ticket_id: None,                   // No workstream in MCP HTTP
             workstream_default_tracker_id: None,          // No workstream tracker in MCP HTTP
         };
@@ -289,33 +290,9 @@ pub async fn create_mcp_http_state(
     // Initialize file time tracker
     let file_time = Arc::new(FileTimeState::new());
 
-    // Use shared file todo store
-    let todo_store: Arc<dyn wonopcode_tools::todo::TodoStore> = if let Some(store) =
-        wonopcode_tools::todo::SharedFileTodoStore::from_env()
-    {
-        tracing::info!(
-            path = %store.path().display(),
-            "MCP HTTP using SharedFileTodoStore"
-        );
-        Arc::new(store)
-    } else {
-        tracing::warn!("WONOPCODE_TODO_FILE not set, MCP HTTP using InMemoryTodoStore - todos will NOT sync with TUI!");
-        Arc::new(wonopcode_tools::todo::InMemoryTodoStore::new())
-    };
-
-    // Create tool registry with all tools
-    // Note: Memory tools are included in with_builtins() and access the service
-    // through ctx.memory_service at execution time (same pattern as ticket tools)
-    let mut tools = ToolRegistry::with_builtins();
-    tools.register(Arc::new(wonopcode_tools::bash::BashTool));
-    tools.register(Arc::new(wonopcode_tools::webfetch::WebFetchTool));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoWriteTool::new(
-        todo_store.clone(),
-    )));
-    tools.register(Arc::new(wonopcode_tools::todo::TodoReadTool::new(
-        todo_store,
-    )));
-    tools.register(Arc::new(wonopcode_tools::lsp::LspTool::new()));
+    // Create tool registry with execute_typescript only
+    // All other tools (bash, webfetch, lsp, ACE, tickets, memory) are accessible via wonop.* API
+    let tools = ToolRegistry::with_builtins();
 
     // Create memory service and initialize workstream
     // The service is passed to ToolExecutorWrapper so tools can access it via ctx.memory_service
@@ -340,13 +317,6 @@ pub async fn create_mcp_http_state(
             }
         };
 
-    // Initialize HMS (Hierarchical Memory System) service for AGENTS.md generation
-    let hms_service: Option<wonopcode_tools::SharedHmsService> = {
-        let service = wonopcode_tools::HmsService::new(cwd.to_path_buf());
-        tracing::info!("HMS service initialized for MCP HTTP");
-        Some(std::sync::Arc::new(tokio::sync::RwLock::new(service)))
-    };
-
     // Build MCP server tools map
     let mut mcp_tools = std::collections::HashMap::new();
     let cancel = CancellationToken::new();
@@ -358,7 +328,6 @@ pub async fn create_mcp_http_state(
         let cancel_clone = cancel.clone();
         let perm = permission_manager.clone();
         let mem_svc = memory_service.clone();
-        let hms_svc = hms_service.clone();
 
         let executor = ToolExecutorWrapper {
             tool: tool_clone,
@@ -367,7 +336,6 @@ pub async fn create_mcp_http_state(
             cancel: cancel_clone,
             permissions: perm,
             memory_service: mem_svc,
-            hms_service: hms_svc,
         };
 
         mcp_tools.insert(

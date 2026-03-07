@@ -579,6 +579,7 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
+        observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
     };
 
     // Get MCP config from config file
@@ -596,14 +597,6 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
                 None
             }
         };
-
-    // Initialize HMS (Hierarchical Memory System) service for AGENTS.md generation
-    let hms_service: Option<wonopcode_tools::SharedHmsService> = {
-        let project_root = instance.directory().to_path_buf();
-        let service = wonopcode_tools::HmsService::new(project_root);
-        info!("HMS service initialized");
-        Some(std::sync::Arc::new(tokio::sync::RwLock::new(service)))
-    };
 
     // Check if update notification is ready (with timeout)
     let update_msg = tokio::time::timeout(std::time::Duration::from_secs(2), update_notification)
@@ -631,7 +624,6 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
             shared_bus,
             shared_permission_manager,
             memory_service,
-            hms_service,
         )
         .await?;
     } else {
@@ -646,7 +638,6 @@ async fn run_interactive(cwd: &std::path::Path, cli: Cli) -> anyhow::Result<()> 
             shared_bus,
             shared_permission_manager,
             memory_service,
-            hms_service,
         )
         .await?;
     }
@@ -673,7 +664,6 @@ async fn run_basic_mode(
     shared_bus: wonopcode_core::bus::Bus,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
-    hms_service: Option<wonopcode_tools::SharedHmsService>,
 ) -> anyhow::Result<()> {
     use std::io::{self, BufRead, Write};
 
@@ -701,7 +691,7 @@ async fn run_basic_mode(
         None, // Use default StandardLoop
         None, // No ticket service in CLI mode
         memory_service, // Memory service for persistent memory
-        hms_service, // HMS service for AGENTS.md generation
+        None, // No HMS service in CLI mode (not implemented yet)
     )
     .await
     {
@@ -839,7 +829,6 @@ async fn run_tui_mode(
     shared_bus: wonopcode_core::bus::Bus,
     shared_permission_manager: Arc<wonopcode_core::PermissionManager>,
     memory_service: Option<wonopcode_tools::SharedMemoryService>,
-    hms_service: Option<wonopcode_tools::SharedHmsService>,
 ) -> anyhow::Result<()> {
     use wonopcode_tui::{App, SidebarWidget};
 
@@ -883,7 +872,7 @@ async fn run_tui_mode(
         None, // Use default StandardLoop
         None, // No ticket service in TUI mode
         memory_service, // Memory service for persistent memory
-        hms_service, // HMS service for AGENTS.md generation
+        None, // No HMS service in TUI mode
     )
     .await
     {
@@ -1002,6 +991,7 @@ async fn run_headless(
         external_mcp_servers: std::collections::HashMap::new(), // Populated by Runner from mcp_configs
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
+        observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
     };
 
     // Get MCP config
@@ -1019,14 +1009,6 @@ async fn run_headless(
                 None
             }
         };
-
-    // Initialize HMS (Hierarchical Memory System) service for AGENTS.md generation
-    let hms_service: Option<wonopcode_tools::SharedHmsService> = {
-        let project_root = instance.directory().to_path_buf();
-        let service = wonopcode_tools::HmsService::new(project_root);
-        info!("HMS service initialized for headless mode");
-        Some(std::sync::Arc::new(tokio::sync::RwLock::new(service)))
-    };
 
     // Create shared permission manager for both Runner and MCP HTTP server.
     // This ensures sandbox state is shared between them - when sandbox is started
@@ -1275,7 +1257,7 @@ async fn run_headless(
         None, // Use default StandardLoop
         None, // No ticket service in headless mode
         memory_service, // Memory service for persistent memory
-        hms_service, // HMS service for AGENTS.md generation
+        None, // No HMS service in headless mode
     )
     .await
     {
@@ -1822,6 +1804,18 @@ async fn run_headless(
                     continue;
                 }
                 wonopcode_tui::AppUpdate::CompactionNotNeeded => {
+                    continue;
+                }
+                // OM state updates are handled internally for TUI display
+                wonopcode_tui::AppUpdate::ObservationalMemoryUpdate(_) => {
+                    continue;
+                }
+                // ArtifactsUpdated is desktop-only feature
+                wonopcode_tui::AppUpdate::ArtifactsUpdated { .. } => {
+                    continue;
+                }
+                // CompletionRecorded is internal state for completion tracking
+                wonopcode_tui::AppUpdate::CompletionRecorded { .. } => {
                     continue;
                 }
             };

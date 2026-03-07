@@ -248,6 +248,77 @@ pub enum WorkstreamEventData {
         /// Phase: "summarizing" or "combining".
         phase: String,
     },
+
+    // =========================================================================
+    // Observational Memory
+    // =========================================================================
+    /// Observational Memory state update.
+    ObservationalMemoryUpdate {
+        /// Whether OM is enabled.
+        enabled: bool,
+        /// Current observations.
+        observations: Vec<super::ObservationSnapshot>,
+        /// Token count for observations.
+        observation_tokens: u32,
+        /// Reflector token threshold.
+        reflector_threshold: u32,
+        /// Token count for unobserved messages.
+        message_tokens: u32,
+        /// Observer token threshold.
+        observer_threshold: u32,
+        /// System prompt token estimate.
+        system_tokens: u32,
+        /// Total observations created.
+        total_observations: u32,
+        /// Number of reflections performed.
+        reflections_count: u32,
+        /// Average compression ratio achieved.
+        avg_compression: f32,
+        /// Estimated cost savings from caching.
+        cache_savings: f64,
+        /// Whether observations were loaded from a previous session.
+        #[serde(default)]
+        loaded_from_previous_session: bool,
+        /// When the previous session was saved (human-readable).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        loaded_session_date: Option<String>,
+    },
+
+    // =========================================================================
+    // Developer Mode Statistics
+    // =========================================================================
+    /// Completion statistics recorded (Developer Mode feature).
+    ///
+    /// Emitted after each LLM completion finishes, containing timing
+    /// and usage data for debugging and monitoring.
+    CompletionRecorded {
+        /// Unique ID for this completion.
+        id: String,
+        /// Unix timestamp (ms) when completion started.
+        timestamp: f64,
+        /// Model ID used.
+        model: String,
+        /// Input tokens for this completion.
+        input_tokens: u64,
+        /// Output tokens for this completion.
+        output_tokens: u64,
+        /// Cache read tokens (if applicable).
+        cache_read_tokens: u64,
+        /// Estimated cost for this completion.
+        cost: f64,
+        /// Time to first token (ms).
+        latency_ms: u64,
+        /// Total duration from start to finish (ms).
+        total_duration_ms: u64,
+        /// Finish reason (end_turn, tool_use, max_tokens, etc.).
+        finish_reason: String,
+        /// Optional: Full request JSON (if recording enabled).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request: Option<serde_json::Value>,
+        /// Optional: Full response JSON (if recording enabled).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        response: Option<serde_json::Value>,
+    },
 }
 
 /// A part of a message (for rich reconstruction).

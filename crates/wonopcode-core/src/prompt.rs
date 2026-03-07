@@ -431,7 +431,9 @@ impl PromptLoop {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            ace_service: None, // ACE service is created lazily from root_dir
             hms_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         };

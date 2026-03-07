@@ -23,6 +23,10 @@ pub struct ModelInfo {
     /// Model status.
     #[serde(default)]
     pub status: ModelStatus,
+    /// Tokenizer information for token estimation.
+    /// Used by Observational Memory to track context budget.
+    #[serde(default)]
+    pub tokenizer: TokenizerInfo,
 }
 
 /// Model capabilities.
@@ -135,6 +139,32 @@ pub struct ModelLimit {
     pub output: u32,
 }
 
+/// Tokenizer information for accurate token estimation.
+///
+/// This enables the Observational Memory system to estimate token counts
+/// without expensive API calls, using a character-based approximation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenizerInfo {
+    /// Tokenizer identifier (e.g., "cl100k_base" for GPT-4, "claude" for Claude).
+    /// Reserved for future use with actual tokenizer libraries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Average characters per token for this model's tokenizer.
+    /// Used for fast token estimation: tokens ≈ chars / chars_per_token.
+    /// Typical values: 3.8 for Claude, 4.0 for GPT-4, 3.5 for Gemini.
+    pub chars_per_token: f32,
+}
+
+impl Default for TokenizerInfo {
+    fn default() -> Self {
+        Self {
+            id: None,
+            // Default to 4.0 (GPT-4 average) as a safe fallback
+            chars_per_token: 4.0,
+        }
+    }
+}
+
 /// Model status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -162,6 +192,7 @@ impl ModelInfo {
             cost: ModelCost::default(),
             limit: ModelLimit::default(),
             status: ModelStatus::default(),
+            tokenizer: TokenizerInfo::default(),
         }
     }
 
@@ -186,6 +217,12 @@ impl ModelInfo {
     /// Set the model limits.
     pub fn with_limit(mut self, limit: ModelLimit) -> Self {
         self.limit = limit;
+        self
+    }
+
+    /// Set the tokenizer info.
+    pub fn with_tokenizer(mut self, tokenizer: TokenizerInfo) -> Self {
+        self.tokenizer = tokenizer;
         self
     }
 }
@@ -232,6 +269,10 @@ pub mod anthropic {
                 output: 128_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -271,6 +312,10 @@ pub mod anthropic {
                 output: 64_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -312,6 +357,10 @@ pub mod anthropic {
                 output: 64_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -351,6 +400,10 @@ pub mod anthropic {
                 output: 64_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -390,6 +443,10 @@ pub mod anthropic {
                 output: 64_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -431,6 +488,10 @@ pub mod anthropic {
                 output: 64_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -470,6 +531,10 @@ pub mod anthropic {
                 output: 32_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -509,6 +574,10 @@ pub mod anthropic {
                 output: 32_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -550,6 +619,10 @@ pub mod anthropic {
                 output: 64_000, // 128K with beta header
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 
@@ -589,6 +662,10 @@ pub mod anthropic {
                 output: 4_096,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("claude".to_string()),
+                chars_per_token: 3.8,
+            },
         }
     }
 }
@@ -635,6 +712,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -674,6 +755,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -713,6 +798,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -750,6 +839,10 @@ pub mod openai {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -787,6 +880,10 @@ pub mod openai {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -829,6 +926,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -866,6 +967,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -903,6 +1008,10 @@ pub mod openai {
                 output: 32_768,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("cl100k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -942,6 +1051,10 @@ pub mod openai {
                 output: 100_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -979,6 +1092,10 @@ pub mod openai {
                 output: 100_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -1016,6 +1133,10 @@ pub mod openai {
                 output: 100_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -1058,6 +1179,10 @@ pub mod openai {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -1095,6 +1220,10 @@ pub mod openai {
                 output: 16_384,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 
@@ -1132,6 +1261,10 @@ pub mod openai {
                 output: 100_000,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("o200k_base".to_string()),
+                chars_per_token: 4.0,
+            },
         }
     }
 }
@@ -1223,6 +1356,10 @@ pub mod google {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 
@@ -1262,6 +1399,10 @@ pub mod google {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 
@@ -1301,6 +1442,10 @@ pub mod google {
                 output: 8_192,
             },
             status: ModelStatus::Active,
+            tokenizer: TokenizerInfo {
+                id: Some("gemini".to_string()),
+                chars_per_token: 3.5,
+            },
         }
     }
 }

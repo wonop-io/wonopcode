@@ -1,4 +1,4 @@
-//! Task management tools (ace_todo_read, ace_todo_write, ace_todo_update).
+//! Task management tools (todoread, todowrite, ace_todo_update).
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -13,33 +13,54 @@ use crate::{Tool, ToolContext, ToolError, ToolEvent, ToolOutput, ToolResult};
 // Helper Functions for Plan View Integration
 // ============================================================================
 
-/// Build PhasedTodos from ACE Task artifacts for UI synchronization.
+/// Build PhasedTodos from ACE artifacts for UI synchronization.
 ///
 /// This converts ACE artifacts into the PhasedTodos format expected by the
 /// Plan View in the desktop UI.
-fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
+///
+/// Tasks are grouped by their `phase` field. Tasks without a phase are placed
+/// in an "Unphased" group for backwards compatibility.
+///
+/// Parent artifacts (requirements, designs, test-cases) are added to the plan
+/// once all their child tasks are done, with the following rules:
+/// - Requirements must be validated before their test-cases can be implemented
+/// - Designs are shown after their parent requirement's tasks are done
+/// - Test-cases are shown after their parent requirement is validated
+fn build_phased_todos_from_tasks(tasks: &[Artifact], all_artifacts: &[Artifact]) -> PhasedTodos {
     let mut phased_todos = PhasedTodos::new();
+    let mut phase_map: HashMap<String, Vec<&Artifact>> = HashMap::new();
+    
+    // Group tasks by phase
+    for task in tasks {
+        let phase_name = task
+            .metadata
+            .phase
+            .clone()
+            .unwrap_or_else(|| "Unphased".to_string());
+        phase_map.entry(phase_name).or_default().push(task);
+    }
 
-    // Group tasks by progress status (matching ace_todo_read display order)
-    let statuses = [
-        ("in_progress", "In Progress"),
-        ("blocked", "Blocked"),
-        ("backlog", "Backlog"),
-        ("parked", "Parked"),
-        ("ready_to_validate", "Ready to Validate"),
-        ("done", "Done"),
-        ("discarded", "Discarded"),
-    ];
+    // Collect all phase names and sort them
+    // We want a consistent ordering: defined phases first (in the order they appear),
+    // then "Unphased" at the end
+    let mut phase_names: Vec<String> = phase_map.keys().cloned().collect();
+    phase_names.sort_by(|a, b| {
+        if a == "Unphased" {
+            std::cmp::Ordering::Greater
+        } else if b == "Unphased" {
+            std::cmp::Ordering::Less
+        } else {
+            a.cmp(b)
+        }
+    });
 
-    for (status_key, status_name) in statuses {
-        let status_tasks: Vec<_> = tasks
-            .iter()
-            .filter(|t| t.metadata.progress.as_str() == status_key)
-            .collect();
-
-        if !status_tasks.is_empty() {
-            let mut phase = Phase::new(status_key.to_string(), status_name.to_string());
-            for task in status_tasks {
+    // Build task phases
+    for phase_name in &phase_names {
+        if let Some(phase_tasks) = phase_map.get(phase_name) {
+            let phase_id = phase_name.to_lowercase().replace(' ', "_");
+            let mut phase = Phase::new(phase_id, phase_name.clone());
+            
+            for task in phase_tasks {
                 let todo_status = match task.metadata.progress {
                     Progress::InProgress => TodoStatus::InProgress,
                     Progress::Done => TodoStatus::Completed,
@@ -63,7 +84,119 @@ fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
         }
     }
 
+    // Add parent artifacts that have all children done
+    // This creates a "Validation" phase for artifacts ready to be validated
+    let validation_items = collect_validation_items(tasks, all_artifacts);
+    if !validation_items.is_empty() {
+        let mut validation_phase = Phase::new("validation".to_string(), "Validation".to_string());
+        for item in validation_items {
+            validation_phase.add_todo(item);
+        }
+        phased_todos.add_phase(validation_phase);
+    }
+
     phased_todos
+}
+
+/// Collect parent artifacts that are ready for validation.
+///
+/// An artifact is ready for validation when:
+/// - All its child tasks are done
+/// - For requirements: no additional constraints
+/// - For test-cases: their parent requirement must be validated (done) first
+fn collect_validation_items(tasks: &[Artifact], all_artifacts: &[Artifact]) -> Vec<TodoItem> {
+    let mut items = Vec::new();
+    
+    // Build a map of parent_id -> child tasks
+    let mut children_by_parent: HashMap<String, Vec<&Artifact>> = HashMap::new();
+    for task in tasks {
+        for parent_id in &task.metadata.parents {
+            children_by_parent
+                .entry(parent_id.clone())
+                .or_default()
+                .push(task);
+        }
+    }
+
+    // Find artifacts that have all children done
+    // We need to check requirements, designs, and test-cases
+    for artifact in all_artifacts {
+        // Skip tasks - they don't have children in this context
+        if artifact.metadata.artifact_type == ArtifactType::Task {
+            continue;
+        }
+
+        // Skip artifacts that are already done or discarded
+        if artifact.metadata.progress.is_terminal() {
+            continue;
+        }
+
+        // Get child tasks for this artifact
+        let children = children_by_parent.get(&artifact.metadata.id);
+        
+        // If no children, skip (nothing to validate)
+        let children = match children {
+            Some(c) if !c.is_empty() => c,
+            _ => continue,
+        };
+
+        // Check if all children are done
+        let all_children_done = children.iter().all(|c| c.metadata.progress == Progress::Done);
+        if !all_children_done {
+            continue;
+        }
+
+        // For test-cases, check if parent requirement is validated
+        if artifact.metadata.artifact_type == ArtifactType::TestCase {
+            // Find the parent requirement
+            let parent_req = artifact
+                .metadata
+                .parents
+                .iter()
+                .find_map(|parent_id| {
+                    all_artifacts.iter().find(|a| {
+                        a.metadata.id == *parent_id
+                            && a.metadata.artifact_type == ArtifactType::Requirement
+                    })
+                });
+
+            // If parent requirement exists and is not done, skip this test-case
+            if let Some(req) = parent_req {
+                if req.metadata.progress != Progress::Done {
+                    continue;
+                }
+            }
+        }
+
+        // Add the artifact as a validation item
+        let type_prefix = match artifact.metadata.artifact_type {
+            ArtifactType::Session => "SESSION",
+            ArtifactType::UseCase => "UC",
+            ArtifactType::Requirement => "REQ",
+            ArtifactType::Design => "DES",
+            ArtifactType::TestCase => "TC",
+            ArtifactType::Task => "TASK",
+        };
+
+        let content = format!("Validate {} {}", type_prefix, artifact.title);
+        
+        // Mark as in_progress if currently ready_to_validate
+        let status = if artifact.metadata.progress == Progress::ReadyToValidate {
+            TodoStatus::InProgress
+        } else {
+            TodoStatus::Pending
+        };
+
+        items.push(TodoItem {
+            id: format!("VALIDATE-{}", artifact.metadata.id),
+            content,
+            status,
+            priority: TodoPriority::High, // Validation is always high priority
+            parents: vec![artifact.metadata.id.clone()],
+        });
+    }
+
+    items
 }
 
 /// Emit TodosUpdated event with tasks for the current workstream's ticket.
@@ -72,41 +205,59 @@ fn build_phased_todos_from_tasks(tasks: &[Artifact]) -> PhasedTodos {
 /// and emits a `ToolEvent::TodosUpdated` so the Plan View in the desktop UI updates immediately.
 fn emit_todos_updated(ctx: &ToolContext, store: &ArtifactStore, ticket_id: &str) {
     if let Some(ref event_tx) = ctx.event_tx {
-        tracing::info!("emit_todos_updated: event_tx is available, reading tasks for ticket {}...", ticket_id);
-        if let Ok(tasks) = store.list_artifacts_for_ticket(ArtifactType::Task, ticket_id) {
-            tracing::info!(
-                "emit_todos_updated: found {} tasks for ticket {}, building phased todos",
-                tasks.len(),
-                ticket_id
-            );
-            let phased_todos = build_phased_todos_from_tasks(&tasks);
-            tracing::info!(
-                "emit_todos_updated: built {} phases",
-                phased_todos.phases.len()
-            );
-            if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(phased_todos)) {
-                tracing::warn!(
-                    "emit_todos_updated: Failed to send TodosUpdated event: {}",
-                    e
-                );
-            } else {
-                tracing::info!("emit_todos_updated: Successfully sent TodosUpdated event");
+        tracing::info!("emit_todos_updated: event_tx is available, reading artifacts for ticket {}...", ticket_id);
+        
+        // Read tasks
+        let tasks = match store.list_artifacts_for_ticket(ArtifactType::Task, ticket_id) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("emit_todos_updated: Failed to list tasks from store: {}", e);
+                return;
             }
+        };
+
+        // Read all artifacts for validation items
+        let all_artifacts = match store.list_all_artifacts_for_ticket(ticket_id) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!("emit_todos_updated: Failed to list all artifacts from store: {}", e);
+                return;
+            }
+        };
+
+        tracing::info!(
+            "emit_todos_updated: found {} tasks and {} total artifacts for ticket {}, building phased todos",
+            tasks.len(),
+            all_artifacts.len(),
+            ticket_id
+        );
+        
+        let phased_todos = build_phased_todos_from_tasks(&tasks, &all_artifacts);
+        tracing::info!(
+            "emit_todos_updated: built {} phases",
+            phased_todos.phases.len()
+        );
+        
+        if let Err(e) = event_tx.send(ToolEvent::TodosUpdated(phased_todos)) {
+            tracing::warn!(
+                "emit_todos_updated: Failed to send TodosUpdated event: {}",
+                e
+            );
         } else {
-            tracing::warn!("emit_todos_updated: Failed to list tasks from store");
+            tracing::info!("emit_todos_updated: Successfully sent TodosUpdated event");
         }
     } else {
         tracing::warn!("emit_todos_updated: event_tx is None, cannot emit event!");
     }
 }
 
-/// ace_todo_read tool - reads the current task tree.
+/// todoread tool - reads the current task tree (ACE-backed).
 pub struct AceTodoReadTool;
 
 #[async_trait]
 impl Tool for AceTodoReadTool {
     fn id(&self) -> &str {
-        "ace_todo_read"
+        "todoread"
     }
 
     fn description(&self) -> &str {
@@ -121,26 +272,94 @@ impl Tool for AceTodoReadTool {
     }
 
     async fn execute(&self, _args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
+        tracing::info!(
+            "📖 todoread: Starting execution with root_dir={}",
+            ctx.root_dir.display()
+        );
+
         // Auto-initialize workstream if needed
         let state = WorkstreamState::ensure_initialized(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📖 todoread: Failed to initialize workstream: {}", e);
+                ToolError::execution_failed(format!("Failed to initialize workstream: {e}"))
+            })?;
+
+        tracing::info!(
+            "📖 todoread: Workstream state loaded - ticket_id={}, active_task={:?}",
+            state.ticket_id,
+            state.active_task
+        );
 
         let store = ArtifactStore::new(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📖 todoread: Failed to create store: {}", e);
+                ToolError::execution_failed(format!("Failed to create store: {e}"))
+            })?;
+
+        tracing::debug!(
+            "📖 todoread: ArtifactStore created, specs_dir={}",
+            store.specs_dir().display()
+        );
 
         // Filter tasks to only those belonging to the current workstream's ticket
+        tracing::debug!(
+            "📖 todoread: Listing tasks for ticket_id={}",
+            state.ticket_id
+        );
+
         let tasks = store
             .list_artifacts_for_ticket(ArtifactType::Task, &state.ticket_id)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to list tasks: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📖 todoread: Failed to list tasks: {}", e);
+                ToolError::execution_failed(format!("Failed to list tasks: {e}"))
+            })?;
+
+        tracing::info!(
+            "📖 todoread: Found {} tasks for ticket {}",
+            tasks.len(),
+            state.ticket_id
+        );
+
+        // Log each task found
+        for task in &tasks {
+            tracing::debug!(
+                "📖 todoread: Task {} - '{}' (progress={}, phase={:?})",
+                task.metadata.id,
+                task.title,
+                task.metadata.progress,
+                task.metadata.phase
+            );
+        }
 
         if tasks.is_empty() {
+            tracing::info!("📖 todoread: No tasks found for ticket {}", state.ticket_id);
+            // Also log what's in the tasks directory
+            let tasks_dir = store.specs_dir().join("tasks");
+            if tasks_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&tasks_dir) {
+                    let files: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect();
+                    tracing::debug!(
+                        "📖 todoread: Files in {}: {:?}",
+                        tasks_dir.display(),
+                        files
+                    );
+                }
+            } else {
+                tracing::debug!(
+                    "📖 todoread: Tasks directory {} does not exist",
+                    tasks_dir.display()
+                );
+            }
             let mut output = String::new();
             output.push_str(&format!("## Ticket: {}\n", state.ticket_id));
             output.push_str(&format!("## Phase: {}\n\n", state.workflow.current_phase));
             output.push_str("No tasks found for this workstream.\n\n");
             output.push_str("Create tasks with:\n");
             output.push_str(
-                "```\nace_todo_write(tasks=[{content: \"...\", parent: \"REQ-...\"}])\n```",
+                "```\ntodowrite(tasks=[{content: \"...\", phase: \"Setup\"}])\n```",
             );
 
             return Ok(ToolOutput::new("No tasks", output));
@@ -374,7 +593,7 @@ Use 'parked' or 'done' on the current active task first."#
     }
 }
 
-/// ace_todo_write tool - creates tasks.
+/// todowrite tool - creates tasks (ACE-backed).
 pub struct AceTodoWriteTool;
 
 #[derive(Debug, Deserialize)]
@@ -391,26 +610,44 @@ struct TaskInput {
     priority: Option<String>,
     #[serde(default)]
     status: Option<String>,
+    /// Phase for grouping tasks in the implementation plan.
+    /// Tasks with the same phase are grouped together in the plan view.
+    #[serde(default)]
+    phase: Option<String>,
 }
 
 #[async_trait]
 impl Tool for AceTodoWriteTool {
     fn id(&self) -> &str {
-        "ace_todo_write"
+        "todowrite"
     }
 
     fn description(&self) -> &str {
         r#"Create tasks for the current workstream.
 
-Each task requires a parent artifact (requirement, design, or test-case).
+Each task requires:
+- A phase for grouping in the implementation plan
+- Optionally a parent artifact (defaults to the session if not specified)
+
 Tasks are created in the specs/tasks/ directory.
 
-Example:
+Example (simple todo list - tasks parent to session):
 ```json
 {
   "tasks": [
-    {"content": "Implement login endpoint", "parent": "REQ-WON-122-001", "priority": "high"},
-    {"content": "Add unit tests", "parent": "REQ-WON-122-001", "priority": "medium"}
+    {"content": "Set up development environment", "phase": "Setup", "priority": "high"},
+    {"content": "Implement core functionality", "phase": "Implementation", "priority": "high"},
+    {"content": "Write tests", "phase": "Testing", "priority": "medium"}
+  ]
+}
+```
+
+Example (with explicit parent - for formal ACE workflow):
+```json
+{
+  "tasks": [
+    {"content": "Set up database schema", "parent": "REQ-WON-122-001", "phase": "Setup", "priority": "high"},
+    {"content": "Implement login endpoint", "parent": "REQ-WON-122-001", "phase": "Core Implementation", "priority": "high"}
   ]
 }
 ```"#
@@ -425,7 +662,7 @@ Example:
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["content", "parent"],
+                        "required": ["content", "phase"],
                         "properties": {
                             "content": {
                                 "type": "string",
@@ -433,7 +670,11 @@ Example:
                             },
                             "parent": {
                                 "type": "string",
-                                "description": "Parent artifact ID (requirement, design, or test-case)"
+                                "description": "Parent artifact ID (requirement, design, test-case, or session). Defaults to the session if not specified."
+                            },
+                            "phase": {
+                                "type": "string",
+                                "description": "Phase name for grouping tasks in the implementation plan (e.g., 'Setup', 'Core Implementation', 'Testing')"
                             },
                             "priority": {
                                 "type": "string",
@@ -453,30 +694,85 @@ Example:
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> ToolResult<ToolOutput> {
+        tracing::info!(
+            "📝 todowrite: Starting execution with root_dir={}",
+            ctx.root_dir.display()
+        );
+        tracing::debug!("📝 todowrite: Raw args: {}", args);
+
         let args: TodoWriteArgs = serde_json::from_value(args)
-            .map_err(|e| ToolError::validation(format!("Invalid arguments: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📝 todowrite: Failed to parse arguments: {}", e);
+                ToolError::validation(format!("Invalid arguments: {e}"))
+            })?;
+
+        tracing::info!("📝 todowrite: Parsed {} task(s) to create", args.tasks.len());
 
         if args.tasks.is_empty() {
+            tracing::warn!("📝 todowrite: No tasks provided");
             return Err(ToolError::validation("No tasks provided".to_string()));
         }
 
+        tracing::debug!("📝 todowrite: Creating ArtifactStore...");
         let store = ArtifactStore::new(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to create store: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📝 todowrite: Failed to create store: {}", e);
+                ToolError::execution_failed(format!("Failed to create store: {e}"))
+            })?;
+        tracing::info!("📝 todowrite: ArtifactStore created, specs_dir={}", store.specs_dir().display());
 
+        tracing::debug!("📝 todowrite: Ensuring directories exist...");
         store.ensure_directories().map_err(|e| {
+            tracing::error!("📝 todowrite: Failed to create directories: {}", e);
             ToolError::execution_failed(format!("Failed to create directories: {e}"))
         })?;
+        tracing::info!("📝 todowrite: Directories ensured");
 
         // Load state (auto-initializing if needed)
+        tracing::debug!("📝 todowrite: Loading/initializing workstream state...");
         let mut state = WorkstreamState::ensure_initialized(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to initialize workstream: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📝 todowrite: Failed to initialize workstream: {}", e);
+                ToolError::execution_failed(format!("Failed to initialize workstream: {e}"))
+            })?;
+        tracing::info!(
+            "📝 todowrite: Workstream state loaded - ticket_id={}, active_task={:?}",
+            state.ticket_id,
+            state.active_task
+        );
+
+        // Ensure session exists (auto-creates if needed)
+        tracing::debug!("📝 todowrite: Ensuring session exists...");
+        let session_id = store
+            .ensure_session(&mut state, &ctx.root_dir)
+            .map_err(|e| {
+                tracing::error!("📝 todowrite: Failed to ensure session: {}", e);
+                ToolError::execution_failed(format!("Failed to ensure session: {e}"))
+            })?;
+        tracing::info!("📝 todowrite: Session ensured - session_id={}", session_id);
 
         let mut created_ids = Vec::new();
 
-        for task_input in args.tasks {
-            let parent = task_input.parent.ok_or_else(|| {
+        for (idx, task_input) in args.tasks.into_iter().enumerate() {
+            tracing::info!(
+                "📝 todowrite: Processing task {} - content='{}', parent={:?}, phase={:?}",
+                idx + 1,
+                task_input.content,
+                task_input.parent,
+                task_input.phase
+            );
+
+            // Use session ID as default parent if not specified
+            let parent = task_input.parent.unwrap_or_else(|| {
+                tracing::debug!("📝 todowrite: Task {} using session as parent", idx + 1);
+                session_id.clone()
+            });
+
+            // Phase is required for new tasks (backwards compatibility: existing tasks may not have it)
+            let phase = task_input.phase.ok_or_else(|| {
+                tracing::error!("📝 todowrite: Task {} missing phase", idx + 1);
                 ToolError::validation(
-                    "Task requires a parent artifact (requirement, design, or test-case)"
+                    "Task requires a phase for grouping in the implementation plan (e.g., 'Setup', 'Core Implementation', 'Testing')"
                         .to_string(),
                 )
             })?;
@@ -487,29 +783,62 @@ Example:
                 .and_then(Priority::parse)
                 .unwrap_or(Priority::Medium);
 
+            tracing::debug!(
+                "📝 todowrite: Creating artifact - parent={}, phase={}, priority={:?}",
+                parent,
+                phase,
+                priority
+            );
+
             let artifact = store
-                .create_artifact(
+                .create_artifact_with_phase(
                     &mut state,
                     ArtifactType::Task,
                     &task_input.content,
                     "", // Tasks don't need content body
-                    vec![parent],
+                    vec![parent.clone()],
                     priority,
                     false, // Tasks go directly to specs, not staging
+                    Some(phase.clone()),
                 )
-                .map_err(|e| ToolError::execution_failed(format!("Failed to create task: {e}")))?;
+                .map_err(|e| {
+                    tracing::error!(
+                        "📝 todowrite: Failed to create task {} (parent={}, phase={}): {}",
+                        idx + 1,
+                        parent,
+                        phase,
+                        e
+                    );
+                    ToolError::execution_failed(format!("Failed to create task: {e}"))
+                })?;
+
+            tracing::info!(
+                "📝 todowrite: Created artifact id={}, path={}",
+                artifact.metadata.id,
+                artifact.path.display()
+            );
+
+            // Verify file was actually written
+            if artifact.path.exists() {
+                tracing::info!("📝 todowrite: ✓ File exists at {}", artifact.path.display());
+            } else {
+                tracing::error!("📝 todowrite: ✗ File NOT found at {} after creation!", artifact.path.display());
+            }
 
             // If status is in_progress, update it
             if task_input.status.as_deref() == Some("in_progress") {
                 if state.active_task.is_some() {
+                    tracing::error!("📝 todowrite: Cannot set in_progress - active task already exists");
                     return Err(ToolError::execution_failed(
                         "Cannot create task as in_progress: another task is already active"
                             .to_string(),
                     ));
                 }
+                tracing::debug!("📝 todowrite: Setting task {} to in_progress", artifact.metadata.id);
                 store
                     .update_artifact_progress(&artifact.metadata.id, Progress::InProgress)
                     .map_err(|e| {
+                        tracing::error!("📝 todowrite: Failed to update task status: {}", e);
                         ToolError::execution_failed(format!("Failed to update task status: {e}"))
                     })?;
                 state.active_task = Some(artifact.metadata.id.clone());
@@ -518,12 +847,29 @@ Example:
             created_ids.push((artifact.metadata.id, task_input.content));
         }
 
+        tracing::debug!("📝 todowrite: Saving workstream state...");
         state
             .save(&ctx.root_dir)
-            .map_err(|e| ToolError::execution_failed(format!("Failed to save state: {e}")))?;
+            .map_err(|e| {
+                tracing::error!("📝 todowrite: Failed to save state: {}", e);
+                ToolError::execution_failed(format!("Failed to save state: {e}"))
+            })?;
+        tracing::info!("📝 todowrite: State saved successfully");
 
         // Emit TodosUpdated so Plan View updates immediately
+        tracing::debug!("📝 todowrite: Emitting TodosUpdated event...");
         emit_todos_updated(ctx, &store, &state.ticket_id);
+
+        // Emit ArtifactCreated for each created task so Documents View updates
+        if let Some(ref event_tx) = ctx.event_tx {
+            for (id, _) in &created_ids {
+                tracing::debug!("📝 todowrite: Emitting ArtifactCreated for {}", id);
+                let _ = event_tx.send(crate::ToolEvent::ArtifactCreated {
+                    id: id.clone(),
+                    artifact_type: "task".to_string(),
+                });
+            }
+        }
 
         let output = format!(
             "Created {} task(s):\n\n{}",
@@ -533,6 +879,12 @@ Example:
                 .map(|(id, content)| format!("- `{}`: {}", id, content))
                 .collect::<Vec<_>>()
                 .join("\n")
+        );
+
+        tracing::info!(
+            "📝 todowrite: Completed successfully - created {} tasks: {:?}",
+            created_ids.len(),
+            created_ids.iter().map(|(id, _)| id).collect::<Vec<_>>()
         );
 
         Ok(
@@ -566,7 +918,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
-            hms_service: None,
+            ace_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
@@ -614,26 +967,39 @@ mod tests {
         let store = ArtifactStore::new(dir.path()).unwrap();
         store.ensure_directories().unwrap();
 
-        // Create a requirement first
-        let req = store
+        // Create session first (UseCases require a Session parent)
+        let session = store
             .create_artifact(
                 &mut state,
-                ArtifactType::UseCase,
-                "Test UC",
-                "Content",
+                ArtifactType::Session,
+                "Test Session",
+                "Session for testing",
                 vec![],
                 Priority::Medium,
                 false,
             )
             .unwrap();
 
-        let req2 = store
+        // Create a UseCase with session as parent
+        let uc = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::UseCase,
+                "Test UC",
+                "Content",
+                vec![session.metadata.id],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
+        let req = store
             .create_artifact(
                 &mut state,
                 ArtifactType::Requirement,
                 "Test REQ",
                 "Content",
-                vec![req.metadata.id],
+                vec![uc.metadata.id],
                 Priority::Medium,
                 false,
             )
@@ -647,8 +1013,8 @@ mod tests {
             .execute(
                 json!({
                     "tasks": [
-                        {"content": "Task 1", "parent": req2.metadata.id, "priority": "high"},
-                        {"content": "Task 2", "parent": req2.metadata.id, "priority": "low"}
+                        {"content": "Task 1", "parent": req.metadata.id, "phase": "Setup", "priority": "high"},
+                        {"content": "Task 2", "parent": req.metadata.id, "phase": "Testing", "priority": "low"}
                     ]
                 }),
                 &ctx,
@@ -678,6 +1044,19 @@ mod tests {
         let store = ArtifactStore::new(dir.path()).unwrap();
         store.ensure_directories().unwrap();
 
+        // Create session first (UseCases require a Session parent)
+        let session = store
+            .create_artifact(
+                &mut state,
+                ArtifactType::Session,
+                "Test Session",
+                "",
+                vec![],
+                Priority::Medium,
+                false,
+            )
+            .unwrap();
+
         // Create parent artifacts
         let uc = store
             .create_artifact(
@@ -685,7 +1064,7 @@ mod tests {
                 ArtifactType::UseCase,
                 "UC",
                 "",
-                vec![],
+                vec![session.metadata.id],
                 Priority::Medium,
                 false,
             )

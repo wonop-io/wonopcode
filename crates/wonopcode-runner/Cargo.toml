@@ -41,5 +41,8 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+# UUID for session IDs
+uuid.workspace = true
+
 [lints]
 workspace = true

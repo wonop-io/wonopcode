@@ -8,9 +8,11 @@ pub mod registry;
 
 // Tool implementations
 pub mod ace;
+pub mod ace_todo_store;
 pub mod bash;
 pub mod batch;
 pub mod edit;
+pub mod execute_typescript;
 pub mod glob;
 pub mod grep;
 pub mod hms;
@@ -36,9 +38,11 @@ pub use registry::ToolRegistry;
 
 // Re-export ACE tools for convenience
 pub use ace::{
-    AceCreateArtifactTool, AceReadArtifactTool, AceSubmitCheckpointTool, AceTodoReadTool,
-    AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool,
+    AceCreateArtifactTool, AceReadArtifactTool, AceSessionLogTool, AceSubmitCheckpointTool,
+    AceTodoReadTool, AceTodoUpdateTool, AceTodoWriteTool, AceWhatNowTool, FileAceService,
+    SharedAceService,
 };
+pub use ace_todo_store::AceTodoStore;
 
 // Re-export ticket tools for convenience
 pub use ticket::{
@@ -51,9 +55,10 @@ pub use memory::{
 };
 
 // Re-export HMS tools for convenience
-pub use hms::{
-    HmsDeleteTool, HmsGetTool, HmsListTool, HmsRenderTool, HmsService, HmsSetTool, SharedHmsService,
-};
+pub use hms::{HmsService, HmsServiceAdapter, SharedHmsService};
+
+// Re-export Code Mode tools for convenience
+pub use execute_typescript::ExecuteTypescriptTool;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -64,6 +69,39 @@ use tokio_util::sync::CancellationToken;
 use wonopcode_sandbox::SandboxRuntime;
 use wonopcode_snapshot::SnapshotStore;
 use wonopcode_util::FileTimeState;
+
+/// Permission check request for TypeScript tools.
+///
+/// This is similar to PermissionCheck in wonopcode-core but defined here
+/// to avoid circular dependencies.
+#[derive(Debug, Clone)]
+pub struct TsPermissionRequest {
+    /// Unique identifier for this request.
+    pub id: String,
+    /// Tool name requesting permission (e.g., "edit", "bash").
+    pub tool: String,
+    /// Action being performed (e.g., "write", "execute").
+    pub action: String,
+    /// Path involved (for file operations).
+    pub path: Option<String>,
+    /// Human-readable description of what's being requested.
+    pub description: String,
+    /// Additional details (like command or file content preview).
+    pub details: Option<serde_json::Value>,
+}
+
+/// Trait for checking permissions from TypeScript code.
+///
+/// This trait abstracts permission checking so tools don't need to depend
+/// directly on wonopcode-core. Implementations wrap the PermissionManager.
+#[async_trait]
+pub trait TsPermissionChecker: Send + Sync {
+    /// Check if an operation is allowed.
+    ///
+    /// Returns `true` if the operation is allowed, `false` if denied.
+    /// Implementations may block waiting for user input.
+    async fn check(&self, session_id: &str, request: TsPermissionRequest) -> bool;
+}
 
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
@@ -114,8 +152,13 @@ pub struct ToolContext {
     pub ticket_service: Option<Arc<dyn TicketService>>,
     /// Optional memory service for memory tools.
     pub memory_service: Option<SharedMemoryService>,
-    /// Optional HMS service for hierarchical memory tools.
+    /// Optional ACE service for planning/workflow tools.
+    pub ace_service: Option<SharedAceService>,
+    /// Optional HMS service for hierarchical memory system.
     pub hms_service: Option<SharedHmsService>,
+    /// Optional permission checker for TypeScript tools.
+    /// When set, TypeScript code can request user permission before performing actions.
+    pub permission_checker: Option<Arc<dyn TsPermissionChecker>>,
     /// Workstream's ticket ID (from .wonopcode/state.yaml).
     /// This is the ticket ID associated with the current workstream.
     pub workstream_ticket_id: Option<String>,
@@ -249,7 +292,8 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
-            hms_service: None,
+            ace_service: None,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
         }
