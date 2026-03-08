@@ -149,10 +149,16 @@ impl Tool for ExecuteTypescriptTool {
         {
             let session_id = ctx.session_id.clone();
             Some(tokio::spawn(async move {
+                // Permission timeout - use 25 seconds to leave room for error handling
+                // before the runtime's 30 second default timeout kicks in
+                let permission_timeout = std::time::Duration::from_secs(25);
+
                 while let Some(ts_req) = rx.recv().await {
+                    let request_id = ts_req.id.clone();
+
                     // Convert TsPermissionRequest from codemode to TsPermissionRequest in tools
                     let request = TsPermissionRequest {
-                        id: ts_req.id.clone(),
+                        id: request_id.clone(),
                         tool: ts_req.tool,
                         action: ts_req.action,
                         path: ts_req.path,
@@ -160,11 +166,23 @@ impl Tool for ExecuteTypescriptTool {
                         details: None,
                     };
 
-                    // Check permission through the checker
-                    let allowed = checker.check(&session_id, request).await;
+                    // Check permission with timeout
+                    let result = checker
+                        .check_with_timeout(&session_id, request, permission_timeout)
+                        .await;
 
-                    // Send response back to TypeScript
-                    let _ = ts_req.response_tx.send(allowed);
+                    // Handle result and send response back to TypeScript
+                    let response = match result {
+                        crate::PermissionCheckResult::Allowed => Some(true),
+                        crate::PermissionCheckResult::Denied => Some(false),
+                        crate::PermissionCheckResult::Timeout => {
+                            // Clean up the timed-out request to dismiss the dialog
+                            checker.cleanup_request(&request_id).await;
+                            None
+                        }
+                    };
+
+                    let _ = ts_req.response_tx.send(response);
                 }
             }))
         } else {

@@ -90,6 +90,17 @@ pub struct TsPermissionRequest {
     pub details: Option<serde_json::Value>,
 }
 
+/// Result of a permission check with timeout support.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionCheckResult {
+    /// Permission was granted.
+    Allowed,
+    /// Permission was denied by user.
+    Denied,
+    /// Permission request timed out (user didn't respond in time).
+    Timeout,
+}
+
 /// Trait for checking permissions from TypeScript code.
 ///
 /// This trait abstracts permission checking so tools don't need to depend
@@ -101,6 +112,29 @@ pub trait TsPermissionChecker: Send + Sync {
     /// Returns `true` if the operation is allowed, `false` if denied.
     /// Implementations may block waiting for user input.
     async fn check(&self, session_id: &str, request: TsPermissionRequest) -> bool;
+
+    /// Check permission with a timeout.
+    ///
+    /// Returns the result of the permission check, including timeout indication.
+    /// Default implementation wraps check() with tokio timeout.
+    async fn check_with_timeout(
+        &self,
+        session_id: &str,
+        request: TsPermissionRequest,
+        timeout: std::time::Duration,
+    ) -> PermissionCheckResult {
+        match tokio::time::timeout(timeout, self.check(session_id, request)).await {
+            Ok(true) => PermissionCheckResult::Allowed,
+            Ok(false) => PermissionCheckResult::Denied,
+            Err(_) => PermissionCheckResult::Timeout,
+        }
+    }
+
+    /// Clean up a timed-out permission request.
+    ///
+    /// Called when a permission request times out to dismiss the dialog
+    /// and remove the pending request from the permission system.
+    async fn cleanup_request(&self, request_id: &str);
 }
 
 /// Event that tools can emit to notify listeners of state changes.

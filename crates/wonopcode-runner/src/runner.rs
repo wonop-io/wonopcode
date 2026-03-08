@@ -153,6 +153,12 @@ impl wonopcode_tools::TsPermissionChecker for TsPermissionCheckerAdapter {
             .check_with_sandbox(session_id, check, has_sandbox)
             .await
     }
+
+    async fn cleanup_request(&self, request_id: &str) {
+        self.permission_manager
+            .cleanup_timed_out_request(request_id)
+            .await
+    }
 }
 
 /// Helper to send updates to the TUI with proper error logging.
