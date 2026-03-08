@@ -347,6 +347,8 @@ impl WorkstreamState {
 
         // Pattern 1: Letters/numbers followed by dash and digits (e.g., WON-125)
         static RE_PROJECT: OnceLock<regex::Regex> = OnceLock::new();
+        // SAFETY: This is a compile-time constant regex pattern that is known to be valid.
+        // Failure would be caught immediately in testing and cannot occur at runtime.
         let re_project =
             RE_PROJECT.get_or_init(|| regex::Regex::new(r"^([A-Za-z][A-Za-z0-9]*-\d+)").unwrap());
 
@@ -360,6 +362,8 @@ impl WorkstreamState {
         // Only matches when followed by -- (the description separator) to avoid
         // ambiguity with branch names like "feature-123" which may not be ticket IDs
         static RE_NUMERIC: OnceLock<regex::Regex> = OnceLock::new();
+        // SAFETY: This is a compile-time constant regex pattern that is known to be valid.
+        // Failure would be caught immediately in testing and cannot occur at runtime.
         let re_numeric = RE_NUMERIC.get_or_init(|| regex::Regex::new(r"^(\d+)--").unwrap());
 
         if let Some(captures) = re_numeric.captures(name) {
