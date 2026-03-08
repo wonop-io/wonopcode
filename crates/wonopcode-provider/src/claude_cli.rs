@@ -1981,10 +1981,14 @@ impl LanguageModel for ClaudeCliProvider {
             }
 
             // Store captured session ID for future resumption
+            // Always update the session ID when Claude CLI returns one - if resume fails,
+            // Claude CLI will create a new session and we must use that new ID.
             if let Some(sid) = captured_session_id {
                 let mut session_lock = session_id_handle.write().await;
-                if session_lock.is_none() {
-                    *session_lock = Some(sid);
+                let old_session = session_lock.clone();
+                *session_lock = Some(sid.clone());
+                if old_session.is_some() && old_session.as_ref() != Some(&sid) {
+                    debug!(old = ?old_session, new = %sid, "Session ID changed (resume may have failed)");
                 }
             }
 
