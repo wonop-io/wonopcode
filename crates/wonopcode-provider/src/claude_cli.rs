@@ -946,8 +946,8 @@ impl ClaudeCliProvider {
         // Tools: Agent, Bash, Edit, Glob, Grep, MultiEdit, Read, Write (file/shell ops)
         // AskUserQuestion (requires interactive stdin), CronCreate/Delete/List (scheduling)
         // EnterPlanMode/ExitPlanMode (we provide our own), EnterWorktree (we manage ourselves)
-        // KillShell, LSP, NotebookEdit, Skill, Task, TaskOutput, TaskStop, TodoRead/Write, WebFetch/Search
-        "Agent,AskUserQuestion,Bash,CronCreate,CronDelete,CronList,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,Glob,Grep,KillShell,LSP,MultiEdit,NotebookEdit,Read,Skill,Task,TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write"
+        // KillShell, LSP, NotebookEdit, Skill, Task, TaskOutput, TaskStop, TodoRead/Write, ToolSearch, WebFetch/Search
+        "Agent,AskUserQuestion,Bash,CronCreate,CronDelete,CronList,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,Glob,Grep,KillShell,LSP,MultiEdit,NotebookEdit,Read,Skill,Task,TaskOutput,TaskStop,TodoRead,TodoWrite,ToolSearch,WebFetch,WebSearch,Write"
     }
 
     /// Discover available built-in tools by querying Claude CLI.
@@ -1023,7 +1023,7 @@ impl ClaudeCliProvider {
         }
 
         debug!(count = tools.len(), "Parsed tool names from discovery response");
-        Ok(tools.into_iter().filter(|t| t != "ToolSearch").collect())
+        Ok(tools)
     }
 
     /// Get hardcoded list of built-in tools as a Vec.
