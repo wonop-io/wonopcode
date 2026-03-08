@@ -211,7 +211,7 @@ impl Tool for ExecuteTypescriptTool {
 
     fn requires_permission(&self) -> bool {
         // The execute_typescript tool itself is auto-allowed by default rules.
-        // Dangerous operations inside the runtime (fs.write, exec, etc.) will
+        // Dangerous operations inside the runtime (fs.write, childProcess.spawn, etc.) will
         // request their own permissions via the permission bridge.
         // We still return true so it goes through the permission system,
         // but the default rules will auto-approve it.
@@ -422,7 +422,7 @@ mod tests {
         assert!(desc.contains("TypeScript"));
         assert!(desc.contains("sandbox"));
         assert!(desc.contains("fs.read"));  // Flat namespace
-        assert!(desc.contains("exec"));
+        assert!(desc.contains("childProcess"));
         assert!(desc.contains("help"));
     }
 
