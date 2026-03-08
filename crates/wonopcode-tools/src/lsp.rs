@@ -1,5 +1,8 @@
 //! LSP tool - Language Server Protocol operations for code intelligence.
 //!
+//! CRITICAL: This is critical code that cannot have any unsafe code.
+//! All errors must be handled gracefully — no unwrap(), expect(), or panic!() in production paths.
+//!
 //! Provides AI with access to code intelligence features:
 //! - Go to definition
 //! - Find references
@@ -38,14 +41,15 @@ impl LspTool {
     }
 
     /// Get or initialize the LSP client.
-    async fn get_client(&self) -> Arc<LspClient> {
+    async fn get_client(&self) -> ToolResult<Arc<LspClient>> {
         let mut guard = self.client.write().await;
         if guard.is_none() {
             let client = LspClient::with_defaults();
             *guard = Some(Arc::new(client));
         }
-        // SAFETY: We just ensured guard is Some above
-        guard.clone().expect("LSP client was just initialized")
+        guard
+            .clone()
+            .ok_or_else(|| ToolError::execution_failed("Failed to initialize LSP client"))
     }
 
     /// Get the LSP client if initialized (for status polling).
@@ -93,7 +97,7 @@ impl Tool for LspTool {
 
 Operations:
 - "definition": Go to definition of symbol at position
-- "references": Find all references to symbol at position  
+- "references": Find all references to symbol at position
 - "symbols": List all symbols in the file
 - "hover": Get hover information (type, docs) at position
 
@@ -144,7 +148,7 @@ Note: Requires the appropriate language server to be installed:
         // Resolve file path
         let file_path = resolve_path(&args.file, &ctx.cwd, &ctx.root_dir)?;
 
-        let client = self.get_client().await;
+        let client = self.get_client().await?;
 
         match args.operation.as_str() {
             "definition" => {

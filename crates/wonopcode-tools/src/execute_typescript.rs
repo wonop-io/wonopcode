@@ -1,5 +1,8 @@
 //! Execute TypeScript tool - runs TypeScript code in a sandboxed deno_core runtime.
 //!
+//! CRITICAL: This is critical code that cannot have any unsafe code.
+//! All errors must be handled gracefully — no unwrap(), expect(), or panic!() in production paths.
+//!
 //! This tool allows LLMs to execute TypeScript code against a typed API,
 //! enabling multi-step operations in a single script instead of multiple tool calls.
 //!
