@@ -10,6 +10,20 @@ use tracing::debug;
 
 use super::{CachedResolver, HmsError, MemoryValue, ResolvedMemory};
 
+/// Common stub prepended to all generated AGENTS.md/CLAUDE.md files.
+/// This ensures consistent identity and behavior instructions across all agent contexts.
+const AGENTS_STUB: &str = r#"# Wonop Code
+
+You are **Wonop Code**, an AI-powered software engineering assistant.
+
+## Efficiency Guidelines
+
+- **Favour longer scripts over many short ones**: When using `execute_typescript`, combine multiple operations into a single script when possible. This reduces overhead and improves performance.
+
+---
+
+"#;
+
 /// Renders AGENTS.md from templates and memory context.
 pub struct TemplateRenderer {
     tera: Tera,
@@ -245,8 +259,11 @@ impl AgentsGenerator {
         // 3. Build context
         let context = build_template_context(&memories, target_dir, project_root);
 
-        // 4. Render
-        self.renderer.render_file(&template_path, &context).await
+        // 4. Render template
+        let rendered = self.renderer.render_file(&template_path, &context).await?;
+        
+        // 5. Prepend common stub
+        Ok(format!("{}{}", AGENTS_STUB, rendered))
     }
 
     /// Write AGENTS.md to disk.
