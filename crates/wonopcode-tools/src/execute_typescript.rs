@@ -22,14 +22,17 @@ use crate::ticket::{
 use crate::{Tool, ToolContext, ToolError, ToolOutput, ToolResult, TsPermissionRequest};
 use async_trait::async_trait;
 use serde::Deserialize;
+use reqwest::Client;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, info, warn};
 use wonopcode_codemode::{
     create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ServiceHandles,
     NewTicket as CodemodeNewTicket, Ticket as CodemodeTicket, TicketFilter as CodemodeTicketFilter,
     TicketService as CodemodeTicketService, TicketStatus as CodemodeTicketStatus,
     TrackerInfo as CodemodeTrackerInfo, ServiceError, ServiceResult, ToolDefinition,
+    WebService as CodemodeWebService, WebSearchResult as CodemodeWebSearchResult,
 };
 
 /// Default timeout for script execution in seconds.
@@ -127,6 +130,10 @@ impl Tool for ExecuteTypescriptTool {
             let adapter = HmsServiceAdapter::new(hms_service.clone(), ctx.root_dir.clone());
             services = services.with_hms(Arc::new(adapter));
         }
+
+        // Wire up web service (always available for search/fetch)
+        let web_service = WebServiceImpl::new();
+        services = services.with_web(Arc::new(web_service));
 
         // Build runtime configuration
         let config = RuntimeConfig {
@@ -256,7 +263,9 @@ pub fn default_tool_definitions() -> Vec<ToolDefinition> {
 fn truncate_description(desc: &str) -> String {
     let first_line = desc.lines().next().unwrap_or(desc);
     if first_line.len() > 60 {
-        format!("{}...", &first_line[..57])
+        // Take first 57 characters safely (handles multi-byte UTF-8)
+        let truncated: String = first_line.chars().take(57).collect();
+        format!("{}...", truncated)
     } else {
         first_line.to_string()
     }
@@ -395,6 +404,360 @@ impl CodemodeTicketService for TicketServiceAdapter {
             .map(Self::details_to_codemode)
             .map_err(Self::convert_error)
     }
+}
+
+// ============================================================================
+// WebServiceImpl: implements WebService for TypeScript runtime
+// ============================================================================
+
+/// Exa MCP API endpoint.
+const EXA_MCP_URL: &str = "https://mcp.exa.ai/mcp";
+
+/// Default timeout for web operations in seconds.
+const WEB_TIMEOUT_SECS: u64 = 30;
+
+/// Maximum response size in bytes (5MB).
+const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024;
+
+/// Web service implementation using Exa AI for search and reqwest for fetching.
+struct WebServiceImpl {
+    client: Client,
+}
+
+impl WebServiceImpl {
+    fn new() -> Self {
+        Self {
+            client: Client::new(),
+        }
+    }
+}
+
+// MCP JSON-RPC request types for Exa API
+#[derive(Debug, serde::Serialize)]
+struct ExaMcpRequest<'a> {
+    jsonrpc: &'a str,
+    id: u32,
+    method: &'a str,
+    params: ExaMcpToolCall<'a>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ExaMcpToolCall<'a> {
+    name: &'a str,
+    arguments: Value,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExaMcpResponse {
+    result: Option<ExaMcpResult>,
+    error: Option<ExaMcpError>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExaMcpResult {
+    content: Vec<ExaMcpContent>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExaMcpContent {
+    #[serde(rename = "type")]
+    content_type: String,
+    text: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExaMcpError {
+    message: String,
+}
+
+/// Parse Server-Sent Events response from Exa API.
+fn parse_exa_sse_response(body: &str) -> Result<String, String> {
+    for line in body.lines() {
+        let line = line.trim();
+        if let Some(data) = line.strip_prefix("data: ") {
+            if data == "[DONE]" {
+                continue;
+            }
+
+            if let Ok(response) = serde_json::from_str::<ExaMcpResponse>(data) {
+                if let Some(error) = response.error {
+                    return Err(format!("Exa API error: {}", error.message));
+                }
+
+                if let Some(result) = response.result {
+                    for content in result.content {
+                        if content.content_type == "text" {
+                            if let Some(text) = content.text {
+                                return Ok(text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try parsing as direct JSON if no SSE format
+    if let Ok(response) = serde_json::from_str::<ExaMcpResponse>(body) {
+        if let Some(error) = response.error {
+            return Err(format!("Exa API error: {}", error.message));
+        }
+
+        if let Some(result) = response.result {
+            for content in result.content {
+                if content.content_type == "text" {
+                    if let Some(text) = content.text {
+                        return Ok(text);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok("No results found".to_string())
+}
+
+#[async_trait]
+impl CodemodeWebService for WebServiceImpl {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: Option<usize>,
+        search_type: Option<String>,
+    ) -> ServiceResult<Vec<CodemodeWebSearchResult>> {
+        let num = num_results.unwrap_or(8) as u32;
+        let stype = search_type.unwrap_or_else(|| "auto".to_string());
+
+        let request = ExaMcpRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: ExaMcpToolCall {
+                name: "web_search_exa",
+                arguments: json!({
+                    "query": query,
+                    "numResults": num,
+                    "livecrawl": "fallback",
+                    "type": stype
+                }),
+            },
+        };
+
+        let response = self.client
+            .post(EXA_MCP_URL)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream, application/json")
+            .timeout(Duration::from_secs(WEB_TIMEOUT_SECS))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ServiceError::new("HTTP_ERROR", format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ServiceError::new("HTTP_ERROR", format!("Exa API returned {status}: {body}")));
+        }
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ServiceError::new("HTTP_ERROR", format!("Failed to read response: {e}")))?;
+
+        let text = parse_exa_sse_response(&body)
+            .map_err(|e| ServiceError::new("PARSE_ERROR", e))?;
+
+        // Return as single result with full content
+        Ok(vec![CodemodeWebSearchResult {
+            title: "Search Results".to_string(),
+            url: String::new(),
+            snippet: text.clone(),
+            content: Some(text),
+        }])
+    }
+
+    async fn fetch(
+        &self,
+        url: &str,
+        format: Option<String>,
+        timeout: Option<u64>,
+    ) -> ServiceResult<String> {
+        let parsed_url = url::Url::parse(url)
+            .map_err(|e| ServiceError::new("VALIDATION_ERROR", format!("Invalid URL: {e}")))?;
+
+        if parsed_url.scheme() != "https" && parsed_url.scheme() != "http" {
+            return Err(ServiceError::new("VALIDATION_ERROR", format!(
+                "Only HTTP(S) URLs are supported, got: {}",
+                parsed_url.scheme()
+            )));
+        }
+
+        let timeout_secs = timeout.unwrap_or(WEB_TIMEOUT_SECS).min(120);
+        let format_type = format.unwrap_or_else(|| "text".to_string());
+
+        let response = self.client
+            .get(parsed_url.as_str())
+            .timeout(Duration::from_secs(timeout_secs))
+            .header("User-Agent", "wonopcode/0.1")
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    ServiceError::new("TIMEOUT", format!("Request timed out after {timeout_secs}s"))
+                } else {
+                    ServiceError::new("HTTP_ERROR", format!("Request failed: {e}"))
+                }
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(ServiceError::new("HTTP_ERROR", format!(
+                "HTTP {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("Unknown")
+            )));
+        }
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("text/plain")
+            .to_string();
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| ServiceError::new("HTTP_ERROR", format!("Failed to read response: {e}")))?;
+
+        if bytes.len() > MAX_RESPONSE_SIZE {
+            return Err(ServiceError::new("TOO_LARGE", format!(
+                "Response too large: {} bytes (max {} bytes)",
+                bytes.len(),
+                MAX_RESPONSE_SIZE
+            )));
+        }
+
+        let text = String::from_utf8_lossy(&bytes).to_string();
+
+        // Simple HTML stripping if format is text and content is HTML
+        let content = if format_type == "text" && content_type.contains("html") {
+            strip_html_tags(&text)
+        } else {
+            text
+        };
+
+        Ok(content)
+    }
+
+    async fn code_search(
+        &self,
+        query: &str,
+        tokens_num: Option<usize>,
+    ) -> ServiceResult<String> {
+        let tokens = tokens_num.unwrap_or(5000) as u32;
+
+        let request = ExaMcpRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: ExaMcpToolCall {
+                name: "get_code_context_exa",
+                arguments: json!({
+                    "query": query,
+                    "tokensNum": tokens
+                }),
+            },
+        };
+
+        let response = self.client
+            .post(EXA_MCP_URL)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream, application/json")
+            .timeout(Duration::from_secs(WEB_TIMEOUT_SECS))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ServiceError::new("HTTP_ERROR", format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ServiceError::new("HTTP_ERROR", format!("Exa API returned {status}: {body}")));
+        }
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ServiceError::new("HTTP_ERROR", format!("Failed to read response: {e}")))?;
+
+        parse_exa_sse_response(&body)
+            .map_err(|e| ServiceError::new("PARSE_ERROR", e))
+    }
+}
+
+/// Simple HTML tag stripping.
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut in_script = false;
+    let mut in_style = false;
+
+    // Track tag detection by collecting characters after '<'
+    let mut tag_buffer = String::new();
+
+    for ch in html.chars() {
+        if !in_tag && ch == '<' {
+            in_tag = true;
+            tag_buffer.clear();
+            continue;
+        }
+
+        if in_tag {
+            if ch == '>' {
+                // Check what tag we just closed
+                let tag_lower = tag_buffer.to_lowercase();
+                if tag_lower.starts_with("script") {
+                    in_script = true;
+                } else if tag_lower.starts_with("/script") {
+                    in_script = false;
+                } else if tag_lower.starts_with("style") {
+                    in_style = true;
+                } else if tag_lower.starts_with("/style") {
+                    in_style = false;
+                }
+                in_tag = false;
+                tag_buffer.clear();
+            } else {
+                tag_buffer.push(ch);
+            }
+            continue;
+        }
+
+        if in_script || in_style {
+            continue;
+        }
+
+        result.push(ch);
+    }
+
+    // Normalize whitespace
+    let mut cleaned = String::new();
+    let mut last_was_space = false;
+
+    for ch in result.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                cleaned.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            cleaned.push(ch);
+            last_was_space = false;
+        }
+    }
+
+    cleaned.trim().to_string()
 }
 
 #[cfg(test)]
