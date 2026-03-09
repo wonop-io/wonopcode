@@ -149,7 +149,7 @@ impl SessionService {
                 }
                 
                 // Filter sessions to only those matching this workstream's directory
-                // Sessions are already sorted by ID descending (newest first)
+                // Sessions are sorted by ID ascending (with inverted ULIDs, smaller = newer)
                 let matching_session = sessions.into_iter().find(|s| s.directory == cwd);
 
                 if let Some(session) = matching_session {
@@ -274,15 +274,46 @@ impl SessionService {
         Ok(session)
     }
 
-    /// Clear the current session.
+    /// Clear the current session and create a new empty one.
     ///
-    /// After this, a new session will be created on the next operation.
+    /// This creates a new session immediately to ensure that when the app
+    /// restarts, the new (empty) session is loaded instead of the old one.
+    /// If session creation fails, we still clear the current session.
     pub async fn clear_session(&self) {
-        let mut current = self.current_session.write().await;
-        if let Some(ref session_id) = *current {
+        let old_session_id = {
+            let current = self.current_session.read().await;
+            current.clone()
+        };
+        
+        if let Some(ref session_id) = old_session_id {
             info!(session_id = %session_id, "Clearing current session");
         }
-        *current = None;
+
+        // Create a new empty session immediately
+        // This ensures the new session is the "most recent" one when the app restarts
+        let cwd = {
+            let ctx = self.conversion_ctx.read().await;
+            ctx.cwd.clone()
+        };
+
+        match self.repo.create(Session::new(&self.project_id, &cwd)).await {
+            Ok(new_session) => {
+                info!(session_id = %new_session.id, "Created new empty session after clear");
+                {
+                    let mut current = self.current_session.write().await;
+                    *current = Some(new_session.id.clone());
+                }
+                {
+                    let mut ctx = self.conversion_ctx.write().await;
+                    ctx.session_id = new_session.id;
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to create new session after clear, clearing anyway");
+                let mut current = self.current_session.write().await;
+                *current = None;
+            }
+        }
     }
 
     /// List all sessions for this project.
@@ -412,6 +443,33 @@ impl SessionService {
         let converted = convert_assistant_message(provider_msg, &ctx, parent_message_id);
 
         let message_id = converted.message.id().to_string();
+        
+        // Debug: Log content parts before conversion
+        let text_part_count = converted.parts.iter()
+            .filter(|p| matches!(p, crate::message::MessagePart::Text(_)))
+            .count();
+        info!(
+            session_id = %session.id,
+            message_id = %message_id,
+            total_parts = converted.parts.len(),
+            text_parts = text_part_count,
+            "📝 SAVE_ASSISTANT_MESSAGE: About to save message"
+        );
+        
+        // Debug: Log each text part
+        for (i, part) in converted.parts.iter().enumerate() {
+            if let crate::message::MessagePart::Text(t) = part {
+                info!(
+                    message_id = %message_id,
+                    part_idx = i,
+                    part_id = %t.id,
+                    text_len = t.text.len(),
+                    text_preview = %t.text.chars().take(50).collect::<String>(),
+                    "📝 SAVE_ASSISTANT_MESSAGE: TextPart[{}] preview",
+                    i
+                );
+            }
+        }
 
         self.repo.save_message(&converted.message).await?;
         for part in &converted.parts {
@@ -712,20 +770,38 @@ impl SessionService {
             messages.len()
         );
         
-        // Log message details for debugging
+        // Log message details for debugging - DETAILED for duplication tracking
         for (i, msg) in messages.iter().enumerate() {
             let role = match &msg.message {
                 crate::message::Message::User(_) => "user",
                 crate::message::Message::Assistant(_) => "assistant",
             };
-            debug!(
+            let text_parts: Vec<_> = msg.parts.iter()
+                .filter_map(|p| match p {
+                    crate::message::MessagePart::Text(t) => Some((t.id.clone(), t.text.len())),
+                    _ => None,
+                })
+                .collect();
+            info!(
                 idx = i,
                 role = role,
                 id = %msg.message.id(),
-                parts = msg.parts.len(),
-                "Message {}: {} with {} parts",
-                i, role, msg.parts.len()
+                total_parts = msg.parts.len(),
+                text_parts = text_parts.len(),
+                "📖 GET_HISTORY: Message[{}] {} has {} parts ({} text parts)",
+                i, role, msg.parts.len(), text_parts.len()
             );
+            // Log each text part for debugging
+            for (j, (part_id, text_len)) in text_parts.iter().enumerate() {
+                info!(
+                    message_idx = i,
+                    text_part_idx = j,
+                    part_id = %part_id,
+                    text_len = text_len,
+                    "📖 GET_HISTORY: TextPart[{}] in message {}",
+                    j, i
+                );
+            }
         }
         
         Ok(messages)
@@ -820,13 +896,17 @@ mod tests {
         // Create a session
         let session1 = service.ensure_session().await.unwrap();
 
-        // Clear it
+        // Clear it - this now creates a new empty session immediately
         service.clear_session().await;
-        assert!(service.current_session_id().await.is_none());
+        
+        // After clear, a new session is created
+        let new_session_id = service.current_session_id().await;
+        assert!(new_session_id.is_some());
+        assert_ne!(new_session_id.as_ref().unwrap(), &session1.id);
 
-        // Ensure creates a new session
+        // Ensure returns the new session (doesn't create another)
         let session2 = service.ensure_session().await.unwrap();
-        assert_ne!(session1.id, session2.id);
+        assert_eq!(new_session_id.unwrap(), session2.id);
     }
 
     #[tokio::test]

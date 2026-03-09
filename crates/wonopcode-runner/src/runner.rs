@@ -3039,6 +3039,23 @@ impl Runner {
                             provider.reset_session().await;
                         }
                     }
+                    // Clear observational memory state for new session
+                    if self.om_config.enabled {
+                        if let Some(ref memory_state) = self.memory_state {
+                            let mut state = memory_state.write().await;
+                            state.clear();
+                            info!("Cleared observational memory for new session");
+                        }
+                        // Also clear persisted observations from disk
+                        if let Some(ref project_dir) = self.om_config.project_dir {
+                            let persistence = ObservationPersistence::new(project_dir);
+                            if let Err(e) = persistence.clear() {
+                                warn!(error = %e, "Failed to clear persisted observations");
+                            } else {
+                                info!("Cleared persisted observations for new session");
+                            }
+                        }
+                    }
                 }
                 AppAction::OpenEditor { .. } => {
                     // Editor is handled synchronously in the TUI, nothing to do here

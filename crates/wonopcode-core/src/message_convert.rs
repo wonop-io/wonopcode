@@ -115,6 +115,36 @@ pub fn convert_assistant_message(
     ctx: &ConversionContext,
     parent_message_id: &str,
 ) -> ConvertedMessage {
+    // Debug: Log incoming content parts
+    let text_content_count = provider_msg.content.iter()
+        .filter(|c| matches!(c, ContentPart::Text { .. }))
+        .count();
+    tracing::info!(
+        content_parts = provider_msg.content.len(),
+        text_content_parts = text_content_count,
+        "📥 CONVERT_ASSISTANT_MESSAGE: Converting {} content parts ({} text)",
+        provider_msg.content.len(),
+        text_content_count
+    );
+    for (i, content) in provider_msg.content.iter().enumerate() {
+        match content {
+            ContentPart::Text { text } => {
+                tracing::info!(
+                    idx = i,
+                    text_len = text.len(),
+                    text_preview = %text.chars().take(50).collect::<String>(),
+                    "📥 CONVERT_ASSISTANT_MESSAGE: ContentPart[{}] = Text({}...)",
+                    i, text.chars().take(50).collect::<String>()
+                );
+            }
+            ContentPart::ToolUse { id, name, .. } => {
+                tracing::info!(idx = i, tool_id = %id, tool_name = %name, "📥 CONVERT_ASSISTANT_MESSAGE: ContentPart[{}] = ToolUse", i);
+            }
+            _ => {
+                tracing::debug!(idx = i, "📥 CONVERT_ASSISTANT_MESSAGE: ContentPart[{}] = Other", i);
+            }
+        }
+    }
     let assistant_msg = AssistantMessage {
         id: Identifier::message(),
         session_id: ctx.session_id.clone(),

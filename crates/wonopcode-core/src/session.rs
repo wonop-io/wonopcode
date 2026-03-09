@@ -260,8 +260,9 @@ impl SessionRepository {
             }
         }
 
-        // Sort by ID (descending - newer first)
-        sessions.sort_by(|a, b| b.id.cmp(&a.id));
+        // Sort by ID ascending - with inverted ULIDs, smaller ID = newer session
+        // (Inverted ULIDs have smaller values for more recent timestamps)
+        sessions.sort_by(|a, b| a.id.cmp(&b.id));
 
         Ok(sessions)
     }
@@ -835,8 +836,8 @@ mod tests {
         let sessions = repo.list("proj_1").await.unwrap();
         assert_eq!(sessions.len(), 2);
 
-        // Verify sorted by ID descending (newer first)
-        assert!(sessions[0].id >= sessions[1].id);
+        // Verify sorted by ID ascending (with inverted ULIDs, smaller = newer)
+        assert!(sessions[0].id <= sessions[1].id);
 
         // Verify both sessions are present
         let ids: Vec<_> = sessions.iter().map(|s| s.id.as_str()).collect();

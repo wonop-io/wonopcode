@@ -123,6 +123,23 @@ impl MemoryState {
         }
     }
     
+    /// Clear all observations and reset state for a new session.
+    /// 
+    /// This preserves the session_id, workstream_id, and observation_token_budget,
+    /// but clears all observations, pending observations, stats, and timestamps.
+    pub fn clear(&mut self) {
+        self.observations.clear();
+        self.unobserved_message_range = None;
+        self.observation_tokens = 0;
+        self.unobserved_message_tokens = 0;
+        self.last_observation = None;
+        self.last_reflection = None;
+        self.pending_observations.clear();
+        self.loaded_from_previous_session = false;
+        self.stats = MemoryStats::default();
+        self.category_index.clear();
+    }
+    
     /// Create memory state with a workstream ID for persistence.
     pub fn with_workstream(mut self, workstream_id: impl Into<String>) -> Self {
         self.workstream_id = Some(workstream_id.into());
@@ -479,5 +496,43 @@ mod tests {
         stats.tokens_after_compression = 2_000;
         
         assert!((stats.compression_ratio() - 5.0).abs() < 0.01);
+    }
+    
+    #[test]
+    fn test_clear() {
+        let mut state = MemoryState::default();
+        
+        // Add some observations and state
+        state.observations.push(Observation::new(
+            Priority::High,
+            ObservationCategory::Decision,
+            "User chose Rust",
+            0.9,
+        ));
+        state.pending_observations.push(Observation::new(
+            Priority::Medium,
+            ObservationCategory::Fact,
+            "Project uses Axum",
+            0.8,
+        ));
+        state.unobserved_message_range = Some((0, 5));
+        state.observation_tokens = 100;
+        state.unobserved_message_tokens = 50;
+        state.stats.total_observations = 5;
+        state.loaded_from_previous_session = true;
+        
+        // Clear the state
+        state.clear();
+        
+        // Verify everything was cleared
+        assert!(state.observations.is_empty());
+        assert!(state.pending_observations.is_empty());
+        assert!(state.unobserved_message_range.is_none());
+        assert_eq!(state.observation_tokens, 0);
+        assert_eq!(state.unobserved_message_tokens, 0);
+        assert_eq!(state.stats.total_observations, 0);
+        assert!(!state.loaded_from_previous_session);
+        // session_id and observation_token_budget should be preserved
+        assert!(!state.session_id.is_empty());
     }
 }
