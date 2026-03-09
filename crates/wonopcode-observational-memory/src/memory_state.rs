@@ -498,6 +498,46 @@ mod tests {
         assert!((stats.compression_ratio() - 5.0).abs() < 0.01);
     }
     
+    /// Test that demonstrates proper usage of unobserved_message_range.
+    /// 
+    /// IMPORTANT: When new messages are added to a conversation after observation,
+    /// the stored range's `end` value becomes stale. Callers should ALWAYS use
+    /// the current `messages.len()` for the end index, not the stored range's end.
+    /// 
+    /// Example: After observation, range might be Some((1, 3)), but if new messages
+    /// are added making messages.len() = 5, the correct unobserved range is (1, 5).
+    #[test]
+    fn test_unobserved_message_range_stale_end_bug() {
+        let mut state = MemoryState::default();
+        
+        // Simulate: After first observation, we set range to (1, 3)
+        // This means messages 1-3 will be observed next time
+        state.set_unobserved_range(1, 3, 1000);
+        
+        assert_eq!(state.unobserved_message_range, Some((1, 3)));
+        
+        // Now simulate new messages being added (e.g., another turn happened)
+        // messages.len() is now 5, but the stored range still says (1, 3)
+        let current_messages_len = 5;
+        
+        // WRONG: Using stored end value would miss messages 3-5
+        let (stored_start, stored_end) = state.unobserved_message_range.unwrap();
+        assert_eq!(stored_start, 1);
+        assert_eq!(stored_end, 3);  // This is stale!
+        
+        // CORRECT: Use stored start but current messages.len() for end
+        let correct_start = state.unobserved_message_range.map(|(s, _)| s).unwrap_or(0);
+        let correct_end = current_messages_len;
+        
+        assert_eq!(correct_start, 1);
+        assert_eq!(correct_end, 5);  // This includes the new messages!
+        
+        // The range to observe should be [1, 5), not [1, 3)
+        // This ensures all unobserved messages are captured
+        assert_eq!(correct_end - correct_start, 4); // 4 messages to observe
+        assert!(correct_end - stored_end == 2);     // 2 messages would have been missed!
+    }
+    
     #[test]
     fn test_clear() {
         let mut state = MemoryState::default();
