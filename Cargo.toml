@@ -33,6 +33,8 @@ members = [
     "crates/wonopcode-tui-messages",
     # Observational Memory
     "crates/wonopcode-observational-memory",
+    # Workflow engine
+    "crates/wonopcode-workflow",
 ]
 
 [workspace.package]
@@ -70,6 +72,7 @@ wonopcode-message = { path = "crates/wonopcode-message" }
 wonopcode-transport = { path = "crates/wonopcode-transport" }
 wonopcode-iggy-embedded = { path = "crates/wonopcode-iggy-embedded" }
 wonopcode-git = { path = "crates/wonopcode-git" }
+wonopcode-workflow = { path = "crates/wonopcode-workflow" }
 
 # External workspace crates
 wonop-memory = { path = "../../../crates/wonop-memory" }

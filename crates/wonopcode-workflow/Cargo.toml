@@ -1,0 +1,47 @@
+[package]
+name = "wonopcode-workflow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Workflow execution engine for wonopcode"
+
+[dependencies]
+# Wonopcode dependencies
+wonopcode-provider = { workspace = true }
+wonopcode-tools = { workspace = true }
+wonopcode-util = { workspace = true }
+wonopcode-snapshot = { workspace = true }
+wonopcode-sandbox = { workspace = true }
+
+# Wonop dependencies (template engine)
+wonop-templates = { path = "../../../../../crates/wonop-templates" }
+wonop-template-filters = { path = "../../../../../crates/wonop-template-filters" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Template engine
+tera = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Misc
+uuid = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
