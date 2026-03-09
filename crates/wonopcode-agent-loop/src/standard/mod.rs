@@ -274,9 +274,13 @@ impl StandardLoop {
             debug!("OM: Observer threshold reached ({} tokens)", message_tokens);
             
             // Get messages to observe (read memory_state)
-            let (start, end) = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?
+            // Always use ctx.messages.len() as end - the stored range may have a stale end value
+            // if new messages were added since the last observation
+            let start = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?
                 .unobserved_message_range
-                .unwrap_or((0, ctx.messages.len()));
+                .map(|(s, _)| s)
+                .unwrap_or(0);
+            let end = ctx.messages.len();
             
             if start < end && start < ctx.messages.len() {
                 let messages_to_observe: Vec<_> = ctx.messages[start..end.min(ctx.messages.len())]
