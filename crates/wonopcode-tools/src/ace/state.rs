@@ -346,29 +346,32 @@ impl WorkstreamState {
         use std::sync::OnceLock;
 
         // Pattern 1: Letters/numbers followed by dash and digits (e.g., WON-125)
-        static RE_PROJECT: OnceLock<regex::Regex> = OnceLock::new();
-        // SAFETY: This is a compile-time constant regex pattern that is known to be valid.
-        // Failure would be caught immediately in testing and cannot occur at runtime.
-        let re_project =
-            RE_PROJECT.get_or_init(|| regex::Regex::new(r"^([A-Za-z][A-Za-z0-9]*-\d+)").unwrap());
+        static RE_PROJECT: OnceLock<Option<regex::Regex>> = OnceLock::new();
+        let re_project = RE_PROJECT.get_or_init(|| {
+            regex::Regex::new(r"^([A-Za-z][A-Za-z0-9]*-\d+)").ok()
+        });
 
-        if let Some(captures) = re_project.captures(name) {
-            if let Some(m) = captures.get(1) {
-                return Some(m.as_str().to_uppercase());
+        if let Some(re) = re_project {
+            if let Some(captures) = re.captures(name) {
+                if let Some(m) = captures.get(1) {
+                    return Some(m.as_str().to_uppercase());
+                }
             }
         }
 
         // Pattern 2: Numeric-only ticket ID (e.g., 409)
         // Only matches when followed by -- (the description separator) to avoid
         // ambiguity with branch names like "feature-123" which may not be ticket IDs
-        static RE_NUMERIC: OnceLock<regex::Regex> = OnceLock::new();
-        // SAFETY: This is a compile-time constant regex pattern that is known to be valid.
-        // Failure would be caught immediately in testing and cannot occur at runtime.
-        let re_numeric = RE_NUMERIC.get_or_init(|| regex::Regex::new(r"^(\d+)--").unwrap());
+        static RE_NUMERIC: OnceLock<Option<regex::Regex>> = OnceLock::new();
+        let re_numeric = RE_NUMERIC.get_or_init(|| {
+            regex::Regex::new(r"^(\d+)--").ok()
+        });
 
-        if let Some(captures) = re_numeric.captures(name) {
-            if let Some(m) = captures.get(1) {
-                return Some(m.as_str().to_string());
+        if let Some(re) = re_numeric {
+            if let Some(captures) = re.captures(name) {
+                if let Some(m) = captures.get(1) {
+                    return Some(m.as_str().to_string());
+                }
             }
         }
 

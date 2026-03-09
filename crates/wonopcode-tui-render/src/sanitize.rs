@@ -43,11 +43,15 @@ pub fn sanitize_for_display(text: &str) -> String {
                     // Consume the rest of the CSI sequence until we hit a letter
                     while let Some(&next) = chars.peek() {
                         if next.is_ascii_alphabetic() {
-                            result.push(chars.next().unwrap());
+                            if let Some(c) = chars.next() {
+                                result.push(c);
+                            }
                             break;
                         } else if next.is_ascii_digit() || next == ';' || next == '?' || next == '='
                         {
-                            result.push(chars.next().unwrap());
+                            if let Some(c) = chars.next() {
+                                result.push(c);
+                            }
                         } else {
                             // Unknown sequence, just show what we have
                             break;
@@ -73,7 +77,9 @@ pub fn sanitize_for_display(text: &str) -> String {
                             }
                             break;
                         } else {
-                            result.push(chars.next().unwrap());
+                            if let Some(c) = chars.next() {
+                                result.push(c);
+                            }
                         }
                     }
                 } else {

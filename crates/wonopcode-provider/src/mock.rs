@@ -52,7 +52,7 @@ impl MockProvider {
 
     /// Expect a text response.
     pub fn expect_text(&self, text: impl Into<String>) {
-        let mut responses = self.responses.lock().unwrap();
+        let mut responses = self.responses.lock().unwrap_or_else(|e| e.into_inner());
         responses.push(MockResponse::Text(text.into()));
     }
 
@@ -63,7 +63,7 @@ impl MockProvider {
         name: impl Into<String>,
         arguments: impl Into<String>,
     ) {
-        let mut responses = self.responses.lock().unwrap();
+        let mut responses = self.responses.lock().unwrap_or_else(|e| e.into_inner());
         responses.push(MockResponse::ToolCall {
             id: id.into(),
             name: name.into(),
@@ -73,13 +73,13 @@ impl MockProvider {
 
     /// Expect an error response.
     pub fn expect_error(&self, error: impl Into<String>) {
-        let mut responses = self.responses.lock().unwrap();
+        let mut responses = self.responses.lock().unwrap_or_else(|e| e.into_inner());
         responses.push(MockResponse::Error(error.into()));
     }
 
     /// Get the number of times generate was called.
     pub fn call_count(&self) -> usize {
-        *self.call_count.lock().unwrap()
+        *self.call_count.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -92,13 +92,13 @@ impl LanguageModel for MockProvider {
     ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>> {
         // Increment call count
         {
-            let mut count = self.call_count.lock().unwrap();
+            let mut count = self.call_count.lock().unwrap_or_else(|e| e.into_inner());
             *count += 1;
         }
 
         // Get next response
         let response = {
-            let mut responses = self.responses.lock().unwrap();
+            let mut responses = self.responses.lock().unwrap_or_else(|e| e.into_inner());
             if responses.is_empty() {
                 MockResponse::Text("Mock response".to_string())
             } else {

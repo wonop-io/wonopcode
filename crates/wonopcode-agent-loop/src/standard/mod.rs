@@ -263,18 +263,18 @@ impl StandardLoop {
             .sum();
 
         // Get thresholds (needs token_state_machine)
-        let thresholds = ctx.token_state_machine.as_ref().unwrap().thresholds();
+        let thresholds = ctx.token_state_machine.as_ref().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?.thresholds();
         let should_observe = thresholds.should_observe(message_tokens);
         
         // Update token state machine
-        ctx.token_state_machine.as_mut().unwrap().update_message_tokens(message_tokens);
+        ctx.token_state_machine.as_mut().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?.update_message_tokens(message_tokens);
 
         // Check if observation should be triggered
         if should_observe {
             debug!("OM: Observer threshold reached ({} tokens)", message_tokens);
             
             // Get messages to observe (read memory_state)
-            let (start, end) = ctx.memory_state.as_ref().unwrap()
+            let (start, end) = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?
                 .unobserved_message_range
                 .unwrap_or((0, ctx.messages.len()));
             
@@ -283,7 +283,7 @@ impl StandardLoop {
                     .to_vec();
                 
                 // Run Observer (release mutable borrow during async call)
-                ctx.token_state_machine.as_mut().unwrap().start_observer();
+                ctx.token_state_machine.as_mut().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?.start_observer();
                 
                 let provider = ctx.provider.clone();
                 let observer = ObserverAgent::new(ObserverConfig::default(), provider);
@@ -300,7 +300,7 @@ impl StandardLoop {
                         
                         // Update memory state with new observations
                         {
-                            let memory_state = ctx.memory_state.as_mut().unwrap();
+                            let memory_state = ctx.memory_state.as_mut().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?;
                             memory_state.add_pending_batch(result.observations);
                             memory_state.commit_observations(end - start);
                         }
@@ -309,7 +309,7 @@ impl StandardLoop {
                         // This ensures observations survive Cmd+Q or unexpected termination
                         if let Some(ref project_dir) = ctx.om_project_dir {
                             let persistence = ObservationPersistence::new(project_dir);
-                            let memory_state = ctx.memory_state.as_ref().unwrap();
+                            let memory_state = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?;
                             match persistence.save(memory_state) {
                                 Ok(()) => {
                                     info!(
@@ -376,13 +376,13 @@ impl StandardLoop {
                             // Reset unobserved range to track all remaining messages
                             // (excluding system message at index 0 if present)
                             let new_start = if has_system { 1 } else { 0 };
-                            ctx.memory_state.as_mut().unwrap().unobserved_message_range = 
+                            ctx.memory_state.as_mut().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.unobserved_message_range = 
                                 Some((new_start, ctx.messages.len()));
                         }
                         
                         // Complete observer in state machine
-                        let observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
-                        ctx.token_state_machine.as_mut().unwrap()
+                        let observation_tokens = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observation_tokens;
+                        ctx.token_state_machine.as_mut().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?
                             .complete_observer(message_tokens, observation_tokens);
                         
                         // Send OM snapshot to UI
@@ -409,17 +409,17 @@ impl StandardLoop {
         }
 
         // Check if reflection should be triggered
-        let observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
-        let obs_count = ctx.memory_state.as_ref().unwrap().observations.len();
-        let should_reflect = ctx.token_state_machine.as_ref().unwrap()
+        let observation_tokens = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observation_tokens;
+        let obs_count = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observations.len();
+        let should_reflect = ctx.token_state_machine.as_ref().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?
             .thresholds().should_reflect(observation_tokens) && obs_count >= 10;
         
         if should_reflect {
             debug!("OM: Reflector threshold reached ({} tokens)", observation_tokens);
             
-            ctx.token_state_machine.as_mut().unwrap().start_reflector();
+            ctx.token_state_machine.as_mut().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?.start_reflector();
             
-            let observations_to_reflect = ctx.memory_state.as_ref().unwrap().observations.clone();
+            let observations_to_reflect = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observations.clone();
             let provider = ctx.provider.clone();
             let reflector = ReflectorAgent::new(ReflectorConfig::default(), provider);
             
@@ -438,14 +438,14 @@ impl StandardLoop {
                         dropped: result.dropped_count as u32,
                         meta_added: result.patterns.len() as u32,
                     };
-                    ctx.memory_state.as_mut().unwrap()
+                    ctx.memory_state.as_mut().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?
                         .commit_reflection(result.observations, reflection_stats);
                     
                     // Save observations to disk immediately (continuous persistence)
                     // This ensures observations survive Cmd+Q or unexpected termination
                     if let Some(ref project_dir) = ctx.om_project_dir {
                         let persistence = ObservationPersistence::new(project_dir);
-                        let memory_state = ctx.memory_state.as_ref().unwrap();
+                        let memory_state = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?;
                         match persistence.save(memory_state) {
                             Ok(()) => {
                                 info!(
@@ -461,8 +461,8 @@ impl StandardLoop {
                     }
                     
                     // Complete reflector in state machine
-                    let new_observation_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
-                    ctx.token_state_machine.as_mut().unwrap()
+                    let new_observation_tokens = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observation_tokens;
+                    ctx.token_state_machine.as_mut().ok_or_else(|| LoopError::internal("OM token_state_machine not initialized"))?
                         .complete_reflector(new_observation_tokens);
                     
                     // Send OM snapshot to UI after reflection
@@ -621,10 +621,10 @@ impl AgentLoop for StandardLoop {
                 
                 // 2. Observational Memory observations (if enabled and have observations)
                 if ctx.is_om_ready() {
-                    let observations_block = ctx.memory_state.as_ref().unwrap().format_for_prompt();
+                    let observations_block = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.format_for_prompt();
                     if !observations_block.is_empty() {
-                        let obs_count = ctx.memory_state.as_ref().unwrap().observations.len();
-                        let obs_tokens = ctx.memory_state.as_ref().unwrap().observation_tokens;
+                        let obs_count = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observations.len();
+                        let obs_tokens = ctx.memory_state.as_ref().ok_or_else(|| LoopError::internal("OM memory_state not initialized"))?.observation_tokens;
                         debug!(
                             "OM: Injecting {} observations ({} tokens) into system prompt",
                             obs_count, obs_tokens
