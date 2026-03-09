@@ -209,6 +209,7 @@ Usage notes:
             permission_checker: ctx.permission_checker.clone(),
             workstream_ticket_id: ctx.workstream_ticket_id.clone(),
             workstream_default_tracker_id: ctx.workstream_default_tracker_id.clone(),
+            default_shell: ctx.default_shell.clone(),
         };
 
         // Execute the subagent

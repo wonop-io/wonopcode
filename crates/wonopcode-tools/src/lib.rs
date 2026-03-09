@@ -200,6 +200,9 @@ pub struct ToolContext {
     /// This is the tracker that owns the workstream's ticket.
     /// Tools should use this as the default for ticket operations.
     pub workstream_default_tracker_id: Option<String>,
+    /// Default shell for command execution (e.g., "zsh", "bash", "sh").
+    /// If set, commands will be executed using this shell with login shell flags.
+    pub default_shell: Option<String>,
 }
 
 impl ToolContext {
