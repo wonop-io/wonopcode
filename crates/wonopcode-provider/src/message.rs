@@ -17,7 +17,7 @@ pub enum Role {
 }
 
 /// A message in a conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     /// The role of the message sender.
     pub role: Role,
@@ -94,7 +94,7 @@ impl Message {
 }
 
 /// A part of a message's content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentPart {
     /// Text content.
@@ -167,7 +167,7 @@ impl ContentPart {
 }
 
 /// Image source for image content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ImageSource {
     /// Base64 encoded image.

@@ -1817,12 +1817,17 @@ impl Runner {
                         // Collect messages for session persistence.
                         // The OM observer drains ctx.messages, so these are emitted BEFORE
                         // the drain to preserve them for persistence.
+                        // Deduplicate to prevent duplicate messages when OM runs multiple times.
                         tracing::info!(
                             "🧠 [Runner] Received MessagesForPersistence: {} messages",
                             msgs.len()
                         );
                         if let Ok(mut guard) = messages_for_persistence_clone.lock() {
-                            guard.extend(msgs);
+                            for msg in msgs {
+                                if !guard.iter().any(|existing| *existing == msg) {
+                                    guard.push(msg);
+                                }
+                            }
                         }
                         continue; // Don't forward to AppUpdate
                     }
