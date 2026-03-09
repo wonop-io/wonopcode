@@ -191,7 +191,7 @@ Usage notes:
             "Executing bash command"
         );
 
-        self.execute_direct(&args.command, &workdir, timeout, args.run_in_background)
+        self.execute_direct(&args.command, &workdir, timeout, args.run_in_background, ctx.default_shell.as_deref())
             .await
     }
 }
@@ -276,10 +276,16 @@ impl BashTool {
         workdir: &PathBuf,
         timeout: Duration,
         run_in_background: bool,
+        default_shell: Option<&str>,
     ) -> ToolResult<ToolOutput> {
         // Build the command
-        let mut cmd = Command::new("bash");
-        cmd.arg("-c")
+        // Use login shell (-l) to source profile files (.bashrc, .zshrc, etc.)
+        // This ensures PATH and other environment variables are properly loaded
+        // Use configured shell if set, otherwise default to bash
+        let shell = default_shell.unwrap_or("bash");
+        let mut cmd = Command::new(shell);
+        cmd.arg("-l")  // Login shell - loads profile
+            .arg("-c")
             .arg(command)
             .current_dir(workdir)
             .stdin(Stdio::null())

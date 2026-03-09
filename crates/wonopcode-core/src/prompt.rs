@@ -436,6 +436,7 @@ impl PromptLoop {
             permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            default_shell: None, // Shell settings not available in prompt executor
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool_name);

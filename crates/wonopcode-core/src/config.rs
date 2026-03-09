@@ -1977,6 +1977,12 @@ pub struct AppSettings {
     /// When observations exceed this threshold, the Reflector runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub om_reflector_threshold: Option<u32>,
+
+    /// Default shell for command execution (e.g., "zsh", "bash", "sh").
+    /// If set, commands will be executed using this shell with login shell flags
+    /// to load environment from profile files (.zshrc, .bashrc, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_shell: Option<String>,
 }
 
 /// Manages application-wide settings.
@@ -2122,6 +2128,17 @@ impl AppSettingsManager {
     /// Set the custom reflector threshold.
     pub fn set_om_reflector_threshold(&mut self, threshold: Option<u32>) -> CoreResult<()> {
         self.settings.om_reflector_threshold = threshold;
+        self.save()
+    }
+
+    /// Get the default shell for command execution.
+    pub fn get_default_shell(&self) -> Option<&str> {
+        self.settings.default_shell.as_deref()
+    }
+
+    /// Set the default shell for command execution.
+    pub fn set_default_shell(&mut self, shell: Option<String>) -> CoreResult<()> {
+        self.settings.default_shell = shell;
         self.save()
     }
 }

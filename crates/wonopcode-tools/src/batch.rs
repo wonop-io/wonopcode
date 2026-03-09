@@ -287,6 +287,7 @@ impl Clone for ToolContext {
             permission_checker: self.permission_checker.clone(),
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
+            default_shell: self.default_shell.clone(),
         }
     }
 }

@@ -267,6 +267,7 @@ impl<'a> ToolExecutor<'a> {
             permission_checker: self.ts_permission_checker.clone(),
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
+            default_shell: None, // TODO: Get from settings when available
         };
 
         // Execute
