@@ -1119,7 +1119,7 @@ impl AgentLoop for StandardLoop {
                         let output = if out.output.len() > 50000 {
                             format!(
                                 "{}\n\n... [Output truncated: {} chars total, showing first 50000]",
-                                &out.output[..50000],
+                                wonopcode_util::truncate_to_char_boundary(&out.output, 50000),
                                 out.output.len()
                             )
                         } else {

@@ -142,7 +142,7 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
                 let mut text = if output.output.len() > 50000 {
                     format!(
                         "{}\n\n... [Output truncated: {} chars total]",
-                        &output.output[..50000],
+                        wonopcode_util::truncate_to_char_boundary(&output.output, 50000),
                         output.output.len()
                     )
                 } else {
