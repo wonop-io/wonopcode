@@ -493,16 +493,25 @@ impl ArtifactStore {
 
     /// Ensure a session exists for the workstream.
     ///
-    /// If the workstream doesn't have a session, creates one.
-    /// Returns the session ID.
+    /// If the workstream doesn't have a session, or the session file is missing,
+    /// creates one. Returns the session ID.
     pub fn ensure_session(
         &self,
         state: &mut WorkstreamState,
         root_dir: &std::path::Path,
     ) -> Result<String> {
+        // Check if session_id is set AND the session artifact actually exists
         if let Some(ref session_id) = state.session_id {
-            // Session already exists
-            return Ok(session_id.clone());
+            // Verify the session file exists on disk
+            if self.read_artifact(session_id)?.is_some() {
+                return Ok(session_id.clone());
+            }
+            // Session ID was set but file doesn't exist - clear it and create new
+            tracing::warn!(
+                "Session {} referenced in state but file not found, creating new session",
+                session_id
+            );
+            state.session_id = None;
         }
 
         // Create a new session

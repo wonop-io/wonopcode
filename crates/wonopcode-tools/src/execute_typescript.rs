@@ -27,8 +27,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+use tokio::sync::mpsc as tokio_mpsc;
 use wonopcode_codemode::{
-    create_permission_channel, AllowedCommands, CodemodeRuntime, RuntimeConfig, ServiceHandles,
+    create_permission_channel, AceEvent, AllowedCommands, CodemodeRuntime, RuntimeConfig, ServiceHandles,
     NewTicket as CodemodeNewTicket, Ticket as CodemodeTicket, TicketFilter as CodemodeTicketFilter,
     TicketService as CodemodeTicketService, TicketStatus as CodemodeTicketStatus,
     TrackerInfo as CodemodeTrackerInfo, ServiceError, ServiceResult, ToolDefinition,
@@ -119,6 +120,10 @@ impl Tool for ExecuteTypescriptTool {
             .unwrap_or_else(|| FileAceService::shared(ctx.root_dir.clone()));
         let mut services = ServiceHandles::new().with_ace(ace_service);
 
+        // Create ACE event channel to bridge events to ToolEvent
+        let (ace_event_tx, mut ace_event_rx) = tokio_mpsc::unbounded_channel::<AceEvent>();
+        services.ace_events = Some(ace_event_tx);
+
         // Wire up ticket service if available (via adapter to bridge trait types)
         if let Some(ticket_service) = &ctx.ticket_service {
             let adapter = TicketServiceAdapter::new(ticket_service.clone());
@@ -134,6 +139,25 @@ impl Tool for ExecuteTypescriptTool {
         // Wire up web service (always available for search/fetch)
         let web_service = WebServiceImpl::new();
         services = services.with_web(Arc::new(web_service));
+
+        // Spawn ACE event forwarder task (converts AceEvent -> ToolEvent)
+        let tool_event_tx = ctx.event_tx.clone();
+        let ace_event_handle = tokio::spawn(async move {
+            while let Some(event) = ace_event_rx.recv().await {
+                if let Some(ref tx) = tool_event_tx {
+                    match event {
+                        AceEvent::ArtifactCreated { id, artifact_type } => {
+                            debug!(artifact_id = %id, "Forwarding AceEvent::ArtifactCreated as ToolEvent");
+                            let _ = tx.send(crate::ToolEvent::ArtifactCreated { id, artifact_type });
+                        }
+                        AceEvent::ArtifactUpdated { id } => {
+                            debug!(artifact_id = %id, "Forwarding AceEvent::ArtifactUpdated as ToolEvent");
+                            let _ = tx.send(crate::ToolEvent::ArtifactUpdated { id });
+                        }
+                    }
+                }
+            }
+        });
 
         // Build runtime configuration
         let config = RuntimeConfig {
@@ -210,6 +234,20 @@ impl Tool for ExecuteTypescriptTool {
         // Cancel the permission handler task
         if let Some(handle) = permission_handle {
             handle.abort();
+        }
+
+        // Wait briefly for ACE events to be forwarded, then cancel
+        // This prevents race condition where events are emitted but not yet processed
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            ace_event_handle
+        ).await {
+            Ok(_) => {
+                // Forwarder finished naturally
+            }
+            Err(_) => {
+                // Timeout - forwarder will be dropped and cancelled
+            }
         }
 
         let output = output?;
