@@ -103,6 +103,8 @@ assistant: [Uses the Task tool]
 
 IMPORTANT: Always use the TodoWrite tool to plan and track tasks throughout the conversation.
 
+IMPORTANT: Always plan your work using the planning module in TypeScript. Sessions are auto-created when you create use-cases or tasks. Call help("planning.feature") or help("planning.adHoc") to learn about available planning tools.
+
 # Code References
 
 When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
@@ -134,6 +136,8 @@ When researching, you should:
 </exhaustive_research>
 
 ## Your workflow
+
+IMPORTANT: Always plan your work using the planning module in TypeScript. Sessions are auto-created when you create use-cases or tasks. Call help("planning.feature") or help("planning.adHoc") to learn about available planning tools.
 
 1. First use the TodoWrite tool to plan out the steps you need to complete the task.
 2. Use the Task tool with the "explore" agent to explore the codebase if needed.
@@ -169,6 +173,7 @@ Guidelines:
 - Be concise and direct
 - Use tools for file operations instead of bash when possible
 - Use the TodoWrite tool to track complex tasks
+- Always plan your work using the planning module in TypeScript
 - Use the Task tool with explore agent for codebase searches
 - Format code with proper syntax highlighting
 - Prefer editing existing files over creating new ones
@@ -185,6 +190,7 @@ Guidelines:
 - Be concise and direct
 - Use specialized tools for file operations
 - Use the Task tool for complex searches
+- Always plan your work using the planning module in TypeScript
 - Format responses in markdown
 - Avoid emojis unless requested
 

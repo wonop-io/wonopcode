@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use wonopcode_codemode::{
     AceService, Artifact, ArtifactPriority, ArtifactStatus, ArtifactType, CheckpointAction,
-    CheckpointResult, CheckpointType, NewArtifact, NewTask, ServiceError, ServiceResult, TaskEntry,
-    TaskTree, WorkflowGuidance,
+    CheckpointResult, CheckpointType, DocumentSummary, ElaborateInput, ElaborateResult,
+    NewArtifact, NewTask, ServiceError, ServiceResult, TaskEntry, TaskTree, WorkflowGuidance,
 };
 
 use super::config::WonopCodeConfig;
@@ -139,11 +139,32 @@ impl AceService for FileAceService {
         let store = ArtifactStore::new(&self.root_dir)
             .map_err(|e| Self::to_service_error(format!("Failed to create store: {}", e)))?;
 
+        // Ensure directories exist
+        store
+            .ensure_directories()
+            .map_err(|e| Self::to_service_error(format!("Failed to create directories: {}", e)))?;
+
         let mut state = WorkstreamState::ensure_initialized(&self.root_dir)
             .map_err(|e| Self::to_service_error(format!("Failed to load state: {}", e)))?;
 
+        // Ensure session exists (auto-creates if needed)
+        let session_id = store
+            .ensure_session(&mut state, &self.root_dir)
+            .map_err(|e| Self::to_service_error(format!("Failed to ensure session: {}", e)))?;
+
         let artifact_type = self.parse_type(&artifact.artifact_type);
         let priority = self.parse_priority(&artifact.priority);
+
+        // Auto-assign session as parent for use-cases and tasks if no parent specified
+        let parents = match artifact.parents {
+            Some(ref p) if !p.is_empty() => p.clone(),
+            _ => match artifact_type {
+                super::types::ArtifactType::UseCase | super::types::ArtifactType::Task => {
+                    vec![session_id]
+                }
+                _ => vec![],
+            },
+        };
 
         let created = store
             .create_artifact(
@@ -151,7 +172,7 @@ impl AceService for FileAceService {
                 artifact_type,
                 &artifact.title,
                 &artifact.content,
-                artifact.parents.unwrap_or_default(),
+                parents,
                 priority,
                 artifact.staging.unwrap_or(true),
             )
@@ -205,6 +226,38 @@ impl AceService for FileAceService {
                 })
             }
             CheckpointAction::Approve => {
+                // Create store to promote artifacts
+                let store = ArtifactStore::new(&self.root_dir)
+                    .map_err(|e| Self::to_service_error(format!("Failed to create store: {}", e)))?;
+
+                // Determine which artifact types to promote based on checkpoint type
+                let artifact_types_to_promote: Vec<super::types::ArtifactType> = match &checkpoint {
+                    CheckpointType::Requirements => vec![
+                        super::types::ArtifactType::UseCase,
+                        super::types::ArtifactType::Requirement,
+                    ],
+                    CheckpointType::Design => vec![
+                        super::types::ArtifactType::Design,
+                    ],
+                    CheckpointType::ImplementationPlan => vec![
+                        super::types::ArtifactType::Task,
+                        super::types::ArtifactType::TestCase,
+                    ],
+                    CheckpointType::Verification => vec![
+                        // Promote all remaining staged artifacts
+                        super::types::ArtifactType::UseCase,
+                        super::types::ArtifactType::Requirement,
+                        super::types::ArtifactType::Design,
+                        super::types::ArtifactType::TestCase,
+                        super::types::ArtifactType::Task,
+                    ],
+                };
+
+                // Promote staged artifacts to approved
+                let promoted_count = store
+                    .promote_artifacts_by_types(&artifact_types_to_promote)
+                    .map_err(|e| Self::to_service_error(format!("Failed to promote artifacts: {}", e)))?;
+
                 // Mark phase as completed by advancing workflow phase
                 // The phase state is stored in state.workflow.phases
                 let phase_key = checkpoint_name.to_string();
@@ -220,8 +273,12 @@ impl AceService for FileAceService {
                 Ok(CheckpointResult {
                     checkpoint,
                     status: "approved".to_string(),
-                    message: comments
-                        .or_else(|| Some(format!("{} checkpoint approved", checkpoint_name))),
+                    message: comments.or_else(|| {
+                        Some(format!(
+                            "{} checkpoint approved. {} artifacts promoted from staging.",
+                            checkpoint_name, promoted_count
+                        ))
+                    }),
                 })
             }
         }
@@ -355,10 +412,32 @@ impl AceService for FileAceService {
             .list_all_artifacts_for_ticket(&state.ticket_id)
             .map_err(|e| Self::to_service_error(format!("Failed to list artifacts: {}", e)))?;
 
-        let tasks: Vec<super::types::Artifact> = artifacts
-            .into_iter()
-            .filter(|a| matches!(a.metadata.artifact_type, super::types::ArtifactType::Task))
-            .collect();
+        // Separate tasks from other artifact types
+        let mut tasks: Vec<super::types::Artifact> = Vec::new();
+        let mut staged_documents = Vec::new();
+        let mut approved_documents = Vec::new();
+
+        for artifact in artifacts {
+            let is_staged = store.is_staged(&artifact);
+            
+            if matches!(artifact.metadata.artifact_type, super::types::ArtifactType::Task) {
+                tasks.push(artifact);
+            } else {
+                // Track non-task artifacts as documents
+                let doc_summary = DocumentSummary {
+                    id: artifact.metadata.id.clone(),
+                    artifact_type: self.convert_type(&artifact.metadata.artifact_type),
+                    title: artifact.title.clone(),
+                    priority: self.convert_priority(&artifact.metadata.priority),
+                };
+                
+                if is_staged {
+                    staged_documents.push(doc_summary);
+                } else {
+                    approved_documents.push(doc_summary);
+                }
+            }
+        }
 
         // Group tasks by status
         let mut done = Vec::new();
@@ -386,7 +465,129 @@ impl AceService for FileAceService {
             backlog,
             blocked,
             discarded,
+            staged_documents,
+            approved_documents,
         })
+    }
+
+    async fn elaborate_artifact(&self, input: ElaborateInput) -> ServiceResult<ElaborateResult> {
+        let store = ArtifactStore::new(&self.root_dir)
+            .map_err(|e| Self::to_service_error(format!("Failed to create store: {}", e)))?;
+
+        // Read the artifact to elaborate
+        let artifact = store
+            .read_artifact(&input.artifact_id)
+            .map_err(|e| Self::to_service_error(format!("Failed to read artifact: {}", e)))?
+            .ok_or_else(|| {
+                ServiceError::new("NOT_FOUND", format!("Artifact not found: {}", input.artifact_id))
+            })?;
+
+        // Generate elaboration based on artifact type
+        let artifact_type_name = match artifact.metadata.artifact_type {
+            super::types::ArtifactType::UseCase => "use case",
+            super::types::ArtifactType::Requirement => "requirement",
+            super::types::ArtifactType::Design => "design",
+            super::types::ArtifactType::TestCase => "test case",
+            super::types::ArtifactType::Task => "task",
+            super::types::ArtifactType::Session => "session",
+        };
+
+        // Build elaboration prompt/template based on artifact type and focus
+        let focus_section = input.focus.as_ref().map(|f| format!("\n\n## Focus Area: {}\n", f)).unwrap_or_default();
+        let context_section = input.context.as_ref().map(|c| format!("\n\n## Additional Context\n{}\n", c)).unwrap_or_default();
+
+        let elaborated_content = format!(
+            r#"# Elaboration of {type_name}: {title}
+
+## Original Content
+{original}
+
+## Detailed Analysis
+{focus}
+Consider the following aspects for this {type_name}:
+
+### Edge Cases
+- What boundary conditions should be considered?
+- What happens with invalid or unexpected inputs?
+- Are there race conditions or timing issues to address?
+
+### Error Handling
+- What errors can occur?
+- How should each error be handled?
+- What feedback should users receive?
+
+### Dependencies
+- What other components does this depend on?
+- What depends on this component?
+- Are there any circular dependencies to avoid?
+
+### Testing Considerations
+- What unit tests are needed?
+- What integration tests are needed?
+- What are the key test scenarios?
+{context}
+"#,
+            type_name = artifact_type_name,
+            title = artifact.title,
+            original = artifact.content,
+            focus = focus_section,
+            context = context_section,
+        );
+
+        // Generate suggestions for follow-up artifacts based on type
+        let suggested_artifacts = match artifact.metadata.artifact_type {
+            super::types::ArtifactType::UseCase => vec![
+                format!("Create requirements for: {}", artifact.title),
+                "Define acceptance criteria".to_string(),
+                "Identify edge case scenarios".to_string(),
+            ],
+            super::types::ArtifactType::Requirement => vec![
+                format!("Create design for: {}", artifact.title),
+                format!("Create test cases for: {}", artifact.title),
+                "Define error handling requirements".to_string(),
+            ],
+            super::types::ArtifactType::Design => vec![
+                format!("Create implementation tasks for: {}", artifact.title),
+                "Define API contracts".to_string(),
+                "Document data models".to_string(),
+            ],
+            super::types::ArtifactType::TestCase => vec![
+                "Add edge case tests".to_string(),
+                "Add performance tests".to_string(),
+                "Add integration tests".to_string(),
+            ],
+            super::types::ArtifactType::Task | super::types::ArtifactType::Session => vec![
+                "Break down into subtasks".to_string(),
+                "Identify blockers".to_string(),
+                "Define acceptance criteria".to_string(),
+            ],
+        };
+
+        Ok(ElaborateResult {
+            artifact_id: input.artifact_id,
+            elaborated_content,
+            suggested_artifacts,
+        })
+    }
+
+    async fn get_session_id(&self) -> ServiceResult<String> {
+        let store = ArtifactStore::new(&self.root_dir)
+            .map_err(|e| Self::to_service_error(format!("Failed to create store: {}", e)))?;
+
+        // Ensure directories exist
+        store
+            .ensure_directories()
+            .map_err(|e| Self::to_service_error(format!("Failed to create directories: {}", e)))?;
+
+        let mut state = WorkstreamState::ensure_initialized(&self.root_dir)
+            .map_err(|e| Self::to_service_error(format!("Failed to load state: {}", e)))?;
+
+        // Ensure session exists (auto-creates if needed)
+        let session_id = store
+            .ensure_session(&mut state, &self.root_dir)
+            .map_err(|e| Self::to_service_error(format!("Failed to ensure session: {}", e)))?;
+
+        Ok(session_id)
     }
 }
 
