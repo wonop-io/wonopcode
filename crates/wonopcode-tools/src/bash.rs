@@ -425,12 +425,18 @@ fn truncate_output(output: &str, max_size: usize) -> (String, bool) {
         return (output.to_string(), false);
     }
 
-    // Keep first half and last portion
-    let keep_start = max_size * 2 / 3;
+    // Keep first portion and last portion, adjusting to char boundaries
+    let mut keep_start = max_size * 2 / 3;
+    while keep_start > 0 && !output.is_char_boundary(keep_start) {
+        keep_start -= 1;
+    }
     let keep_end = max_size - keep_start - 100; // Leave room for truncation message
+    let mut end_start = output.len().saturating_sub(keep_end);
+    while end_start < output.len() && !output.is_char_boundary(end_start) {
+        end_start += 1;
+    }
 
     let start = &output[..keep_start];
-    let end_start = output.len().saturating_sub(keep_end);
     let end = &output[end_start..];
 
     let truncated = format!(

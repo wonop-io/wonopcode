@@ -136,7 +136,7 @@ Examples of auto-routing:
                 entry.key,
                 entry.scope,
                 if args.content.len() > 100 {
-                    format!("{}...", &args.content[..100])
+                    { let mut end = 100.min(args.content.len()); while end > 0 && !args.content.is_char_boundary(end) { end -= 1; } format!("{}...", &args.content[..end]) }
                 } else {
                     args.content
                 }
@@ -272,7 +272,7 @@ You can limit results to specific scopes or search across all scopes."#
                 entry.key,
                 entry.scope,
                 if entry.content.len() > 200 {
-                    format!("{}...", &entry.content[..200])
+                    { let mut end = 200.min(entry.content.len()); while end > 0 && !entry.content.is_char_boundary(end) { end -= 1; } format!("{}...", &entry.content[..end]) }
                 } else {
                     entry.content.clone()
                 }
@@ -416,7 +416,7 @@ match "prefer dark theme for IDE"."#
                 entry.scope,
                 entry.relevance_score.unwrap_or(0.0),
                 if entry.content.len() > 200 {
-                    format!("{}...", &entry.content[..200])
+                    { let mut end = 200.min(entry.content.len()); while end > 0 && !entry.content.is_char_boundary(end) { end -= 1; } format!("{}...", &entry.content[..end]) }
                 } else {
                     entry.content.clone()
                 }

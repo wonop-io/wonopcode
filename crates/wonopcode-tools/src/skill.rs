@@ -194,13 +194,13 @@ fn parse_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), String
     }
 
     // Find the end of frontmatter
-    let rest = &content[3..];
+    let rest = content.get(3..).unwrap_or("");
     let end_idx = rest
         .find("\n---")
         .ok_or("Missing closing frontmatter delimiter")?;
 
-    let frontmatter_str = &rest[..end_idx].trim();
-    let body = rest[end_idx + 4..].trim();
+    let frontmatter_str = rest.get(..end_idx).unwrap_or("").trim();
+    let body = rest.get(end_idx + 4..).unwrap_or("").trim();
 
     // Parse YAML frontmatter
     let frontmatter: SkillFrontmatter = serde_yaml::from_str(frontmatter_str)

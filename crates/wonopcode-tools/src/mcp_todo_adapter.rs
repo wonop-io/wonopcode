@@ -297,12 +297,12 @@ impl McpTodoAdapter {
         };
 
         // Remove status part
-        let rest = line[3..].trim();
+        let rest = line.get(3..).unwrap_or("").trim();
 
         // Extract priority if present: [high], [medium], [low]
         let (priority, rest) = if rest.starts_with('[') {
             if let Some(end) = rest.find(']') {
-                let priority_str = &rest[1..end];
+                let priority_str = rest.get(1..end).unwrap_or("");
                 let priority = match priority_str {
                     "high" => TodoPriority::High,
                     "medium" => TodoPriority::Medium,
