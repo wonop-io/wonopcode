@@ -36,22 +36,26 @@ use wonopcode_codemode::{
     WebService as CodemodeWebService, WebSearchResult as CodemodeWebSearchResult,
 };
 
-/// Default timeout for script execution in seconds.
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
-
 /// Execute TypeScript code in a sandboxed runtime.
 pub struct ExecuteTypescriptTool;
+
+/// Options for script execution.
+#[derive(Debug, Default, Deserialize)]
+struct ExecuteOptions {
+    /// Optional timeout in seconds (max: 120). If not specified, no timeout is applied.
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
 
 #[derive(Debug, Deserialize)]
 struct ExecuteTypescriptArgs {
     /// The TypeScript code to execute.
     code: String,
-    /// Brief description of what the code does.
+    /// Brief description of what this code does (required).
+    description: String,
+    /// Execution options including timeout.
     #[serde(default)]
-    description: Option<String>,
-    /// Optional timeout override in seconds (max 120).
-    #[serde(default)]
-    timeout_secs: Option<u64>,
+    options: Option<ExecuteOptions>,
 }
 
 #[async_trait]
@@ -69,7 +73,7 @@ impl Tool for ExecuteTypescriptTool {
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["code"],
+            "required": ["code", "description"],
             "properties": {
                 "code": {
                     "type": "string",
@@ -79,11 +83,17 @@ impl Tool for ExecuteTypescriptTool {
                     "type": "string",
                     "description": "Brief description of what this code does"
                 },
-                "timeout_secs": {
-                    "type": "integer",
-                    "description": "Optional timeout in seconds (default: 30, max: 120)",
-                    "minimum": 1,
-                    "maximum": 120
+                "options": {
+                    "type": "object",
+                    "description": "Execution options",
+                    "properties": {
+                        "timeout_secs": {
+                            "type": "integer",
+                            "description": "Optional timeout in seconds (max: 120). If not specified, no timeout is applied.",
+                            "minimum": 1,
+                            "maximum": 120
+                        }
+                    }
                 }
             }
         })
@@ -98,11 +108,18 @@ impl Tool for ExecuteTypescriptTool {
             return Err(ToolError::validation("Code cannot be empty"));
         }
 
-        let description = args.description.as_deref().unwrap_or("Executing TypeScript");
+        // Validate description is not empty
+        if args.description.trim().is_empty() {
+            return Err(ToolError::validation("Description cannot be empty"));
+        }
+
+        let description = &args.description;
         info!(description = %description, "Executing TypeScript code");
 
-        // Calculate timeout (clamp to max 120 seconds)
-        let timeout_secs = args.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS).min(120);
+        // Extract timeout from options if provided, clamp to max 120 seconds
+        let timeout_secs: Option<u64> = args.options
+            .and_then(|opts| opts.timeout_secs)
+            .map(|t| t.min(120));
 
         // Create permission bridge if permission checker is available
         let (permission_bridge, permission_rx) = if ctx.permission_checker.is_some() {
@@ -172,7 +189,7 @@ impl Tool for ExecuteTypescriptTool {
 
         debug!(
             project_root = %ctx.root_dir.display(),
-            timeout_secs = timeout_secs,
+            timeout_secs = ?timeout_secs,
             has_permission_checker = ctx.permission_checker.is_some(),
             "Creating Code Mode runtime"
         );
@@ -853,13 +870,13 @@ mod tests {
         let tool = ExecuteTypescriptTool;
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("code")));
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("code")));
+        assert!(required.contains(&json!("description")));
         assert!(schema["properties"]["code"].is_object());
         assert!(schema["properties"]["description"].is_object());
-        assert!(schema["properties"]["timeout_secs"].is_object());
+        assert!(schema["properties"]["options"].is_object());
+        assert!(schema["properties"]["options"]["properties"]["timeout_secs"].is_object());
     }
 
     #[test]
@@ -884,13 +901,14 @@ mod tests {
     #[test]
     fn test_args_deserialization() {
         let args: ExecuteTypescriptArgs = serde_json::from_value(json!({
-            "code": "console.log('test');"
+            "code": "console.log('test');",
+            "description": "Test script"
         }))
         .unwrap();
 
         assert_eq!(args.code, "console.log('test');");
-        assert!(args.description.is_none());
-        assert!(args.timeout_secs.is_none());
+        assert_eq!(args.description, "Test script");
+        assert!(args.options.is_none());
     }
 
     #[test]
@@ -898,13 +916,15 @@ mod tests {
         let args: ExecuteTypescriptArgs = serde_json::from_value(json!({
             "code": "console.log('test');",
             "description": "Test script",
-            "timeout_secs": 60
+            "options": {
+                "timeout_secs": 60
+            }
         }))
         .unwrap();
 
         assert_eq!(args.code, "console.log('test');");
-        assert_eq!(args.description, Some("Test script".to_string()));
-        assert_eq!(args.timeout_secs, Some(60));
+        assert_eq!(args.description, "Test script");
+        assert_eq!(args.options.unwrap().timeout_secs, Some(60));
     }
 
     #[test]
@@ -935,7 +955,10 @@ mod tests {
         let tool = ExecuteTypescriptTool;
         let ctx = test_context();
 
-        let result = tool.execute(json!({ "code": "   " }), &ctx).await;
+        let result = tool.execute(json!({
+            "code": "   ",
+            "description": "Empty code test"
+        }), &ctx).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1141,7 +1164,10 @@ mod tests {
             .execute(
                 json!({
                     "code": "console.log('quick');",
-                    "timeout_secs": 999  // Should be clamped to 120
+                    "description": "Timeout clamping test",
+                    "options": {
+                        "timeout_secs": 999  // Should be clamped to 120
+                    }
                 }),
                 &ctx,
             )
@@ -1178,7 +1204,7 @@ mod tests {
         match result {
             Ok(output) => {
                 assert_eq!(output.metadata["description"], "Metadata test");
-                assert!(output.metadata["timeout_secs"].is_number());
+                // timeout_secs can be null (no timeout) or a number
                 assert!(output.metadata["output_lines"].is_number());
             }
             Err(e) => {
