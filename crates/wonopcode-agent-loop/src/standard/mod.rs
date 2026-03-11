@@ -613,15 +613,21 @@ impl AgentLoop for StandardLoop {
             // Build generation options with optional RAG context and OM observations
             // 
             // The prompt structure for optimal cache hits:
-            // 1. System prompt (static) - cached
+            // 1. System prompt (re-rendered from template) - cached
             // 2. Observations (semi-static, changes after Observer runs) - cached  
             // 3. RAG context (changes per query) - not cached
             // 4. Messages (changes every turn) - not cached
             let system_prompt = {
                 let mut parts: Vec<String> = Vec::new();
                 
-                // 1. Base system prompt
-                if let Some(base) = &ctx.config.system_prompt {
+                // 1. Base system prompt - re-rendered from template on every invocation
+                //    This ensures AGENTS.md, date/time, git branch are always fresh.
+                if let Some(ref source) = ctx.system_prompt_source {
+                    if let Some(rendered) = source.render_system_prompt().await {
+                        parts.push(rendered);
+                    }
+                } else if let Some(base) = &ctx.config.system_prompt {
+                    // Fallback: use static system prompt from config
                     parts.push(base.clone());
                 }
                 

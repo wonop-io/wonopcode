@@ -59,6 +59,24 @@ pub trait PermissionChecker: Send + Sync {
     fn is_sandbox_running(&self) -> bool;
 }
 
+/// Trait for providing a fresh system prompt before each LLM invocation.
+///
+/// Implementors render the system prompt dynamically (e.g., from a Tera template)
+/// with up-to-date values for date, time, git branch, AGENTS.md content, etc.
+///
+/// This is called by the agent loop right before every `generate()` call to ensure
+/// the system prompt reflects the current state.
+#[async_trait]
+pub trait SystemPromptSource: Send + Sync {
+    /// Render and return a fresh system prompt.
+    ///
+    /// Called before each LLM invocation. Implementations should:
+    /// - Re-render AGENTS.md from HMS if available
+    /// - Use current date/time
+    /// - Check the current git branch
+    async fn render_system_prompt(&self) -> Option<String>;
+}
+
 /// Configuration for the agent loop.
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -387,6 +405,13 @@ pub struct LoopContext<'a> {
     ///
     /// When set, HMS tools can access memory.yaml files and render AGENTS.md.
     pub hms_service: Option<wonopcode_tools::SharedHmsService>,
+
+    /// Optional system prompt source for dynamic rendering.
+    ///
+    /// When set, the agent loop calls this before every LLM invocation to get
+    /// a fresh system prompt with up-to-date date/time, git branch, and
+    /// re-rendered AGENTS.md content. This replaces `config.system_prompt`.
+    pub system_prompt_source: Option<Arc<dyn SystemPromptSource>>,
 
     /// Optional permission checker for TypeScript tools.
     ///

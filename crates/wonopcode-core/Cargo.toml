@@ -33,6 +33,7 @@ reqwest.workspace = true
 regex.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+tera.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

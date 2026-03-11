@@ -8409,6 +8409,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tera",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
