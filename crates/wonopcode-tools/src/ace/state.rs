@@ -382,7 +382,7 @@ impl WorkstreamState {
     fn extract_title(dir_name: &str) -> Option<String> {
         // Look for the part after -- which is typically the description
         if let Some(idx) = dir_name.find("--") {
-            let desc = &dir_name[idx + 2..];
+            let desc = dir_name.get(idx + 2..).unwrap_or("");
             if !desc.is_empty() {
                 // Convert kebab-case to Title Case
                 let title = desc

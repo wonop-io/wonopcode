@@ -239,7 +239,7 @@ impl McpTodoAdapter {
                 // Extract phase name
                 let phase_line = trimmed.trim_start_matches("##").trim();
                 let phase_name = if let Some(pos) = phase_line.find('(') {
-                    phase_line[..pos].trim()
+                    phase_line.get(..pos).unwrap_or(phase_line).trim()
                 } else {
                     phase_line
                 };
@@ -309,7 +309,7 @@ impl McpTodoAdapter {
                     "low" => TodoPriority::Low,
                     _ => TodoPriority::Medium,
                 };
-                (priority, rest[end + 1..].trim())
+                (priority, rest.get(end + 1..).unwrap_or("").trim())
             } else {
                 (TodoPriority::Medium, rest)
             }
@@ -321,8 +321,8 @@ impl McpTodoAdapter {
         let (content, id) = if let Some(start) = rest.rfind('(') {
             if let Some(end) = rest.rfind(')') {
                 if end > start {
-                    let id = rest[start + 1..end].trim().to_string();
-                    let content = rest[..start].trim().to_string();
+                    let id = rest.get(start + 1..end).unwrap_or("").trim().to_string();
+                    let content = rest.get(..start).unwrap_or(rest).trim().to_string();
                     (content, id)
                 } else {
                     (
