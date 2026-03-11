@@ -16,7 +16,7 @@ use tracing::{debug, error, info, trace, warn};
 use wonopcode_agent_loop::{
     BoxedAgentLoop, CompactionConfig as LoopCompactionConfig, LoopConfig, LoopContext, LoopError,
     LoopUpdate, MemoryState, ObservationalMemoryConfig, PermissionCheckRequest, PermissionChecker,
-    TokenStateMachine, persistence::ObservationPersistence,
+    SystemPromptSource, TokenStateMachine, persistence::ObservationPersistence,
 };
 use wonopcode_core::bus::{
     Bus, PermissionRequest as BusPermissionRequest, PermissionResponse as BusPermissionResponse,
@@ -158,6 +158,71 @@ impl wonopcode_tools::TsPermissionChecker for TsPermissionCheckerAdapter {
         self.permission_manager
             .cleanup_timed_out_request(request_id)
             .await
+    }
+}
+
+/// Adapter that implements `SystemPromptSource` for dynamic system prompt rendering.
+///
+/// Re-renders the system prompt from a Tera template before every LLM invocation,
+/// ensuring fresh values for date, time, git branch, and AGENTS.md content.
+struct RunnerSystemPromptSource {
+    cwd: std::path::PathBuf,
+    hms_service: Option<wonopcode_tools::SharedHmsService>,
+    renderer: system_prompt::SystemPromptRenderer,
+    model_name: String,
+    provider_name: String,
+}
+
+impl RunnerSystemPromptSource {
+    fn new(
+        cwd: std::path::PathBuf,
+        provider_name: String,
+        model_name: String,
+        hms_service: Option<wonopcode_tools::SharedHmsService>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            cwd,
+            hms_service,
+            renderer: system_prompt::SystemPromptRenderer::new()?,
+            model_name,
+            provider_name,
+        })
+    }
+}
+
+#[async_trait]
+impl SystemPromptSource for RunnerSystemPromptSource {
+    async fn render_system_prompt(&self) -> Option<String> {
+        // 1. Get AGENTS.md content - try HMS first, fall back to disk
+        let agent_md = if let Some(ref hms) = self.hms_service {
+            // Re-render AGENTS.md from HMS (memory.yaml + template)
+            match hms.write().await.generate(&self.cwd).await {
+                Ok(content) => Some(content),
+                Err(e) => {
+                    debug!("HMS generate failed, falling back to disk: {}", e);
+                    system_prompt::load_custom_instructions(&self.cwd)
+                }
+            }
+        } else {
+            system_prompt::load_custom_instructions(&self.cwd)
+        };
+
+        // 2. Build fresh variables from current environment
+        let mut vars = system_prompt::SystemPromptVars::from_env(
+            &self.cwd,
+            &self.model_name,
+            &self.provider_name,
+        );
+        vars.agent_md = agent_md;
+
+        // 3. Render the template
+        match self.renderer.render(&vars) {
+            Ok(rendered) => Some(rendered),
+            Err(e) => {
+                warn!("Failed to render system prompt template: {}", e);
+                None
+            }
+        }
     }
 }
 
@@ -1917,6 +1982,23 @@ impl Runner {
             TsPermissionCheckerAdapter::new(self.permission_manager.clone()),
         );
 
+        // Create system prompt source for dynamic re-rendering before each LLM call
+        let system_prompt_source: Option<Arc<dyn SystemPromptSource>> = {
+            let config = self.config.read().await;
+            match RunnerSystemPromptSource::new(
+                cwd.to_path_buf(),
+                config.provider.clone(),
+                config.model_id.clone(),
+                self.hms_service.clone(),
+            ) {
+                Ok(source) => Some(Arc::new(source)),
+                Err(e) => {
+                    warn!("Failed to create system prompt source: {}. Using static prompt.", e);
+                    None
+                }
+            }
+        };
+
         // Load workstream state for default tracker resolution
         let (workstream_ticket_id, workstream_default_tracker_id) =
             Self::load_workstream_context(cwd);
@@ -1960,6 +2042,7 @@ impl Runner {
             ticket_service: self.ticket_service.clone(),
             memory_service: self.memory_service.clone(),
             hms_service: self.hms_service.clone(),
+            system_prompt_source,
             ts_permission_checker: Some(ts_permission_checker),
             workstream_ticket_id,
             workstream_default_tracker_id,
@@ -4519,143 +4602,16 @@ fn infer_provider_from_model(model: &str) -> Option<&'static str> {
 
 /// Build system prompt with environment context.
 fn build_system_prompt_for_session(provider: &str, model: &str, cwd: &Path) -> String {
-    // Detect if git repo
-    let is_git_repo = cwd.join(".git").exists();
-
-    // Get platform
-    let platform = std::env::consts::OS;
-
-    // Generate file tree (limited to top-level for now)
-    let file_tree = generate_file_tree(cwd, 2, 20);
-
-    // Load custom instructions from AGENTS.md, CLAUDE.md, etc.
-    let custom_instructions = load_custom_instructions(cwd);
-
-    // Generate environment context
-    let environment =
-        system_prompt::environment_context(cwd, is_git_repo, platform, file_tree.as_deref());
-
-    // Build full prompt
-    system_prompt::build_system_prompt(
-        provider,
-        model,
-        None, // agent_prompt - will be added for subagents
-        custom_instructions.as_deref(),
-        &environment,
-    )
-}
-
-/// Generate a simple file tree for the environment context.
-fn generate_file_tree(dir: &Path, max_depth: usize, max_files: usize) -> Option<String> {
-    let mut entries = Vec::new();
-    let mut count = 0;
-
-    fn collect_entries(
-        dir: &Path,
-        prefix: &str,
-        depth: usize,
-        max_depth: usize,
-        entries: &mut Vec<String>,
-        count: &mut usize,
-        max_files: usize,
-    ) {
-        if depth > max_depth || *count >= max_files {
-            return;
+    let renderer = match system_prompt::SystemPromptRenderer::new() {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Failed to create system prompt renderer: {}", e);
+            return String::new();
         }
-
-        let Ok(read_dir) = std::fs::read_dir(dir) else {
-            return;
-        };
-
-        let mut items: Vec<_> = read_dir
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let name = e.file_name();
-                let name_str = name.to_string_lossy();
-                // Skip hidden files and common noise directories
-                !name_str.starts_with('.')
-                    && name_str != "node_modules"
-                    && name_str != "target"
-                    && name_str != "__pycache__"
-                    && name_str != "venv"
-                    && name_str != ".git"
-            })
-            .collect();
-
-        items.sort_by_key(|e| e.file_name());
-
-        for entry in items {
-            if *count >= max_files {
-                entries.push(format!("{prefix}..."));
-                break;
-            }
-
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-            if is_dir {
-                entries.push(format!("{prefix}{name_str}/"));
-                *count += 1;
-                collect_entries(
-                    &entry.path(),
-                    &format!("{prefix}  "),
-                    depth + 1,
-                    max_depth,
-                    entries,
-                    count,
-                    max_files,
-                );
-            } else {
-                entries.push(format!("{prefix}{name_str}"));
-                *count += 1;
-            }
-        }
-    }
-
-    collect_entries(dir, "", 0, max_depth, &mut entries, &mut count, max_files);
-
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries.join("\n"))
-    }
-}
-
-/// Load custom instructions from common instruction files.
-fn load_custom_instructions(cwd: &Path) -> Option<String> {
-    // Look for custom instruction files in order of priority
-    let instruction_files = [
-        ".wonopcode/AGENTS.md",
-        "AGENTS.md",
-        ".claude/CLAUDE.md",
-        "CLAUDE.md",
-        ".wonopcode/instructions.md",
-        ".cursor/rules",
-    ];
-
-    let mut instructions = Vec::new();
-
-    for file in &instruction_files {
-        let path = cwd.join(file);
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if !content.trim().is_empty() {
-                    instructions.push(format!(
-                        "# Instructions from {}\n\n{}",
-                        file,
-                        content.trim()
-                    ));
-                }
-            }
-        }
-    }
-
-    if instructions.is_empty() {
-        None
-    } else {
-        Some(instructions.join("\n\n"))
-    }
+    };
+    let mut vars = system_prompt::SystemPromptVars::from_env(cwd, model, provider);
+    vars.agent_md = system_prompt::load_custom_instructions(cwd);
+    renderer.render(&vars).unwrap_or_default()
 }
 
 /// Load API key from environment or credentials file.

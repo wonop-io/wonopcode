@@ -1,14 +1,69 @@
 //! System prompt generation for wonopcode.
 //!
-//! This module provides provider-specific system prompts and environment context
-//! generation.
+//! This module provides a Tera template-based system prompt renderer that generates
+//! system prompts with dynamic variables. The system prompt is re-rendered before
+//! every LLM invocation to ensure fresh values for date, time, branch, AGENTS.md, etc.
+//!
+//! # Updating the System Prompt
+//!
+//! The system prompt is rendered from a Tera template. To modify it:
+//!
+//! 1. **Edit the default template**: Modify `DEFAULT_SYSTEM_PROMPT_TEMPLATE` in this file.
+//!    The template uses Tera syntax (similar to Jinja2). Available variables:
+//!    - `{{ agent_md }}` - Rendered AGENTS.md content (from HMS or disk)
+//!    - `{{ date }}` - Current date (e.g., "Wed Mar 11 2026")
+//!    - `{{ time }}` - Current time (e.g., "14:30:05")
+//!    - `{{ branch }}` - Current git branch name
+//!    - `{{ working_dir }}` - Absolute path to the working directory
+//!    - `{{ model_name }}` - Name/ID of the current LLM model
+//!    - `{{ provider }}` - Provider identifier (e.g., "anthropic", "openai")
+//!    - `{{ platform }}` - OS platform (e.g., "macos", "linux")
+//!    - `{{ is_git_repo }}` - Whether cwd is a git repository (boolean)
+//!
+//! 2. **Customize per-project**: Create a `.wonopcode/AGENTS.TEMPLATE.md` file to
+//!    customize the agent instructions via the HMS (Hierarchical Memory System).
+//!    The rendered content becomes the `{{ agent_md }}` variable.
+//!
+//! 3. **Legacy instruction files**: If no HMS template exists, the system falls back
+//!    to reading raw instruction files: `AGENTS.md`, `CLAUDE.md`, etc.
+//!
+//! # Architecture
+//!
+//! The `SystemPromptRenderer` uses Tera templates to produce the system prompt.
+//! It is called from the agent loop (`StandardLoop`) right before each LLM
+//! `generate()` call, ensuring:
+//! - Fresh date/time values
+//! - Up-to-date AGENTS.md (re-rendered from HMS if available)
+//! - Correct git branch after checkout operations
+//!
+//! This is a unified approach: all API-based providers (Anthropic, OpenAI, etc.)
+//! use the same template. The Claude CLI provider is excluded since it manages
+//! its own system prompt.
 
 use std::path::Path;
+use tera::{Context, Tera};
 
-/// Provider-specific system prompt for Anthropic (Claude) models.
-pub const ANTHROPIC_PROMPT: &str = r#"You are Wonopcode, a powerful coding agent for the terminal.
+/// Default Tera template for the system prompt.
+///
+/// This template is used by all API-based providers. Edit this template to change
+/// the system prompt across all providers uniformly.
+///
+/// ## Template Variables
+///
+/// | Variable | Description | Example |
+/// |----------|-------------|---------|
+/// | `agent_md` | Rendered AGENTS.md / custom instructions | Project-specific rules |
+/// | `date` | Current date | "Wed Mar 11 2026" |
+/// | `time` | Current time | "14:30:05" |
+/// | `branch` | Git branch name | "main" |
+/// | `working_dir` | Absolute working directory path | "/home/user/project" |
+/// | `model_name` | LLM model identifier | "claude-sonnet-4-20250514" |
+/// | `provider` | Provider identifier | "anthropic" |
+/// | `platform` | OS platform | "macos" |
+/// | `is_git_repo` | Whether cwd is in a git repo | true |
+pub const DEFAULT_SYSTEM_PROMPT_TEMPLATE: &str = r#"You are Wonopcode, a powerful AI coding assistant.
 
-You are an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
+You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.
 
@@ -34,72 +89,19 @@ These tools are also EXTREMELY helpful for planning tasks, and for breaking down
 
 It is critical that you mark todos as completed as soon as you are done with a task. Do not batch up multiple tasks before marking them as completed.
 
-Examples:
-
-<example>
-user: Run the build and fix any type errors
-assistant: I'm going to use the TodoWrite tool to write the following items to the todo list:
-- Run the build
-- Fix any type errors
-
-I'm now going to run the build using Bash.
-
-Looks like I found 10 type errors. I'm going to use the TodoWrite tool to write 10 items to the todo list.
-
-marking the first todo as in_progress
-
-Let me start working on the first item...
-
-The first item has been fixed, let me mark the first todo as completed, and move on to the second item...
-..
-..
-</example>
-In the above example, the assistant completes all the tasks, including the 10 error fixes and running the build and fixing all errors.
-
-<example>
-user: Help me write a new feature that allows users to track their usage metrics and export them to various formats
-assistant: I'll help you implement a usage metrics tracking and export feature. Let me first use the TodoWrite tool to plan this task.
-Adding the following todos to the todo list:
-1. Research existing metrics tracking in the codebase
-2. Design the metrics collection system
-3. Implement core metrics tracking functionality
-4. Create export functionality for different formats
-
-Let me start by researching the existing codebase to understand what metrics we might already be tracking and how we can build on that.
-
-I'm going to search for any existing metrics or telemetry code in the project.
-
-I've found some existing telemetry code. Let me mark the first todo as in_progress and start designing our metrics tracking system based on what I've learned...
-
-[Assistant continues implementing the feature step by step, marking todos as in_progress and completed as they go]
-</example>
-
-
 # Doing tasks
 The user will primarily request you perform software engineering tasks. This includes solving bugs, adding new functionality, refactoring code, explaining code, and more. For these tasks the following steps are recommended:
--
 - Use the TodoWrite tool to plan the task if required
 
 - Tool results and user messages may include <system-reminder> tags. <system-reminder> tags contain useful information and reminders. They are automatically added by the system, and bear no direct relation to the specific tool results or user messages in which they appear.
 
-
 # Tool usage policy
 - When doing file search, prefer to use the Task tool in order to reduce context usage.
 - You should proactively use the Task tool with specialized agents when the task at hand matches the agent's description.
-
 - When WebFetch returns a message about a redirect to a different host, you should immediately make a new WebFetch request with the redirect URL provided in the response.
-- You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead. Never use placeholders or guess missing parameters in tool calls.
-- If the user specifies that they want you to run tools "in parallel", you MUST send a single message with multiple tool use content blocks. For example, if you need to launch multiple agents in parallel, send a single message with multiple Task tool calls.
-- Use specialized tools instead of bash commands when possible, as this provides a better user experience. For file operations, use dedicated tools: Read for reading files instead of cat/head/tail, Edit for editing instead of sed/awk, and Write for creating files instead of cat with heredoc or echo redirection. Reserve bash tools exclusively for actual system commands and terminal operations that require shell execution. NEVER use bash echo or other command-line tools to communicate thoughts, explanations, or instructions to the user. Output all communication directly in your response text instead.
+- You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency.
+- Use specialized tools instead of bash commands when possible, as this provides a better user experience. For file operations, use dedicated tools: Read for reading files instead of cat/head/tail, Edit for editing instead of sed/awk, and Write for creating files instead of cat with heredoc or echo redirection. Reserve bash tools exclusively for actual system commands and terminal operations that require shell execution.
 - VERY IMPORTANT: When exploring the codebase to gather context or to answer a question that is not a needle query for a specific file/class/function, it is CRITICAL that you use the Task tool instead of running search commands directly.
-<example>
-user: Where are errors from the client handled?
-assistant: [Uses the Task tool to find the files that handle client errors instead of using Glob or Grep directly]
-</example>
-<example>
-user: What is the codebase structure?
-assistant: [Uses the Task tool]
-</example>
 
 IMPORTANT: Always use the TodoWrite tool to plan and track tasks throughout the conversation.
 
@@ -109,92 +111,24 @@ IMPORTANT: Always plan your work using the planning module in TypeScript. Sessio
 
 When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
 
-<example>
-user: Where are errors from the client handled?
-assistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.
-</example>
-"#;
+{% if agent_md %}
+# Project Instructions
 
-/// Header for Anthropic models (Claude Code identity).
-pub const ANTHROPIC_HEADER: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+{{ agent_md }}
+{% endif %}
 
-/// System prompt for OpenAI GPT models (beast mode - aggressive autonomous agent).
-pub const OPENAI_PROMPT: &str = r#"You are WonopCode, a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.
+# Environment
 
-You are an autonomous agent that can complete complex multi-step tasks without supervision.
-
-<guidelines>
-You are capable of accomplishing any software engineering task given to you. You will do exhaustive research using the WebFetch tool, and thoroughly plan your work before implementing it, and afterwards verify that it works. Exhaustive research is the most important part of your job. You MUST NOT skip it. You MUST NOT hallucinate information - if you do not know something, look it up using one of your tools. Exhaustive research involves multiple WebFetch calls to understand the topic thoroughly. It is CRITICAL that you do exhaustive research when the user asks you to do something that requires knowledge you do not have.
-
-<exhaustive_research>
-When researching, you should:
-1. Start with a broad search to understand the landscape
-2. Drill down into specific topics that are relevant
-3. Verify information from multiple sources when possible
-4. Take notes on key findings for later reference
-5. Identify gaps in your knowledge and research those too
-</exhaustive_research>
-
-## Your workflow
-
-IMPORTANT: Always plan your work using the planning module in TypeScript. Sessions are auto-created when you create use-cases or tasks. Call help("planning.feature") or help("planning.adHoc") to learn about available planning tools.
-
-1. First use the TodoWrite tool to plan out the steps you need to complete the task.
-2. Use the Task tool with the "explore" agent to explore the codebase if needed.
-3. Use the WebFetch tool to research documentation, APIs, or other resources.
-4. Implement the solution step by step, marking todos as complete.
-5. Test your implementation to verify it works.
-6. Summarize what you did for the user.
-
-## Tool usage
-
-- Use specialized tools over bash when possible
-- Call multiple tools in parallel when they don't depend on each other
-- Never guess or use placeholders - always gather actual information
-- Use the Task tool for complex searches instead of direct grep/glob
-</guidelines>
-
-<formatting>
-Your output will be displayed on a command line interface. Keep responses concise and use markdown formatting. Avoid emojis unless requested.
-</formatting>
-"#;
-
-/// System prompt for Google Gemini models.
-pub const GEMINI_PROMPT: &str = r#"You are Wonopcode, an expert software engineering assistant.
-
-You help users with coding tasks including:
-- Writing and editing code
-- Debugging issues
-- Explaining code and concepts
-- Refactoring and optimization
-- Code review
-
-Guidelines:
-- Be concise and direct
-- Use tools for file operations instead of bash when possible
-- Use the TodoWrite tool to track complex tasks
-- Always plan your work using the planning module in TypeScript
-- Use the Task tool with explore agent for codebase searches
-- Format code with proper syntax highlighting
-- Prefer editing existing files over creating new ones
-
-Your output will be displayed in a CLI. Use markdown formatting and avoid emojis.
-"#;
-
-/// System prompt for models without TodoWrite support.
-pub const BASIC_PROMPT: &str = r#"You are Wonopcode, an expert software engineering assistant.
-
-You help users with coding tasks through an interactive CLI.
-
-Guidelines:
-- Be concise and direct
-- Use specialized tools for file operations
-- Use the Task tool for complex searches
-- Always plan your work using the planning module in TypeScript
-- Format responses in markdown
-- Avoid emojis unless requested
-
-Your output will be displayed in a terminal.
+<env>
+Working directory: {{ working_dir }}
+Is directory a git repo: {{ is_git_repo }}
+Platform: {{ platform }}
+Today's date: {{ date }}
+Current time: {{ time }}
+{% if branch %}Current branch: {{ branch }}{% endif %}
+Model: {{ model_name }}
+Provider: {{ provider }}
+</env>
 "#;
 
 /// Explore agent prompt.
@@ -275,150 +209,261 @@ You have reached the maximum number of steps for this turn. Please summarize you
 and let the user know what remains to be done. The user can continue in a new message.
 </system-reminder>"#;
 
-/// Get the system prompt header for a provider.
-pub fn header_for_provider(provider: &str) -> Option<&'static str> {
-    if provider.contains("anthropic") {
-        Some(ANTHROPIC_HEADER)
+/// Variables for rendering the system prompt template.
+#[derive(Debug, Clone)]
+pub struct SystemPromptVars {
+    /// Rendered AGENTS.md / custom instructions content.
+    pub agent_md: Option<String>,
+    /// Current date string (e.g., "Wed Mar 11 2026").
+    pub date: String,
+    /// Current time string (e.g., "14:30:05").
+    pub time: String,
+    /// Current git branch name.
+    pub branch: Option<String>,
+    /// Absolute path to the working directory.
+    pub working_dir: String,
+    /// LLM model identifier.
+    pub model_name: String,
+    /// Provider identifier.
+    pub provider: String,
+    /// OS platform.
+    pub platform: String,
+    /// Whether cwd is a git repo.
+    pub is_git_repo: bool,
+}
+
+impl SystemPromptVars {
+    /// Build variables from the current environment.
+    ///
+    /// This gathers date, time, platform, git branch, etc. from the live environment.
+    /// The `agent_md` field must be set separately (from HMS or disk).
+    pub fn from_env(cwd: &Path, model_name: &str, provider: &str) -> Self {
+        let now = chrono::Local::now();
+        Self {
+            agent_md: None,
+            date: now.format("%a %b %d %Y").to_string(),
+            time: now.format("%H:%M:%S").to_string(),
+            branch: get_git_branch(cwd),
+            working_dir: cwd.display().to_string(),
+            model_name: model_name.to_string(),
+            provider: provider.to_string(),
+            platform: std::env::consts::OS.to_string(),
+            is_git_repo: cwd.join(".git").exists() || has_git_dir_ancestor(cwd),
+        }
+    }
+}
+
+/// Renders the system prompt from a Tera template and dynamic variables.
+///
+/// This is the main entry point for system prompt generation. It is called
+/// before every LLM invocation in the agent loop.
+pub struct SystemPromptRenderer {
+    tera: Tera,
+}
+
+impl SystemPromptRenderer {
+    /// Create a new renderer with the default template.
+    pub fn new() -> Result<Self, String> {
+        let mut tera = Tera::default();
+        tera.add_raw_template("system_prompt", DEFAULT_SYSTEM_PROMPT_TEMPLATE)
+            .map_err(|e| format!("Failed to parse default system prompt template: {}", e))?;
+        Ok(Self { tera })
+    }
+
+    /// Create a renderer with a custom template string.
+    ///
+    /// Use this to override the default system prompt template entirely.
+    pub fn with_template(template: &str) -> Result<Self, String> {
+        let mut tera = Tera::default();
+        tera.add_raw_template("system_prompt", template)
+            .map_err(|e| format!("Invalid system prompt template: {}", e))?;
+        Ok(Self { tera })
+    }
+
+    /// Render the system prompt with the given variables.
+    ///
+    /// This should be called right before each LLM invocation to get
+    /// fresh date/time/branch values.
+    pub fn render(&self, vars: &SystemPromptVars) -> Result<String, String> {
+        let mut context = Context::new();
+
+        // Insert all variables into the Tera context
+        context.insert("agent_md", &vars.agent_md.as_deref().unwrap_or(""));
+        context.insert("date", &vars.date);
+        context.insert("time", &vars.time);
+        context.insert("branch", &vars.branch.as_deref().unwrap_or(""));
+        context.insert("working_dir", &vars.working_dir);
+        context.insert("model_name", &vars.model_name);
+        context.insert("provider", &vars.provider);
+        context.insert("platform", &vars.platform);
+        context.insert("is_git_repo", &if vars.is_git_repo { "yes" } else { "no" });
+
+        self.tera
+            .render("system_prompt", &context)
+            .map_err(|e| format!("Failed to render system prompt: {}", e))
+    }
+}
+
+/// Load custom instructions from AGENTS.md, CLAUDE.md, etc.
+///
+/// This is the fallback when HMS (Hierarchical Memory System) is not available.
+/// It reads raw instruction files from the working directory.
+pub fn load_custom_instructions(cwd: &Path) -> Option<String> {
+    let instruction_files = [
+        ".wonopcode/AGENTS.md",
+        "AGENTS.md",
+        ".claude/CLAUDE.md",
+        "CLAUDE.md",
+        ".wonopcode/instructions.md",
+        ".cursor/rules",
+    ];
+
+    let mut instructions = Vec::new();
+
+    for file in &instruction_files {
+        let path = cwd.join(file);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if !content.trim().is_empty() {
+                    instructions.push(content.trim().to_string());
+                }
+            }
+        }
+    }
+
+    if instructions.is_empty() {
+        None
+    } else {
+        Some(instructions.join("\n\n"))
+    }
+}
+
+/// Get the current git branch name for the given directory.
+fn get_git_branch(cwd: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() && branch != "HEAD" {
+            Some(branch)
+        } else {
+            None
+        }
     } else {
         None
     }
 }
 
-/// Get the main system prompt for a model.
-pub fn prompt_for_model(model: &str) -> &'static str {
-    let model_lower = model.to_lowercase();
-
-    // OpenAI models (current and future)
-    if model_lower.contains("gpt-")
-        || model_lower.contains("o1")
-        || model_lower.contains("o3")
-        || model_lower.contains("codex")
-    {
-        OPENAI_PROMPT
-    } else if model_lower.contains("gemini") {
-        GEMINI_PROMPT
-    } else if model_lower.contains("claude") {
-        ANTHROPIC_PROMPT
-    } else {
-        BASIC_PROMPT
+/// Check if any ancestor directory has a .git directory.
+fn has_git_dir_ancestor(path: &Path) -> bool {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.join(".git").exists() {
+            return true;
+        }
+        if !current.pop() {
+            return false;
+        }
     }
-}
-
-/// Generate environment context for the system prompt.
-pub fn environment_context(
-    directory: &Path,
-    is_git_repo: bool,
-    platform: &str,
-    file_tree: Option<&str>,
-) -> String {
-    let date = chrono::Local::now().format("%a %b %d %Y").to_string();
-
-    let mut context = format!(
-        r#"Here is some useful information about the environment you are running in:
-<env>
-  Working directory: {}
-  Is directory a git repo: {}
-  Platform: {}
-  Today's date: {}
-</env>"#,
-        directory.display(),
-        if is_git_repo { "yes" } else { "no" },
-        platform,
-        date
-    );
-
-    if let Some(tree) = file_tree {
-        context.push_str(&format!(
-            r#"
-<files>
-  {tree}
-</files>"#
-        ));
-    }
-
-    context
-}
-
-/// Build the full system prompt for a session.
-pub fn build_system_prompt(
-    provider: &str,
-    model: &str,
-    agent_prompt: Option<&str>,
-    custom_instructions: Option<&str>,
-    environment: &str,
-) -> String {
-    let mut parts = Vec::new();
-
-    // Add header if applicable
-    if let Some(header) = header_for_provider(provider) {
-        parts.push(header.to_string());
-    }
-
-    // Add main prompt (agent-specific or provider-specific)
-    if let Some(agent) = agent_prompt {
-        parts.push(agent.to_string());
-    } else {
-        parts.push(prompt_for_model(model).to_string());
-    }
-
-    // Add custom instructions
-    if let Some(custom) = custom_instructions {
-        parts.push(custom.to_string());
-    }
-
-    // Add environment context
-    parts.push(environment.to_string());
-
-    parts.join("\n\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
-    fn test_header_for_provider() {
-        assert!(header_for_provider("anthropic").is_some());
-        assert!(header_for_provider("openai").is_none());
-        assert!(header_for_provider("google").is_none());
+    fn test_renderer_default_template() {
+        let renderer = SystemPromptRenderer::new().unwrap();
+        let vars = SystemPromptVars {
+            agent_md: Some("Always use rust.".to_string()),
+            date: "Wed Mar 11 2026".to_string(),
+            time: "14:30:05".to_string(),
+            branch: Some("main".to_string()),
+            working_dir: "/home/user/project".to_string(),
+            model_name: "claude-sonnet-4-20250514".to_string(),
+            provider: "anthropic".to_string(),
+            platform: "linux".to_string(),
+            is_git_repo: true,
+        };
+
+        let result = renderer.render(&vars).unwrap();
+        assert!(result.contains("Wonopcode"));
+        assert!(result.contains("Always use rust."));
+        assert!(result.contains("Wed Mar 11 2026"));
+        assert!(result.contains("14:30:05"));
+        assert!(result.contains("main"));
+        assert!(result.contains("/home/user/project"));
+        assert!(result.contains("claude-sonnet-4-20250514"));
+        assert!(result.contains("anthropic"));
     }
 
     #[test]
-    fn test_prompt_for_model() {
-        assert!(prompt_for_model("claude-3-sonnet").contains("TodoWrite"));
-        assert!(prompt_for_model("gpt-4").contains("autonomous"));
-        assert!(prompt_for_model("gemini-pro").contains("concise"));
+    fn test_renderer_no_agent_md() {
+        let renderer = SystemPromptRenderer::new().unwrap();
+        let vars = SystemPromptVars {
+            agent_md: None,
+            date: "Wed Mar 11 2026".to_string(),
+            time: "14:30:05".to_string(),
+            branch: None,
+            working_dir: "/tmp".to_string(),
+            model_name: "gpt-4".to_string(),
+            provider: "openai".to_string(),
+            platform: "macos".to_string(),
+            is_git_repo: false,
+        };
+
+        let result = renderer.render(&vars).unwrap();
+        assert!(result.contains("Wonopcode"));
+        assert!(!result.contains("Project Instructions"));
     }
 
     #[test]
-    fn test_environment_context() {
-        let ctx = environment_context(
-            &PathBuf::from("/home/user/project"),
-            true,
-            "linux",
-            Some("src/\n  main.rs"),
+    fn test_renderer_custom_template() {
+        let renderer = SystemPromptRenderer::with_template(
+            "Hello {{ model_name }}! Date: {{ date }}"
+        ).unwrap();
+        let vars = SystemPromptVars {
+            agent_md: None,
+            date: "today".to_string(),
+            time: "now".to_string(),
+            branch: None,
+            working_dir: "/tmp".to_string(),
+            model_name: "test-model".to_string(),
+            provider: "test".to_string(),
+            platform: "test".to_string(),
+            is_git_repo: false,
+        };
+
+        let result = renderer.render(&vars).unwrap();
+        assert_eq!(result, "Hello test-model! Date: today");
+    }
+
+    #[test]
+    fn test_renderer_invalid_template() {
+        let result = SystemPromptRenderer::with_template("{{ unclosed");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_custom_instructions_missing() {
+        let result = load_custom_instructions(Path::new("/nonexistent/path"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_system_prompt_vars_from_env() {
+        let vars = SystemPromptVars::from_env(
+            Path::new("/tmp"),
+            "test-model",
+            "test-provider",
         );
-
-        assert!(ctx.contains("/home/user/project"));
-        assert!(ctx.contains("git repo: yes"));
-        assert!(ctx.contains("linux"));
-        assert!(ctx.contains("main.rs"));
-    }
-
-    #[test]
-    fn test_build_system_prompt() {
-        let prompt = build_system_prompt(
-            "anthropic",
-            "claude-3-sonnet",
-            None,
-            Some("Custom instruction"),
-            "<env>test</env>",
-        );
-
-        assert!(prompt.contains("Claude Code"));
-        assert!(prompt.contains("TodoWrite"));
-        assert!(prompt.contains("Custom instruction"));
-        assert!(prompt.contains("<env>test</env>"));
+        assert_eq!(vars.model_name, "test-model");
+        assert_eq!(vars.provider, "test-provider");
+        assert!(!vars.date.is_empty());
+        assert!(!vars.time.is_empty());
     }
 }

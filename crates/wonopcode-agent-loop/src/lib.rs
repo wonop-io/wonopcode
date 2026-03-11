@@ -52,6 +52,7 @@ pub use capabilities::LoopCapabilities;
 pub use context::{
     CompactionConfig, LoopConfig, LoopContext, LoopUpdate, ObservationalMemoryStateSnapshot,
     ObservationSnapshot, PermissionCheckRequest, PermissionChecker, PromptImage,
+    SystemPromptSource,
 };
 pub use error::{LoopError, LoopResult};
 pub use standard::StandardLoop;
