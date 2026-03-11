@@ -193,6 +193,7 @@ pub async fn run_command(
         // Use instance directory as working directory for Claude CLI
         working_directory: Some(instance.directory().to_path_buf()),
         observational_memory: wonopcode_runner::ObservationalMemoryConfig::enabled(),
+        max_iterations: None, // Unlimited for run command
     };
 
     // Create runner with shared permission manager (allow-all for non-interactive mode)

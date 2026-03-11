@@ -72,7 +72,8 @@ pub struct LoopConfig {
     pub temperature: Option<f32>,
 
     /// Maximum iterations before stopping.
-    pub max_iterations: u32,
+    /// Maximum iterations before stopping. None means unlimited.
+    pub max_iterations: Option<u32>,
 
     /// Whether to include tool documentation in system prompt.
     pub include_tool_docs: bool,
@@ -84,7 +85,7 @@ impl Default for LoopConfig {
             system_prompt: None,
             max_tokens: Some(8192),
             temperature: Some(0.7),
-            max_iterations: 50,
+            max_iterations: None,
             include_tool_docs: false,
         }
     }
@@ -508,7 +509,7 @@ mod tests {
     #[test]
     fn test_loop_config_default() {
         let config = LoopConfig::default();
-        assert_eq!(config.max_iterations, 50);
+        assert_eq!(config.max_iterations, None);
         assert_eq!(config.max_tokens, Some(8192));
     }
 

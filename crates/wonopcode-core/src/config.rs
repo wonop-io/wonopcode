@@ -1983,6 +1983,11 @@ pub struct AppSettings {
     /// to load environment from profile files (.zshrc, .bashrc, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_shell: Option<String>,
+
+    /// Maximum number of agent turns before stopping.
+    /// None means unlimited (default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_agent_turns: Option<u32>,
 }
 
 /// Manages application-wide settings.
@@ -1992,6 +1997,7 @@ pub struct AppSettingsManager {
     /// Current settings.
     pub settings: AppSettings,
 }
+
 
 impl AppSettingsManager {
     /// Create a new settings manager.
@@ -2139,6 +2145,17 @@ impl AppSettingsManager {
     /// Set the default shell for command execution.
     pub fn set_default_shell(&mut self, shell: Option<String>) -> CoreResult<()> {
         self.settings.default_shell = shell;
+        self.save()
+    }
+
+    /// Get the max agent turns setting.
+    pub fn get_max_agent_turns(&self) -> Option<u32> {
+        self.settings.max_agent_turns
+    }
+
+    /// Set the max agent turns setting.
+    pub fn set_max_agent_turns(&mut self, turns: Option<u32>) -> CoreResult<()> {
+        self.settings.max_agent_turns = turns;
         self.save()
     }
 }

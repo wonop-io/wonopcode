@@ -126,8 +126,8 @@ impl DoomLoopDetector {
 /// let loop_impl = StandardLoop::new();
 /// ```
 pub struct StandardLoop {
-    /// Maximum iterations before doom loop detection triggers.
-    max_iterations: u32,
+    /// Maximum iterations before stopping. None means unlimited.
+    max_iterations: Option<u32>,
     /// Doom loop detector (interior mutability for &self methods).
     doom_detector: Mutex<DoomLoopDetector>,
 }
@@ -136,13 +136,13 @@ impl StandardLoop {
     /// Create a new StandardLoop with default settings.
     pub fn new() -> Self {
         Self {
-            max_iterations: 50,
+            max_iterations: None,
             doom_detector: Mutex::new(DoomLoopDetector::new()),
         }
     }
 
-    /// Create with custom iteration limit.
-    pub fn with_max_iterations(max_iterations: u32) -> Self {
+    /// Create with custom iteration limit. None means unlimited.
+    pub fn with_max_iterations(max_iterations: Option<u32>) -> Self {
         Self {
             max_iterations,
             doom_detector: Mutex::new(DoomLoopDetector::new()),
@@ -602,8 +602,10 @@ impl AgentLoop for StandardLoop {
 
             // Check iteration limit
             iteration += 1;
-            if iteration > self.max_iterations {
-                return Err(LoopError::MaxIterations(self.max_iterations));
+            if let Some(max) = self.max_iterations {
+                if iteration > max {
+                    return Err(LoopError::MaxIterations(max));
+                }
             }
 
             debug!(iteration, "Starting loop iteration");
@@ -1224,13 +1226,13 @@ mod tests {
     #[test]
     fn test_standard_loop_default() {
         let loop_impl = StandardLoop::default();
-        assert_eq!(loop_impl.max_iterations, 50);
+        assert_eq!(loop_impl.max_iterations, None);
     }
 
     #[test]
     fn test_standard_loop_with_max_iterations() {
-        let loop_impl = StandardLoop::with_max_iterations(100);
-        assert_eq!(loop_impl.max_iterations, 100);
+        let loop_impl = StandardLoop::with_max_iterations(Some(100));
+        assert_eq!(loop_impl.max_iterations, Some(100));
     }
 
     #[test]
