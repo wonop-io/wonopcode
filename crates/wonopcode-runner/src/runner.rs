@@ -586,6 +586,9 @@ pub struct RunnerConfig {
     /// Observational Memory configuration.
     /// When enabled, uses OM for context compression instead of legacy compaction.
     pub observational_memory: ObservationalMemoryConfig,
+    /// Maximum number of agent loop iterations before stopping.
+    /// None means unlimited (default).
+    pub max_iterations: Option<u32>,
 }
 
 impl Default for RunnerConfig {
@@ -606,6 +609,7 @@ impl Default for RunnerConfig {
             external_mcp_servers: HashMap::new(),
             working_directory: None,
             observational_memory: ObservationalMemoryConfig::enabled(), // OM enabled by default
+            max_iterations: None, // Unlimited by default
         }
     }
 }
@@ -747,9 +751,10 @@ impl Runner {
         // Create file time tracker
         let file_time = Arc::new(FileTimeState::new());
 
-        // Use provided agent loop or create default StandardLoop
+        // Use provided agent loop or create default StandardLoop with config max_iterations
+        let max_iterations = config.max_iterations;
         let agent_loop: BoxedAgentLoop =
-            agent_loop.unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::new()));
+            agent_loop.unwrap_or_else(|| Box::new(wonopcode_agent_loop::StandardLoop::with_max_iterations(max_iterations)));
 
         debug!(
             loop_name = agent_loop.name(),
@@ -1887,7 +1892,7 @@ impl Runner {
                 }),
                 max_tokens: config.max_tokens,
                 temperature: config.temperature,
-                max_iterations: 50,
+                max_iterations: Some(50),
                 include_tool_docs: false,
             }
         };
@@ -2369,6 +2374,7 @@ impl Runner {
                 external_mcp_servers: old_config.external_mcp_servers.clone(),
                 working_directory: old_config.working_directory.clone(),
                 observational_memory: old_config.observational_memory.clone(),
+                max_iterations: old_config.max_iterations,
             }
         };
 
