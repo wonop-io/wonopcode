@@ -20,6 +20,7 @@ pub mod list;
 pub mod lsp;
 pub mod mcp;
 pub mod memory;
+pub mod memory_adapter;
 pub mod mcp_todo_adapter;
 pub mod multiedit;
 pub mod patch;
@@ -53,6 +54,7 @@ pub use ticket::{TicketServiceAdapter,
 pub use memory::{
     MemoryClearTool, MemoryRecallTool, MemorySearchTool, MemoryStoreTool, SharedMemoryService,
 };
+pub use memory_adapter::MemoryServiceAdapter;
 
 // Re-export HMS tools for convenience
 pub use hms::{HmsService, HmsServiceAdapter, SharedHmsService};
@@ -140,6 +142,7 @@ pub trait TsPermissionChecker: Send + Sync {
     /// and remove the pending request from the permission system.
     async fn cleanup_request(&self, request_id: &str);
 }
+
 /// Trait for executing TypeScript code.
 ///
 /// This abstracts the TypeScript execution engine, allowing different
