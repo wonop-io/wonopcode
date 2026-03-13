@@ -201,7 +201,50 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
+
+    /// Mock executor for testing that returns predefined output.
+    struct MockTypescriptExecutor {
+        output: Vec<String>,
+    }
+
+    impl MockTypescriptExecutor {
+        fn new(output: Vec<String>) -> Self {
+            Self { output }
+        }
+    }
+
+    #[async_trait]
+    impl crate::TypescriptExecutor for MockTypescriptExecutor {
+        async fn execute(&self, _code: &str, _context: crate::TypescriptExecutionContext) -> Result<Vec<String>, String> {
+            Ok(self.output.clone())
+        }
+    }
+
+    fn test_context_with_executor(executor: Arc<dyn crate::TypescriptExecutor>) -> ToolContext {
+        ToolContext {
+            session_id: "test_session".to_string(),
+            message_id: "test_message".to_string(),
+            agent: "test".to_string(),
+            abort: CancellationToken::new(),
+            root_dir: PathBuf::from("/tmp"),
+            cwd: PathBuf::from("/tmp"),
+            snapshot: None,
+            file_time: None,
+            sandbox: None,
+            event_tx: None,
+            ticket_service: None,
+            memory_service: None,
+            ace_service: None,
+            hms_service: None,
+            permission_checker: None,
+            workstream_ticket_id: None,
+            workstream_default_tracker_id: None,
+            default_shell: None,
+            typescript_executor: Some(executor),
+        }
+    }
 
     fn test_context() -> ToolContext {
         ToolContext {
@@ -382,7 +425,28 @@ mod tests {
     // Run with: cargo test -- --ignored
 
     #[tokio::test]
-    #[ignore = "requires TypescriptExecutor - run with --ignored"]
+    async fn test_basic_execution_with_mock() {
+        let tool = ExecuteTypescriptTool;
+        let mock = Arc::new(MockTypescriptExecutor::new(vec!["Hello from TypeScript".to_string()]));
+        let ctx = test_context_with_executor(mock);
+
+        let result = tool
+            .execute(
+                json!({
+                    "code": "console.log('Hello from TypeScript');",
+                    "description": "Test execution"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.output.contains("Hello from TypeScript"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires real TypescriptExecutor - run with --ignored"]
     async fn test_basic_execution() {
         let tool = ExecuteTypescriptTool;
         let ctx = test_context();
