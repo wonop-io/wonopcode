@@ -2060,6 +2060,8 @@ impl Runner {
             messages_count_at_start: messages_count_before_loop,
             // Project directory for continuous OM persistence
             om_project_dir: self.om_config.project_dir.clone(),
+            // TypeScript executor - None for now, will be wired when worker process is enabled
+            typescript_executor: None,
         };
 
         // Run the agent loop with emergency compaction on context overflow

@@ -1063,6 +1063,7 @@ impl AgentLoop for StandardLoop {
                 ctx.ts_permission_checker.clone(),
                 ctx.workstream_ticket_id.clone(),
                 ctx.workstream_default_tracker_id.clone(),
+                ctx.typescript_executor.clone(),
             );
 
             let mut tool_results = Vec::new();

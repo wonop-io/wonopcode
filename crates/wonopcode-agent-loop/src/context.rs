@@ -471,6 +471,12 @@ pub struct LoopContext<'a> {
     /// Observer and Reflector runs. This ensures observations survive
     /// unexpected app termination (e.g., Cmd+Q).
     pub om_project_dir: Option<PathBuf>,
+
+    /// Optional TypeScript executor for worker process mode.
+    ///
+    /// When set, TypeScript execution will be routed to an isolated
+    /// worker process instead of running in-process with V8.
+    pub typescript_executor: Option<wonopcode_tools::SharedTypescriptExecutor>,
 }
 
 /// Image attached to a prompt.

@@ -40,6 +40,8 @@ pub struct ToolExecutor<'a> {
     workstream_ticket_id: Option<String>,
     /// Optional default tracker ID for the workstream.
     workstream_default_tracker_id: Option<String>,
+    /// Optional TypeScript executor for worker process mode.
+    typescript_executor: Option<wonopcode_tools::SharedTypescriptExecutor>,
 }
 
 impl<'a> ToolExecutor<'a> {
@@ -64,6 +66,7 @@ impl<'a> ToolExecutor<'a> {
             ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            typescript_executor: None,
         }
     }
 
@@ -92,6 +95,7 @@ impl<'a> ToolExecutor<'a> {
             ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            typescript_executor: None,
         }
     }
 
@@ -127,6 +131,7 @@ impl<'a> ToolExecutor<'a> {
             ts_permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            typescript_executor: None,
         }
     }
 
@@ -148,6 +153,7 @@ impl<'a> ToolExecutor<'a> {
         ts_permission_checker: Option<Arc<dyn TsPermissionChecker>>,
         workstream_ticket_id: Option<String>,
         workstream_default_tracker_id: Option<String>,
+        typescript_executor: Option<wonopcode_tools::SharedTypescriptExecutor>,
     ) -> Self {
         Self {
             tools,
@@ -163,6 +169,7 @@ impl<'a> ToolExecutor<'a> {
             ts_permission_checker,
             workstream_ticket_id,
             workstream_default_tracker_id,
+            typescript_executor,
         }
     }
 
@@ -268,7 +275,7 @@ impl<'a> ToolExecutor<'a> {
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
             default_shell: None, // TODO: Get from settings when available
-            typescript_executor: None, // TODO: Wire up worker executor
+            typescript_executor: self.typescript_executor.clone(),
         };
 
         // Execute
