@@ -12,6 +12,22 @@
 //! - Shell command execution with allowlist
 //! - Console output capture
 //! - Configurable timeout and heap limits
+//!
+//! # V8 Process Isolation (WIP)
+//!
+//! To fix crashes caused by V8/WebKit CodeRange conflicts on macOS, this tool
+//! can optionally run V8 in a separate worker process communicating via IPC.
+//!
+//! The worker process architecture is implemented in:
+//! - `wonopcode-codemode-worker`: Worker binary with V8 runtime
+//! - `wonopcode-codemode-client`: IPC client library
+//! - `wonopcode-pro-server::WorkerManager`: Worker lifecycle management
+//!
+//! To enable worker process mode, set environment variable:
+//!   WONOPCODE_USE_WORKER_PROCESS=1
+//!
+//! Full integration requires wiring services through the IPC layer.
+//! See docs/v8-process-isolation-plan.md for details.
 
 use crate::ace::FileAceService;
 use crate::hms::HmsServiceAdapter;
