@@ -1181,15 +1181,27 @@ impl Runner {
         // Create TypeScript executor for in-process V8 execution
         // This is for the CLI version where WebKit is not present
         {
-            use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor};
+            use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor, TicketServiceAdapter, HmsServiceAdapter};
             
-            // Build service handles from the runner's services
+            // Build service handles from the runner's services using adapters
             let mut codemode_services = CodemodeServiceHandles::new();
             
-            // Note: We can't directly pass the services because they use different trait types.
-            // The InProcessTypescriptExecutor will need to get services from a different source
-            // or we need to create adapters. For now, create executor without services.
-            // Services will be accessed through ToolContext at execution time.
+            // Wire up ticket service if available
+            if let Some(ref ticket_svc) = runner.ticket_service {
+                let adapter = TicketServiceAdapter::new(ticket_svc.clone());
+                codemode_services.tickets = Some(std::sync::Arc::new(adapter));
+                debug!("TypeScript executor: TicketService wired");
+            }
+            
+            // Wire up HMS service if available
+            if let Some(ref hms_svc) = runner.hms_service {
+                let adapter = HmsServiceAdapter::for_project(cwd.clone());
+                codemode_services.hms = Some(std::sync::Arc::new(adapter));
+                debug!("TypeScript executor: HmsService wired");
+            }
+            
+            // Note: Memory, Web, ACE, LSP, and Agent services need additional adapters
+            // For now, those will return "service not available" errors in TypeScript
             
             let executor = InProcessTypescriptExecutor::new(codemode_services);
             runner.typescript_executor = Some(std::sync::Arc::new(executor));

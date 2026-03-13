@@ -10,6 +10,7 @@ mod list_labels;
 mod read;
 mod remove_labels;
 mod search;
+mod codemode_adapter;
 mod service;
 mod trackers;
 
@@ -25,6 +26,7 @@ pub use service::{
     TicketError, TicketFilter, TicketService, TicketStatus, TicketSummary, TicketUser, TrackerInfo,
 };
 pub use trackers::TicketListTrackersTool;
+pub use codemode_adapter::TicketServiceAdapter;
 
 #[cfg(test)]
 pub(crate) use service::mock;

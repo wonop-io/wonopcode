@@ -45,7 +45,7 @@ pub use ace::{
 pub use ace_todo_store::AceTodoStore;
 
 // Re-export ticket tools for convenience
-pub use ticket::{
+pub use ticket::{TicketServiceAdapter, 
     TicketCreateTool, TicketListTool, TicketReadTool, TicketSearchTool, TicketService,
 };
 
