@@ -933,7 +933,7 @@ impl Runner {
         instance: Instance,
         mcp_configs: Option<HashMap<String, McpConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None, None, None).await
+        Self::new_with_shared(config, instance, mcp_configs, None, None, None, None, None, None, None, None).await
     }
 
     /// Create a new runner with optional shared Bus, PermissionManager, SessionService, and AgentLoop.
@@ -962,6 +962,7 @@ impl Runner {
         ticket_service: Option<Arc<dyn wonopcode_tools::TicketService>>,
         memory_service: Option<wonopcode_tools::SharedMemoryService>,
         hms_service: Option<wonopcode_tools::SharedHmsService>,
+        typescript_executor: Option<wonopcode_tools::SharedTypescriptExecutor>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Track whether we're using a shared permission manager
         let using_shared_pm = shared_permission_manager.is_some();
@@ -1178,9 +1179,13 @@ impl Runner {
         runner.memory_service = memory_service.clone();
         runner.hms_service = hms_service.clone();
 
-        // Create TypeScript executor for in-process V8 execution
-        // This is for the CLI version where WebKit is not present
-        {
+        // Create TypeScript executor
+        // If provided externally (e.g., WorkerExecutor for Desktop), use that
+        // Otherwise create InProcessTypescriptExecutor for CLI
+        if let Some(ts_executor) = typescript_executor {
+            runner.typescript_executor = Some(ts_executor);
+            debug!("TypeScript executor: using externally provided executor");
+        } else {
             use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor, TicketServiceAdapter, HmsServiceAdapter, MemoryServiceAdapter, FileAceService, LspServiceAdapter, WebServiceAdapter, AgentServiceAdapter};
             
             // Build service handles from the runner's services using adapters

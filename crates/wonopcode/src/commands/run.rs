@@ -208,6 +208,7 @@ pub async fn run_command(
         None, // No ticket service in run command
         memory_service, // Memory service for persistent memory
         None, // No HMS service in run command
+        None, // No external TypeScript executor
     )
     .await
     {

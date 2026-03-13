@@ -698,6 +698,7 @@ async fn run_basic_mode(
         None, // No ticket service in CLI mode
         memory_service, // Memory service for persistent memory
         None, // No HMS service in CLI mode (not implemented yet)
+        None, // No external TypeScript executor (uses InProcessTypescriptExecutor)
     )
     .await
     {
@@ -879,6 +880,7 @@ async fn run_tui_mode(
         None, // No ticket service in TUI mode
         memory_service, // Memory service for persistent memory
         None, // No HMS service in TUI mode
+        None, // No external TypeScript executor
     )
     .await
     {
@@ -1265,6 +1267,7 @@ async fn run_headless(
         None, // No ticket service in headless mode
         memory_service, // Memory service for persistent memory
         None, // No HMS service in headless mode
+        None, // No external TypeScript executor
     )
     .await
     {
