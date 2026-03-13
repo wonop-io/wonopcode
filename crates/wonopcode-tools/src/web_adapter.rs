@@ -2,8 +2,8 @@
 //!
 //! Implements:
 //! - fetch: Uses WebFetchTool logic
-//! - search: Returns "not available" (requires external API)
-//! - code_search: Returns "not available" (requires external API)
+//! - search: Uses DuckDuckGo HTML scraping
+//! - code_search: Searches code documentation sites
 
 use async_trait::async_trait;
 use std::time::Duration;
@@ -38,12 +38,53 @@ impl Default for WebServiceAdapter {
 impl CodemodeService for WebServiceAdapter {
     async fn search(
         &self,
-        _query: &str,
-        _num_results: Option<usize>,
+        query: &str,
+        num_results: Option<usize>,
         _search_type: Option<String>,
     ) -> ServiceResult<Vec<WebSearchResult>> {
-        // Web search requires external API (Google/Bing) - not available in CLI
-        Err(ServiceError::not_available("web.search"))
+        let num_results = num_results.unwrap_or(10).min(20);
+        
+        debug!(query = %query, num_results = %num_results, "Performing web search");
+        
+        // Build DuckDuckGo HTML search URL
+        let encoded_query = urlencoding::encode(query);
+        let search_url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
+        
+        // Build HTTP client
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("Mozilla/5.0 (compatible; wonopcode/0.1)")
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|e| ServiceError::new("CLIENT_ERROR", format!("Failed to create HTTP client: {e}")))?;
+        
+        // Fetch search results page
+        let response = client.get(&search_url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                ServiceError::new("TIMEOUT", "Search request timed out")
+            } else {
+                ServiceError::new("REQUEST_FAILED", format!("Search request failed: {e}"))
+            }
+        })?;
+        
+        if !response.status().is_success() {
+            return Err(ServiceError::new(
+                "HTTP_ERROR",
+                format!("Search returned HTTP {}", response.status().as_u16()),
+            ));
+        }
+        
+        let html = response.text().await
+            .map_err(|e| ServiceError::new("READ_ERROR", format!("Failed to read response: {e}")))?;
+        
+        // Parse DuckDuckGo HTML results
+        let results = parse_duckduckgo_results(&html, num_results);
+        
+        if results.is_empty() {
+            debug!("No search results found for query: {}", query);
+        }
+        
+        Ok(results)
     }
 
     async fn fetch(
@@ -152,12 +193,182 @@ impl CodemodeService for WebServiceAdapter {
 
     async fn code_search(
         &self,
-        _query: &str,
-        _tokens_num: Option<usize>,
+        query: &str,
+        tokens_num: Option<usize>,
     ) -> ServiceResult<String> {
-        // Code search requires external API - not available in CLI
-        Err(ServiceError::not_available("web.codeSearch"))
+        let max_tokens = tokens_num.unwrap_or(8000).min(16000);
+        
+        debug!(query = %query, max_tokens = %max_tokens, "Performing code search");
+        
+        // Search code-related sites
+        let code_sites = "site:stackoverflow.com OR site:github.com OR site:docs.rs OR site:doc.rust-lang.org OR site:developer.mozilla.org OR site:devdocs.io";
+        let full_query = format!("{} {}", query, code_sites);
+        
+        // Use the search method to get results
+        let results = self.search(&full_query, Some(5), None).await?;
+        
+        if results.is_empty() {
+            return Ok(format!("No code documentation found for: {}", query));
+        }
+        
+        // Format results as text
+        let mut output = format!("# Code Search Results for: {}\n\n", query);
+        
+        for (i, result) in results.iter().enumerate() {
+            output.push_str(&format!("## {}. {}\n", i + 1, result.title));
+            output.push_str(&format!("URL: {}\n", result.url));
+            output.push_str(&format!("{}\n\n", result.snippet));
+        }
+        
+        // Optionally fetch content from top results to fill token budget
+        let mut fetched_content = String::new();
+        let mut current_tokens = output.len() / 4; // rough estimate: 4 chars per token
+        
+        for result in results.iter().take(3) {
+            if current_tokens >= max_tokens {
+                break;
+            }
+            
+            // Try to fetch content from the URL
+            if let Ok(content) = self.fetch(&result.url, Some("text".to_string()), Some(10)).await {
+                let remaining_tokens = max_tokens.saturating_sub(current_tokens);
+                let max_chars = remaining_tokens * 4;
+                let truncated = if content.len() > max_chars {
+                    &content[..max_chars]
+                } else {
+                    &content
+                };
+                
+                fetched_content.push_str(&format!("---\n## Content from: {}\n{}\n\n", result.url, truncated));
+                current_tokens += truncated.len() / 4;
+            }
+        }
+        
+        if !fetched_content.is_empty() {
+            output.push_str("\n# Fetched Content\n\n");
+            output.push_str(&fetched_content);
+        }
+        
+        Ok(output)
     }
+}
+
+/// Parse DuckDuckGo HTML search results.
+fn parse_duckduckgo_results(html: &str, max_results: usize) -> Vec<WebSearchResult> {
+    let mut results = Vec::new();
+    
+    // DuckDuckGo HTML results are in <div class="result"> elements
+    // Each contains:
+    // - <a class="result__a"> with href and title
+    // - <a class="result__snippet"> with snippet text
+    
+    // Simple regex-free parsing for robustness
+    let mut pos = 0;
+    while results.len() < max_results {
+        // Find next result div
+        let result_start = match html[pos..].find("class=\"result ") {
+            Some(idx) => pos + idx,
+            None => break,
+        };
+        
+        // Find the end of this result div (next result or end)
+        let result_end = html[result_start + 20..]
+            .find("class=\"result ")
+            .map(|idx| result_start + 20 + idx)
+            .unwrap_or(html.len());
+        
+        let result_html = &html[result_start..result_end];
+        
+        // Extract URL from result__a href
+        let url = extract_href_from_result(result_html);
+        let title = extract_title_from_result(result_html);
+        let snippet = extract_snippet_from_result(result_html);
+        
+        if let (Some(url), Some(title)) = (url, title) {
+            // DuckDuckGo uses redirect URLs, extract the actual URL
+            let actual_url = extract_actual_url(&url).unwrap_or(url);
+            
+            results.push(WebSearchResult {
+                title,
+                url: actual_url,
+                snippet: snippet.unwrap_or_default(),
+                content: None,
+            });
+        }
+        
+        pos = result_end;
+    }
+    
+    results
+}
+
+/// Extract href from result__a link.
+fn extract_href_from_result(html: &str) -> Option<String> {
+    // Look for href in result__a link
+    let marker = "class=\"result__a\"";
+    let link_start = html.find(marker)?;
+    
+    // Look for the <a tag containing result__a and extract its href
+    let a_start = html[..link_start].rfind("<a ")?;
+    let a_end = html[link_start..].find(">").map(|i| link_start + i)?;
+    let a_tag = &html[a_start..a_end];
+    
+    // Extract href from the a tag
+    let href_start = a_tag.find("href=\"")?;
+    let href_value_start = href_start + 6;
+    let href_end = a_tag[href_value_start..].find("\"")? + href_value_start;
+    
+    Some(html_decode(&a_tag[href_value_start..href_end]))
+}
+
+/// Extract title text from result__a link.
+fn extract_title_from_result(html: &str) -> Option<String> {
+    let marker = "class=\"result__a\"";
+    let link_start = html.find(marker)?;
+    let tag_end = html[link_start..].find(">")? + link_start + 1;
+    let close_tag = html[tag_end..].find("</a>")? + tag_end;
+    
+    let title_html = &html[tag_end..close_tag];
+    Some(html_to_text(title_html).trim().to_string())
+}
+
+/// Extract snippet text from result__snippet.
+fn extract_snippet_from_result(html: &str) -> Option<String> {
+    let marker = "class=\"result__snippet\"";
+    let snippet_start = html.find(marker)?;
+    let tag_end = html[snippet_start..].find(">")? + snippet_start + 1;
+    let close_tag = html[tag_end..].find("</a>")? + tag_end;
+    
+    let snippet_html = &html[tag_end..close_tag];
+    Some(html_to_text(snippet_html).trim().to_string())
+}
+
+/// Extract actual URL from DuckDuckGo redirect URL.
+fn extract_actual_url(ddg_url: &str) -> Option<String> {
+    // DuckDuckGo URLs look like: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=...
+    if ddg_url.contains("uddg=") {
+        let start = ddg_url.find("uddg=")? + 5;
+        let end = ddg_url[start..].find('&').map(|i| start + i).unwrap_or(ddg_url.len());
+        let encoded = &ddg_url[start..end];
+        return Some(urlencoding::decode(encoded).ok()?.into_owned());
+    }
+    
+    // Some direct URLs start with //
+    if ddg_url.starts_with("//") {
+        return Some(format!("https:{}", ddg_url));
+    }
+    
+    None
+}
+
+/// Decode HTML entities.
+fn html_decode(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
 }
 
 /// Convert HTML to plain text.

@@ -39,6 +39,7 @@ ignore.workspace = true
 similar.workspace = true
 regex.workspace = true
 url.workspace = true
+urlencoding.workspace = true
 reqwest.workspace = true
 once_cell.workspace = true
 walkdir.workspace = true

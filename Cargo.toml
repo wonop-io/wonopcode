@@ -149,6 +149,7 @@ wiremock = "0.5"
 # Misc
 regex = "1"
 url = "2"
+urlencoding = "2.1"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
