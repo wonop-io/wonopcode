@@ -226,7 +226,8 @@ mod tests {
 
         assert!(schema["properties"]["code"].is_object());
         assert!(schema["properties"]["description"].is_object());
-        assert!(schema["properties"]["timeout_secs"].is_object());
+        // timeout_secs is nested under options
+        assert!(schema["properties"]["options"]["properties"]["timeout_secs"].is_object());
     }
 
     #[test]

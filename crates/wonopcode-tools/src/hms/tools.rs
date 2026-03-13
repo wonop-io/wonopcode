@@ -637,9 +637,13 @@ mod tests {
             event_tx: None,
             ticket_service: None,
             memory_service: None,
+            ace_service: None,
             hms_service: hms,
+            permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            default_shell: None,
+            typescript_executor: None,
         }
     }
 

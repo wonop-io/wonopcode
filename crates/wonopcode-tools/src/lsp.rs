@@ -383,6 +383,9 @@ mod tests {
             permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+        default_shell: None,
+        hms_service: None,
+        typescript_executor: None,
         }
     }
 
