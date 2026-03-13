@@ -742,6 +742,8 @@ pub struct Runner {
     /// Token state machine for OM threshold management.
     /// Only initialized when OM is enabled.
     token_state_machine: Option<RwLock<TokenStateMachine>>,
+    /// TypeScript executor for in-process V8 execution.
+    typescript_executor: Option<wonopcode_tools::SharedTypescriptExecutor>,
 }
 
 impl Runner {
@@ -911,6 +913,7 @@ impl Runner {
             om_config,
             memory_state,
             token_state_machine,
+            typescript_executor: None,
         })
     }
 
@@ -1172,8 +1175,26 @@ impl Runner {
                 info!(workstream_id = %workstream_id, "Workstream memory initialized");
             }
         }
-        runner.memory_service = memory_service;
-        runner.hms_service = hms_service;
+        runner.memory_service = memory_service.clone();
+        runner.hms_service = hms_service.clone();
+
+        // Create TypeScript executor for in-process V8 execution
+        // This is for the CLI version where WebKit is not present
+        {
+            use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor};
+            
+            // Build service handles from the runner's services
+            let mut codemode_services = CodemodeServiceHandles::new();
+            
+            // Note: We can't directly pass the services because they use different trait types.
+            // The InProcessTypescriptExecutor will need to get services from a different source
+            // or we need to create adapters. For now, create executor without services.
+            // Services will be accessed through ToolContext at execution time.
+            
+            let executor = InProcessTypescriptExecutor::new(codemode_services);
+            runner.typescript_executor = Some(std::sync::Arc::new(executor));
+            debug!("TypeScript executor initialized (in-process V8)");
+        }
 
         // Initialize MCP client if configured
         // NOTE: This may replace the entire tool registry, so memory tools are also added there
@@ -2060,8 +2081,8 @@ impl Runner {
             messages_count_at_start: messages_count_before_loop,
             // Project directory for continuous OM persistence
             om_project_dir: self.om_config.project_dir.clone(),
-            // TypeScript executor - None for now, will be wired when worker process is enabled
-            typescript_executor: None,
+            // TypeScript executor for in-process V8 execution
+            typescript_executor: self.typescript_executor.clone(),
         };
 
         // Run the agent loop with emergency compaction on context overflow

@@ -59,6 +59,10 @@ pub use hms::{HmsService, HmsServiceAdapter, SharedHmsService};
 
 // Re-export Code Mode tools for convenience
 pub use execute_typescript::ExecuteTypescriptTool;
+pub use execute_typescript::InProcessTypescriptExecutor;
+
+// Re-export ServiceHandles for TypeScript executor configuration
+pub use wonopcode_codemode::ServiceHandles as CodemodeServiceHandles;
 
 use async_trait::async_trait;
 use serde_json::Value;

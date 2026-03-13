@@ -195,6 +195,67 @@ fn truncate_description(desc: &str) -> String {
     }
 }
 
+
+// ============================================================================
+// In-Process TypeScript Executor
+// ============================================================================
+
+use wonopcode_codemode::{CodemodeRuntime, RuntimeConfig, FeatureFlags, AllowedCommands};
+use wonopcode_codemode::ServiceHandles as CodemodeServiceHandles;
+
+/// In-process TypeScript executor using CodemodeRuntime.
+///
+/// This executor runs TypeScript code directly in the main process using
+/// deno_core/V8. It's suitable for CLI usage where there's no WebKit conflict.
+///
+/// For desktop apps with WebKit, use WorkerExecutor (process isolation) instead
+/// to avoid V8/WebKit memory conflicts.
+pub struct InProcessTypescriptExecutor {
+    /// Service handles for external services.
+    services: CodemodeServiceHandles,
+    /// Default shell for command execution.
+    default_shell: Option<String>,
+}
+
+impl InProcessTypescriptExecutor {
+    /// Create a new in-process executor with the given service handles.
+    pub fn new(services: CodemodeServiceHandles) -> Self {
+        Self {
+            services,
+            default_shell: None,
+        }
+    }
+
+    /// Set the default shell for command execution.
+    pub fn with_default_shell(mut self, shell: Option<String>) -> Self {
+        self.default_shell = shell;
+        self
+    }
+}
+
+#[async_trait]
+impl crate::TypescriptExecutor for InProcessTypescriptExecutor {
+    async fn execute(&self, code: &str, context: crate::TypescriptExecutionContext) -> Result<Vec<String>, String> {
+        let config = RuntimeConfig {
+            project_root: context.project_root.clone(),
+            allowed_commands: AllowedCommands::default(),
+            timeout_secs: context.timeout_secs,
+            max_heap_size: 64 * 1024 * 1024, // 64MB
+            permission_bridge: None,
+            session_id: Some(context.session_id.clone()),
+            services: self.services.clone(),
+            features: FeatureFlags::all_enabled(),
+            workstream_ticket_id: None,
+            workstream_tracker_id: None,
+            default_shell: self.default_shell.clone(),
+        };
+
+        let runtime = CodemodeRuntime::new(config);
+        
+        runtime.execute(code).await.map_err(|e| e.to_string())
+    }
+}
+
 // ============================================================================
 #[cfg(test)]
 mod tests {
