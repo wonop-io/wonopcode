@@ -1181,7 +1181,7 @@ impl Runner {
         // Create TypeScript executor for in-process V8 execution
         // This is for the CLI version where WebKit is not present
         {
-            use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor, TicketServiceAdapter, HmsServiceAdapter, MemoryServiceAdapter, FileAceService, LspServiceAdapter, WebServiceAdapter};
+            use wonopcode_tools::{CodemodeServiceHandles, InProcessTypescriptExecutor, TicketServiceAdapter, HmsServiceAdapter, MemoryServiceAdapter, FileAceService, LspServiceAdapter, WebServiceAdapter, AgentServiceAdapter};
             
             // Build service handles from the runner's services using adapters
             let mut codemode_services = CodemodeServiceHandles::new();
@@ -1228,8 +1228,12 @@ impl Runner {
                 debug!("TypeScript executor: WebService wired (fetch only)");
             }
             
-            // Note: AgentService needs additional infrastructure for spawning subagents
-            // For now, it will return "service not available" errors in TypeScript
+            // Wire up Agent service (plan mode only - spawn not available in CLI)
+            {
+                let agent_svc = AgentServiceAdapter::new();
+                codemode_services.agents = Some(std::sync::Arc::new(agent_svc));
+                debug!("TypeScript executor: AgentService wired (plan mode only)");
+            }
             
             let executor = InProcessTypescriptExecutor::new(codemode_services);
             runner.typescript_executor = Some(std::sync::Arc::new(executor));

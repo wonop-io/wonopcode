@@ -8,6 +8,7 @@ pub mod registry;
 
 // Tool implementations
 pub mod ace;
+pub mod agent_adapter;
 pub mod ace_todo_store;
 pub mod bash;
 pub mod batch;
@@ -66,6 +67,9 @@ pub use lsp_adapter::LspServiceAdapter;
 
 // Re-export Web adapter
 pub use web_adapter::WebServiceAdapter;
+
+// Re-export Agent adapter
+pub use agent_adapter::AgentServiceAdapter;
 
 // Re-export Code Mode tools for convenience
 pub use execute_typescript::ExecuteTypescriptTool;
