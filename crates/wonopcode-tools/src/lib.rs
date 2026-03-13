@@ -18,6 +18,7 @@ pub mod grep;
 pub mod hms;
 pub mod list;
 pub mod lsp;
+pub mod lsp_adapter;
 pub mod mcp;
 pub mod memory;
 pub mod memory_adapter;
@@ -58,6 +59,9 @@ pub use memory_adapter::MemoryServiceAdapter;
 
 // Re-export HMS tools for convenience
 pub use hms::{HmsService, HmsServiceAdapter, SharedHmsService};
+
+// Re-export LSP adapter
+pub use lsp_adapter::LspServiceAdapter;
 
 // Re-export Code Mode tools for convenience
 pub use execute_typescript::ExecuteTypescriptTool;
