@@ -268,6 +268,7 @@ impl<'a> ToolExecutor<'a> {
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
             default_shell: None, // TODO: Get from settings when available
+            typescript_executor: None, // TODO: Wire up worker executor
         };
 
         // Execute

@@ -137,6 +137,44 @@ impl Tool for ExecuteTypescriptTool {
             .and_then(|opts| opts.timeout_secs)
             .map(|t| t.min(120));
 
+        // If an external executor is available (e.g., worker process), use it
+        // This path supports V8 process isolation for stability
+        if let Some(executor) = &ctx.typescript_executor {
+            let exec_context = crate::TypescriptExecutionContext {
+                project_root: ctx.root_dir.clone(),
+                session_id: ctx.session_id.clone(),
+                timeout_secs,
+            };
+
+            let output = executor.execute(&args.code, exec_context).await.map_err(|e| {
+                warn!(error = %e, "TypeScript execution failed (worker process)");
+                ToolError::execution_failed(format!("Execution failed: {e}"))
+            })?;
+
+            let output_text = if output.is_empty() {
+                "(no output)".to_string()
+            } else {
+                output.join("\n")
+            };
+
+            debug!(
+                lines = output.len(),
+                "TypeScript execution completed (worker process)"
+            );
+
+            return Ok(ToolOutput::new(
+                format!("TypeScript: {}", truncate_description(description)),
+                output_text,
+            )
+            .with_metadata(serde_json::json!({
+                "description": description,
+                "output_lines": output.len(),
+                "timeout_secs": timeout_secs,
+                "executor": "worker_process",
+            })));
+        }
+
+        // Fall through to in-process execution
         // Create permission bridge if permission checker is available
         let (permission_bridge, permission_rx) = if ctx.permission_checker.is_some() {
             let (bridge, rx) = create_permission_channel();

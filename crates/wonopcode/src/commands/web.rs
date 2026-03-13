@@ -126,6 +126,8 @@ impl wonopcode_mcp::McpToolExecutor for ToolExecutorWrapper {
             permission_checker: Some(self.ts_permission_checker.clone()),
             workstream_ticket_id: None,                   // No workstream in MCP HTTP
             workstream_default_tracker_id: None,          // No workstream tracker in MCP HTTP
+            default_shell: None,
+            typescript_executor: None,
         };
 
         tracing::info!(

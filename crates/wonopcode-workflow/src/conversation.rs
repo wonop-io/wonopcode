@@ -253,6 +253,8 @@ impl ConversationEngine {
                 permission_checker: None,
                 workstream_ticket_id: None,
                 workstream_default_tracker_id: None,
+                default_shell: None,
+                typescript_executor: None,
             };
 
             match tool.execute(args, &ctx).await {
@@ -308,4 +310,3 @@ fn format_tool_output(output: &wonopcode_tools::ToolOutput) -> String {
     result.push_str(&output.output);
     result
 }
-

@@ -112,14 +112,15 @@ impl Processor {
         }
 
         // Build system prompt
-        let environment = build_environment_info(cwd);
-        let system_prompt = wonopcode_core::system_prompt::build_system_prompt(
-            &self.config.provider,
-            &self.config.model_id,
-            None, // agent_prompt
-            None, // custom_instructions
-            &environment,
+        let vars = wonopcode_core::system_prompt::SystemPromptVars::from_env(
+            cwd, 
+            &self.config.model_id, 
+            &self.config.provider
         );
+        let renderer = wonopcode_core::system_prompt::SystemPromptRenderer::new()
+            .map_err(|e| format!("Failed to create system prompt renderer: {e}"))?;
+        let system_prompt = renderer.render(&vars)
+            .map_err(|e| format!("Failed to render system prompt: {e}"))?;
 
         // Add user message with hints to history
         {
@@ -377,6 +378,8 @@ impl Processor {
             permission_checker: None, // ACP tools run without permission checker for now
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            default_shell: None,
+            typescript_executor: None,
         };
 
         let _timing = wonopcode_util::TimingGuard::tool(tool.id());

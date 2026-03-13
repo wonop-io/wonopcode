@@ -210,6 +210,7 @@ Usage notes:
             workstream_ticket_id: ctx.workstream_ticket_id.clone(),
             workstream_default_tracker_id: ctx.workstream_default_tracker_id.clone(),
             default_shell: ctx.default_shell.clone(),
+            typescript_executor: ctx.typescript_executor.clone(),
         };
 
         // Execute the subagent

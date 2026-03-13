@@ -1998,5 +1998,26 @@ async fn run_discover(cli: &Cli) -> anyhow::Result<()> {
     run_connect(&selected.address.to_string(), cli).await
 }
 
+
+/// Run ACP (Agent Control Protocol) mode.
+async fn run_acp(_working_dir: &std::path::Path) -> anyhow::Result<()> {
+    // TODO: Implement ACP mode
+    Err(anyhow::anyhow!("ACP mode not yet implemented"))
+}
+
+/// Handle stats command.
+async fn handle_stats(
+    _cwd: &std::path::Path,
+    _days: Option<u32>,
+    _tools: Option<usize>,
+    _project: Option<String>,
+) -> anyhow::Result<()> {
+    // TODO: Implement stats command
+    Err(anyhow::anyhow!("Stats command not yet implemented"))
+}
+
 /// Connect to a remote headless server.
-#[allow(clippy::cognitive_complexity)]
+async fn run_connect(_address: &str, _cli: &Cli) -> anyhow::Result<()> {
+    // TODO: Implement remote server connection
+    Err(anyhow::anyhow!("Remote connection not yet implemented"))
+}

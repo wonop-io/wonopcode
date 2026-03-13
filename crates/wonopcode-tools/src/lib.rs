@@ -136,6 +136,33 @@ pub trait TsPermissionChecker: Send + Sync {
     /// and remove the pending request from the permission system.
     async fn cleanup_request(&self, request_id: &str);
 }
+/// Trait for executing TypeScript code.
+///
+/// This abstracts the TypeScript execution engine, allowing different
+/// implementations (in-process V8, worker process, etc.) to be swapped.
+///
+/// When set on ToolContext, ExecuteTypescriptTool will use this executor
+/// instead of creating its own CodemodeRuntime.
+#[async_trait]
+pub trait TypescriptExecutor: Send + Sync {
+    /// Execute TypeScript code and return console output lines.
+    async fn execute(&self, code: &str, context: TypescriptExecutionContext) -> Result<Vec<String>, String>;
+}
+
+/// Context for TypeScript execution.
+#[derive(Debug, Clone)]
+pub struct TypescriptExecutionContext {
+    /// Project root directory.
+    pub project_root: PathBuf,
+    /// Session ID.
+    pub session_id: String,
+    /// Optional timeout in seconds.
+    pub timeout_secs: Option<u64>,
+}
+
+/// Shared TypeScript executor.
+pub type SharedTypescriptExecutor = Arc<dyn TypescriptExecutor>;
+
 
 /// Event that tools can emit to notify listeners of state changes.
 #[derive(Debug, Clone)]
@@ -203,6 +230,9 @@ pub struct ToolContext {
     /// Default shell for command execution (e.g., "zsh", "bash", "sh").
     /// If set, commands will be executed using this shell with login shell flags.
     pub default_shell: Option<String>,
+    /// Optional TypeScript executor for V8 process isolation.
+    /// When set, ExecuteTypescriptTool will use this instead of in-process CodemodeRuntime.
+    pub typescript_executor: Option<SharedTypescriptExecutor>,
 }
 
 impl ToolContext {
@@ -333,6 +363,7 @@ mod tests {
             permission_checker: None,
             workstream_ticket_id: None,
             workstream_default_tracker_id: None,
+            typescript_executor: None,
         }
     }
 

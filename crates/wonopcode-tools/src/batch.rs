@@ -288,6 +288,7 @@ impl Clone for ToolContext {
             workstream_ticket_id: self.workstream_ticket_id.clone(),
             workstream_default_tracker_id: self.workstream_default_tracker_id.clone(),
             default_shell: self.default_shell.clone(),
+            typescript_executor: self.typescript_executor.clone(),
         }
     }
 }
