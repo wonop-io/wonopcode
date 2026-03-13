@@ -32,6 +32,7 @@ pub mod skill;
 pub mod task;
 pub mod ticket;
 pub mod todo;
+pub mod web_adapter;
 pub mod webfetch;
 pub mod write;
 
@@ -62,6 +63,9 @@ pub use hms::{HmsService, HmsServiceAdapter, SharedHmsService};
 
 // Re-export LSP adapter
 pub use lsp_adapter::LspServiceAdapter;
+
+// Re-export Web adapter
+pub use web_adapter::WebServiceAdapter;
 
 // Re-export Code Mode tools for convenience
 pub use execute_typescript::ExecuteTypescriptTool;
