@@ -5,9 +5,11 @@
 mod api;
 mod event;
 mod pr;
+mod rate_limiter;
 
 pub use api::GitHubClient;
 pub use pr::checkout_pr;
+pub use rate_limiter::RateLimiter;
 
 use anyhow::Result;
 use tracing::info;

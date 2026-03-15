@@ -11,16 +11,21 @@
 
 #![allow(dead_code)]
 
+use super::rate_limiter::RateLimiter;
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
-/// GitHub API client.
+/// Maximum number of retries for rate-limited requests.
+const MAX_RETRIES: u32 = 3;
+
+/// GitHub API client with built-in rate limiting.
 pub struct GitHubClient {
     client: Client,
     token: String,
     base_url: String,
+    rate_limiter: RateLimiter,
 }
 
 impl GitHubClient {
@@ -32,6 +37,7 @@ impl GitHubClient {
             client,
             token: token.to_string(),
             base_url: "https://api.github.com".to_string(),
+            rate_limiter: RateLimiter::new(),
         })
     }
 
@@ -40,6 +46,103 @@ impl GitHubClient {
         let mut client = Self::new(token)?;
         client.base_url = base_url.to_string();
         Ok(client)
+    }
+
+    /// Execute a GET request with rate limiting and retries.
+    async fn get(&self, url: &str) -> Result<reqwest::Response> {
+        self.execute_request(reqwest::Method::GET, url, None).await
+    }
+
+    /// Execute a POST request with rate limiting and retries.
+    async fn post(&self, url: &str, body: Option<serde_json::Value>) -> Result<reqwest::Response> {
+        self.execute_request(reqwest::Method::POST, url, body).await
+    }
+
+    /// Execute a PATCH request with rate limiting and retries.
+    async fn patch(&self, url: &str, body: Option<serde_json::Value>) -> Result<reqwest::Response> {
+        self.execute_request(reqwest::Method::PATCH, url, body).await
+    }
+
+    /// Execute a DELETE request with rate limiting and retries.
+    async fn delete(&self, url: &str) -> Result<reqwest::Response> {
+        self.execute_request(reqwest::Method::DELETE, url, None).await
+    }
+
+    /// Execute an HTTP request with rate limiting and automatic retries.
+    async fn execute_request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<reqwest::Response> {
+        let is_mutative = matches!(
+            method,
+            reqwest::Method::POST | reqwest::Method::PATCH | reqwest::Method::PUT | reqwest::Method::DELETE
+        );
+
+        for attempt in 0..=MAX_RETRIES {
+            // Wait for rate limiter before making request
+            self.rate_limiter.wait_for_request(is_mutative).await;
+
+            // Build the request
+            let mut request = self
+                .client
+                .request(method.clone(), url)
+                .header("Authorization", format!("Bearer {}", self.token))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28");
+
+            if let Some(ref json) = body {
+                request = request.json(json);
+            }
+
+            // Send the request
+            let response = match request.send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    if attempt < MAX_RETRIES {
+                        warn!("Request failed (attempt {}), retrying: {}", attempt + 1, e);
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
+
+            let status = response.status();
+            let headers = response.headers().clone();
+
+            // Check for rate limiting
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                // Need to read body to check for rate limit message
+                let body_text = response.text().await.unwrap_or_default();
+
+                if RateLimiter::is_rate_limited(status, &body_text) {
+                    if attempt < MAX_RETRIES {
+                        let wait_duration = self.rate_limiter.handle_rate_limit(&headers).await;
+                        warn!(
+                            "Rate limited on {} {} (attempt {}), waiting {:?}",
+                            method, url, attempt + 1, wait_duration
+                        );
+                        tokio::time::sleep(wait_duration).await;
+                        continue;
+                    }
+                    error!("Rate limit exceeded after {} retries", MAX_RETRIES);
+                    anyhow::bail!("GitHub API rate limit exceeded: {}", body_text);
+                }
+
+                // Not a rate limit error, return error response
+                anyhow::bail!("GitHub API error {}: {}", status, body_text);
+            }
+
+            // Record successful request
+            self.rate_limiter.record_success(&headers).await;
+
+            return Ok(response);
+        }
+
+        anyhow::bail!("Request failed after {} retries", MAX_RETRIES);
     }
 
     /// Add a reaction to a comment.
@@ -56,13 +159,7 @@ impl GitHubClient {
         );
 
         let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&serde_json::json!({ "content": reaction }))
-            .send()
+            .post(&url, Some(serde_json::json!({ "content": reaction })))
             .await?;
 
         if !response.status().is_success() {
@@ -89,14 +186,7 @@ impl GitHubClient {
             self.base_url, owner, repo, comment_id, reaction_id
         );
 
-        let response = self
-            .client
-            .delete(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await?;
+        let response = self.delete(&url).await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -122,13 +212,7 @@ impl GitHubClient {
         );
 
         let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&serde_json::json!({ "body": body }))
-            .send()
+            .post(&url, Some(serde_json::json!({ "body": body })))
             .await?;
 
         if !response.status().is_success() {
@@ -157,13 +241,7 @@ impl GitHubClient {
         );
 
         let response = self
-            .client
-            .patch(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&serde_json::json!({ "body": body }))
-            .send()
+            .patch(&url, Some(serde_json::json!({ "body": body })))
             .await?;
 
         if !response.status().is_success() {
@@ -189,14 +267,7 @@ impl GitHubClient {
             self.base_url, owner, repo, number
         );
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await?;
+        let response = self.get(&url).await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -222,18 +293,15 @@ impl GitHubClient {
         let url = format!("{}/repos/{}/{}/pulls", self.base_url, owner, repo);
 
         let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&serde_json::json!({
-                "title": title,
-                "body": body,
-                "head": head,
-                "base": base
-            }))
-            .send()
+            .post(
+                &url,
+                Some(serde_json::json!({
+                    "title": title,
+                    "body": body,
+                    "head": head,
+                    "base": base
+                })),
+            )
             .await?;
 
         if !response.status().is_success() {
@@ -255,14 +323,7 @@ impl GitHubClient {
             self.base_url, owner, repo, number
         );
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await?;
+        let response = self.get(&url).await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -287,14 +348,7 @@ impl GitHubClient {
             self.base_url, owner, repo, username
         );
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await?;
+        let response = self.get(&url).await?;
 
         if !response.status().is_success() {
             let status = response.status();
