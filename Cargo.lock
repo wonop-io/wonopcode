@@ -8717,6 +8717,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "urlencoding",
  "walkdir",
  "wonop-memory",
  "wonopcode-codemode",

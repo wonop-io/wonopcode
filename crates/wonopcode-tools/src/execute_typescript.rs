@@ -210,6 +210,15 @@ use wonopcode_codemode::ServiceHandles as CodemodeServiceHandles;
 ///
 /// For desktop apps with WebKit, use WorkerExecutor (process isolation) instead
 /// to avoid V8/WebKit memory conflicts.
+///
+/// # Deprecated
+/// This executor is deprecated and kept only for potential fallback scenarios.
+/// Desktop apps MUST use WorkerExecutor (codemode-worker process) instead.
+/// In-process V8 causes memory conflicts with WebKit on macOS.
+#[deprecated(
+    since = "0.3.0",
+    note = "Use WorkerExecutor for Desktop apps. In-process V8 conflicts with WebKit on macOS."
+)]
 pub struct InProcessTypescriptExecutor {
     /// Service handles for external services.
     services: CodemodeServiceHandles,

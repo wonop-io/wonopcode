@@ -4,6 +4,62 @@
 
 use serde::{Deserialize, Serialize};
 
+// =============================================================================
+// V8 Capability Types
+// =============================================================================
+
+/// Filesystem access level for the V8 sandbox
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FilesystemCapability {
+    /// No filesystem access
+    #[default]
+    None,
+    /// Read-only filesystem access
+    ReadOnly,
+    /// Full read/write filesystem access
+    Full,
+}
+
+/// V8 sandbox capability set
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct V8CapabilitySet {
+    /// Filesystem access level
+    pub filesystem: FilesystemCapability,
+    /// Access to ticket system
+    pub tickets: bool,
+    /// Ability to spawn sub-agents
+    pub agents: bool,
+    /// Access to memory/recall functions
+    pub memory: bool,
+    /// Access to LSP (language server)
+    pub lsp: bool,
+    /// Access to HMS (hierarchical memory system)
+    pub hms: bool,
+    /// Access to web (fetch, search)
+    pub web: bool,
+    /// Access to ACE (artifact planning)
+    pub ace: bool,
+    /// Access to child_process (shell commands)
+    pub child_process: bool,
+}
+
+impl Default for V8CapabilitySet {
+    fn default() -> Self {
+        Self {
+            filesystem: FilesystemCapability::Full,
+            tickets: true,
+            agents: true,
+            memory: true,
+            lsp: true,
+            hms: true,
+            web: true,
+            ace: true,
+            child_process: true,
+        }
+    }
+}
+
 /// Messages sent from client to server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -188,6 +244,14 @@ pub enum ClientMessage {
         workstream_id: String,
         /// Whether to enable allow-all mode.
         enabled: bool,
+    },
+
+    /// Set V8 sandbox capabilities for TypeScript execution.
+    SetV8Capabilities {
+        /// Workstream ID.
+        workstream_id: String,
+        /// Capability set for the V8 sandbox.
+        capabilities: V8CapabilitySet,
     },
 
     /// Update MCP server state.
