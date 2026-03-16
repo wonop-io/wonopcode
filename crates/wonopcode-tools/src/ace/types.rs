@@ -209,6 +209,48 @@ impl SessionLogImportance {
     }
 }
 
+/// Artifact staging status - staged (draft) or committed (approved).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactStatus {
+    /// Draft artifact, pending review/approval
+    #[default]
+    Staged,
+    /// Approved artifact that has passed review
+    Committed,
+}
+
+impl ArtifactStatus {
+    /// Convert to string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ArtifactStatus::Staged => "staged",
+            ArtifactStatus::Committed => "committed",
+        }
+    }
+
+    /// Parse from string.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "staged" => Some(ArtifactStatus::Staged),
+            "committed" => Some(ArtifactStatus::Committed),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this artifact is staged (not yet approved).
+    pub fn is_staged(&self) -> bool {
+        matches!(self, ArtifactStatus::Staged)
+    }
+}
+
+impl fmt::Display for ArtifactStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+
 impl Priority {
     /// Convert to string representation.
     pub fn as_str(&self) -> &'static str {
@@ -360,6 +402,15 @@ pub struct ArtifactMetadata {
     pub approved_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_at: Option<DateTime<Utc>>,
+    /// Artifact status - staged (draft) or committed (approved).
+    #[serde(default)]
+    pub artifact_status: ArtifactStatus,
+    /// Ticket ID this artifact belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<String>,
+    /// Kind (kebab-case version of artifact type).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 fn default_author() -> String {
@@ -388,6 +439,11 @@ impl Artifact {
     /// - `UC-413-001` → `413`
     /// - `REQ-WON-123-001` → `WON-123`
     pub fn ticket_id(&self) -> Option<String> {
+        // First check if ticket is stored directly in metadata
+        if let Some(ref ticket) = self.metadata.ticket {
+            return Some(ticket.clone());
+        }
+        // Fall back to parsing from artifact ID
         extract_ticket_id_from_artifact_id(&self.metadata.id)
     }
 
@@ -411,12 +467,18 @@ impl Artifact {
 /// - `UC-413-001` → `413`
 /// - `REQ-WON-123-001` → `WON-123`
 pub fn extract_ticket_id_from_artifact_id(artifact_id: &str) -> Option<String> {
-    // The artifact ID format is: {PREFIX}-{TICKET_ID}-{3-DIGIT-SEQUENCE}
-    // We need to:
-    // 1. Remove the 3-digit sequence at the end (and its preceding dash)
-    // 2. Remove the prefix (UC, REQ, DES, TC, TASK)
-    // 3. What remains is the ticket ID
+    // Handle new format: {KIND}-{idx}--{ticket}--{slug}
+    // Examples: UC-01--WON-123--user-logs-in, REQ-02--WON-123--password-length
+    if artifact_id.contains("--") {
+        let parts: Vec<&str> = artifact_id.split("--").collect();
+        if parts.len() >= 2 {
+            return Some(parts[1].to_string());
+        }
+    }
 
+    // Handle legacy format: {PREFIX}-{TICKET_ID}-{3-DIGIT-SEQUENCE}
+    // Examples: TASK-WON-157-006, UC-413-001, REQ-WON-123-001
+    
     // Must have at least PREFIX-X-NNN (minimum 8 chars: "UC-1-001")
     if artifact_id.len() < 8 {
         return None;
@@ -581,4 +643,26 @@ mod tests {
         assert_eq!(extract_ticket_id_from_artifact_id("TASK--001"), None); // Empty ticket ID
         assert_eq!(extract_ticket_id_from_artifact_id("XX-WON-123-001"), None); // Invalid prefix
     }
+
+    #[test]
+    fn test_extract_ticket_id_new_format() {
+        // New format: {KIND}-{idx}--{ticket}--{slug}
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("UC-01--WON-123--user-logs-in"),
+            Some("WON-123".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("REQ-02--WON-123--password-length"),
+            Some("WON-123".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("SESSION-01--WON-456--test-session"),
+            Some("WON-456".to_string())
+        );
+        assert_eq!(
+            extract_ticket_id_from_artifact_id("TASK-03--PROJ-789--implement-auth"),
+            Some("PROJ-789".to_string())
+        );
+    }
+
 }

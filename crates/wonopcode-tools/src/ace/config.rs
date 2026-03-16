@@ -31,14 +31,14 @@ fn default_enabled() -> bool {
 }
 
 fn default_specs_dir() -> String {
-    "specs".to_string()
+    "changelog".to_string()
 }
 
 impl Default for AceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            specs_dir: "specs".to_string(),
+            specs_dir: "changelog".to_string(),
             workflow: WorkflowConfig::default(),
             gates: GatesConfig::default(),
             hooks: HooksConfig::default(),
@@ -208,7 +208,7 @@ mod tests {
     fn test_default_config() {
         let config = WonopCodeConfig::default();
         assert!(config.ace.enabled);
-        assert_eq!(config.ace.specs_dir, "specs");
+        assert_eq!(config.ace.specs_dir, "changelog");
         assert!(config.ace.workflow.checkpoints.requirements.required);
     }
 
@@ -217,7 +217,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let config = WonopCodeConfig::load(dir.path()).unwrap();
         assert!(config.ace.enabled);
-        assert_eq!(config.ace.specs_dir, "specs");
+        assert_eq!(config.ace.specs_dir, "changelog");
     }
 
     #[test]
@@ -247,7 +247,7 @@ ace:
     fn test_specs_dir_path() {
         let config = WonopCodeConfig::default();
         let root = Path::new("/project");
-        assert_eq!(config.specs_dir(root), PathBuf::from("/project/specs"));
+        assert_eq!(config.specs_dir(root), PathBuf::from("/project/changelog"));
     }
 
     #[test]

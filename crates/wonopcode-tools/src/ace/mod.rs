@@ -36,7 +36,7 @@ pub use state::WorkstreamState;
 pub use store::ArtifactStore;
 pub use types::{
     Artifact, ArtifactMetadata, ArtifactType, PhaseStatus, Priority, Progress,
-    SessionLogImportance, WorkflowPhase,
+    ArtifactStatus, SessionLogImportance, WorkflowPhase,
 };
 
 // Re-export tools for registration

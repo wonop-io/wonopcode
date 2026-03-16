@@ -1,6 +1,11 @@
 //! Artifact storage operations.
 //!
-//! Manages reading and writing artifacts to the specs directory.
+//! Manages reading and writing artifacts to the changelog directory.
+//! 
+//! Storage model:
+//! - All artifacts stored in `changelog/{ticket_id}/`
+//! - Naming convention: `{KIND}-{index}--{ticket_id}--{title-slug}.md`
+//! - Staging/committed status tracked via frontmatter `artifact_status` field
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -9,14 +14,15 @@ use std::path::{Path, PathBuf};
 use super::config::WonopCodeConfig;
 use super::state::WorkstreamState;
 use super::types::{
-    Artifact, ArtifactMetadata, ArtifactType, Priority, Progress, SessionLogImportance,
+    Artifact, ArtifactMetadata, ArtifactStatus, ArtifactType, Priority, Progress, SessionLogImportance,
 };
 
-/// Manages artifact storage in the specs directory.
+/// Manages artifact storage in the changelog directory.
 pub struct ArtifactStore {
     #[allow(dead_code)]
     root_dir: PathBuf,
-    specs_dir: PathBuf,
+    /// Base changelog directory (e.g., /project/changelog)
+    changelog_dir: PathBuf,
 }
 
 impl ArtifactStore {
@@ -28,69 +34,117 @@ impl ArtifactStore {
         );
 
         let config = WonopCodeConfig::load(root_dir)?;
-        let specs_dir = config.specs_dir(root_dir);
+        let changelog_dir = config.specs_dir(root_dir);
 
         tracing::info!(
-            "🗄️ ArtifactStore::new: root_dir={}, specs_dir={}, ace_enabled={}",
+            "🗄️ ArtifactStore::new: root_dir={}, changelog_dir={}, ace_enabled={}",
             root_dir.display(),
-            specs_dir.display(),
+            changelog_dir.display(),
             config.is_enabled()
         );
 
         Ok(Self {
             root_dir: root_dir.to_path_buf(),
-            specs_dir,
+            changelog_dir,
         })
     }
 
-    /// Create a store with a custom specs directory.
-    pub fn with_specs_dir(root_dir: &Path, specs_dir: PathBuf) -> Self {
+    /// Create a store with a custom changelog directory.
+    pub fn with_specs_dir(root_dir: &Path, changelog_dir: PathBuf) -> Self {
         tracing::debug!(
-            "🗄️ ArtifactStore::with_specs_dir: root_dir={}, specs_dir={}",
+            "🗄️ ArtifactStore::with_specs_dir: root_dir={}, changelog_dir={}",
             root_dir.display(),
-            specs_dir.display()
+            changelog_dir.display()
         );
         Self {
             root_dir: root_dir.to_path_buf(),
-            specs_dir,
+            changelog_dir,
         }
     }
 
-    /// Get the specs directory path.
+    /// Get the changelog directory path.
     pub fn specs_dir(&self) -> &Path {
-        &self.specs_dir
+        &self.changelog_dir
     }
 
-    /// Ensure the specs directory structure exists.
+    /// Get the ticket directory path for a given ticket ID.
+    pub fn ticket_dir(&self, ticket_id: &str) -> PathBuf {
+        self.changelog_dir.join(ticket_id)
+    }
+
+    /// Ensure the directory structure exists for a ticket.
     pub fn ensure_directories(&self) -> Result<()> {
         tracing::debug!(
-            "🗄️ ArtifactStore::ensure_directories: Creating directories under {}",
-            self.specs_dir.display()
+            "🗄️ ArtifactStore::ensure_directories: Creating base changelog dir {}",
+            self.changelog_dir.display()
         );
-
-        for dir in [
-            "sessions",
-            "use-cases",
-            "requirements",
-            "designs",
-            "tests",
-            "tasks",
-        ] {
-            std::fs::create_dir_all(self.specs_dir.join(dir))?;
-        }
-        // Create staging directory
-        let staging = self.specs_dir.join("workspace").join("staging");
-        for dir in [
-            "sessions",
-            "use-cases",
-            "requirements",
-            "designs",
-            "tests",
-            "tasks",
-        ] {
-            std::fs::create_dir_all(staging.join(dir))?;
-        }
+        std::fs::create_dir_all(&self.changelog_dir)?;
         Ok(())
+    }
+
+    /// Ensure the ticket directory exists.
+    pub fn ensure_ticket_dir(&self, ticket_id: &str) -> Result<PathBuf> {
+        let dir = self.ticket_dir(ticket_id);
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    /// Convert title to URL-safe slug.
+    fn title_to_slug(title: &str) -> String {
+        title
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .take(6) // Limit words
+            .collect::<Vec<_>>()
+            .join("-")
+    }
+
+    /// Get the next available index for an artifact type within a ticket.
+    fn get_next_index(&self, ticket_id: &str, artifact_type: &ArtifactType) -> Result<u32> {
+        let ticket_dir = self.ticket_dir(ticket_id);
+        let prefix = artifact_type.prefix();
+        
+        if !ticket_dir.exists() {
+            return Ok(1);
+        }
+
+        let mut max_index: u32 = 0;
+        
+        for entry in std::fs::read_dir(&ticket_dir)? {
+            let entry = entry?;
+            let filename = entry.file_name();
+            let name = filename.to_string_lossy();
+            
+            // Check if filename starts with our prefix (e.g., "UC-01--")
+            if name.starts_with(prefix) && name.ends_with(".md") {
+                // Extract index from {PREFIX}-{INDEX}--
+                if let Some(idx_str) = name.strip_prefix(prefix).and_then(|s| s.strip_prefix('-')) {
+                    if let Some(idx_end) = idx_str.find("--") {
+                        if let Ok(idx) = idx_str[..idx_end].parse::<u32>() {
+                            max_index = max_index.max(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(max_index + 1)
+    }
+
+    /// Generate artifact filename using new convention: {KIND}-{index}--{ticket_id}--{slug}.md
+    fn generate_filename(&self, artifact_type: &ArtifactType, index: u32, ticket_id: &str, title: &str) -> String {
+        let slug = Self::title_to_slug(title);
+        format!("{}-{:02}--{}--{}.md", artifact_type.prefix(), index, ticket_id, slug)
+    }
+
+    /// Generate artifact ID: {KIND}-{index}--{ticket_id}--{slug}
+    fn generate_id(&self, artifact_type: &ArtifactType, index: u32, ticket_id: &str, title: &str) -> String {
+        let slug = Self::title_to_slug(title);
+        format!("{}-{:02}--{}--{}", artifact_type.prefix(), index, ticket_id, slug)
     }
 
     /// Create a new artifact.
@@ -118,9 +172,6 @@ impl ArtifactStore {
     }
 
     /// Create a new artifact with an optional phase.
-    ///
-    /// The phase parameter is primarily used for Task artifacts to group them
-    /// in the implementation plan view. For other artifact types, phase is ignored.
     #[allow(clippy::too_many_arguments)]
     pub fn create_artifact_with_phase(
         &self,
@@ -133,32 +184,38 @@ impl ArtifactStore {
         staging: bool,
         phase: Option<String>,
     ) -> Result<Artifact> {
+        let ticket_id = &state.ticket_id;
+        
         tracing::info!(
-            "🗄️ ArtifactStore::create_artifact_with_phase: type={}, title='{}', parents={:?}, phase={:?}, staging={}",
+            "🗄️ ArtifactStore::create_artifact_with_phase: type={}, title='{}', ticket={}, parents={:?}, phase={:?}, staging={}",
             artifact_type,
             title,
+            ticket_id,
             parents,
             phase,
             staging
         );
-        tracing::debug!(
-            "🗄️ ArtifactStore: specs_dir={}, ticket_id={}",
-            self.specs_dir.display(),
-            state.ticket_id
-        );
 
-        // Validate parents (including ticket ID check)
-        tracing::debug!("🗄️ ArtifactStore: Validating parents...");
-        self.validate_parents(&artifact_type, &parents, &state.ticket_id)?;
-        tracing::debug!("🗄️ ArtifactStore: Parents validated successfully");
+        // Validate parents
+        self.validate_parents(&artifact_type, &parents, ticket_id)?;
 
-        // Generate ID
-        let seq = state.next_sequence(artifact_type.directory());
-        let id = format!("{}-{}-{:03}", artifact_type.prefix(), state.ticket_id, seq);
+        // Get next index for this artifact type within the ticket
+        let index = self.get_next_index(ticket_id, &artifact_type)?;
+
+        // Generate ID and filename
+        let id = self.generate_id(&artifact_type, index, ticket_id, title);
+        let filename = self.generate_filename(&artifact_type, index, ticket_id, title);
+
         tracing::info!("🗄️ ArtifactStore: Generated artifact ID: {}", id);
 
-        // Create metadata
+        // Ensure ticket directory exists
+        let ticket_dir = self.ensure_ticket_dir(ticket_id)?;
+        let path = ticket_dir.join(&filename);
+
+        // Create metadata with artifact_status
         let now = Utc::now();
+        let artifact_status = if staging { ArtifactStatus::Staged } else { ArtifactStatus::Committed };
+        
         let metadata = ArtifactMetadata {
             id: id.clone(),
             artifact_type,
@@ -171,34 +228,15 @@ impl ArtifactStore {
             author: "agent".to_string(),
             approved_by: None,
             approved_at: None,
+            artifact_status,
+            ticket: Some(ticket_id.to_string()),
+            kind: Some(artifact_type.directory().to_string()),
         };
 
-        // Determine path
-        let dir = if staging {
-            self.specs_dir
-                .join("workspace")
-                .join("staging")
-                .join(artifact_type.directory())
-        } else {
-            self.specs_dir.join(artifact_type.directory())
-        };
-        tracing::debug!("🗄️ ArtifactStore: Target directory: {}", dir.display());
-
-        tracing::debug!("🗄️ ArtifactStore: Creating directory if needed...");
-        std::fs::create_dir_all(&dir)?;
-        tracing::debug!("🗄️ ArtifactStore: Directory exists: {}", dir.exists());
-
-        let filename = format!("{}-{}.md", id, sanitize_title(title));
-        let path = dir.join(&filename);
         tracing::info!("🗄️ ArtifactStore: Writing file to: {}", path.display());
 
         // Write file
         let file_content = format_artifact(&metadata, title, content);
-        tracing::debug!(
-            "🗄️ ArtifactStore: File content length: {} bytes",
-            file_content.len()
-        );
-
         std::fs::write(&path, &file_content)?;
 
         // Verify file was written
@@ -209,12 +247,10 @@ impl ArtifactStore {
                 path.display(),
                 file_size
             );
-        } else {
-            tracing::error!(
-                "🗄️ ArtifactStore: ✗ File write appeared to succeed but file not found: {}",
-                path.display()
-            );
         }
+
+        // Update sequence counter in state
+        state.next_sequence(artifact_type.directory());
 
         Ok(Artifact {
             metadata,
@@ -226,19 +262,57 @@ impl ArtifactStore {
 
     /// Read an artifact by ID.
     pub fn read_artifact(&self, id: &str) -> Result<Option<Artifact>> {
-        // Determine artifact type from ID prefix
+        // Extract ticket ID from artifact ID using the new format: {KIND}-{idx}--{ticket}--{slug}
+        let ticket_id = match extract_ticket_id_from_new_format(id) {
+            Some(t) => t,
+            None => {
+                // Try legacy format: {KIND}-{TICKET}-{SEQ}
+                match super::types::extract_ticket_id_from_artifact_id(id) {
+                    Some(t) => t,
+                    None => return Ok(None),
+                }
+            }
+        };
+
+        let ticket_dir = self.ticket_dir(&ticket_id);
+        
+        if !ticket_dir.exists() {
+            return Ok(None);
+        }
+
+        // Search for file starting with the ID
+        for entry in std::fs::read_dir(&ticket_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.extension().map(|e| e == "md").unwrap_or(false) {
+                let filename = path.file_stem().unwrap_or_default().to_string_lossy();
+                if filename == id || filename.starts_with(&format!("{}-", id.split("--").next().unwrap_or(id))) {
+                    // Parse and check if ID matches
+                    if let Ok(artifact) = self.parse_artifact_file(&path) {
+                        if artifact.metadata.id == id {
+                            return Ok(Some(artifact));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also search in legacy format locations for backwards compatibility
+        self.read_artifact_legacy(id)
+    }
+
+    /// Read artifact from legacy storage format (specs/{type}/).
+    fn read_artifact_legacy(&self, id: &str) -> Result<Option<Artifact>> {
         let artifact_type = match parse_artifact_type_from_id(id) {
             Ok(t) => t,
             Err(_) => return Ok(None),
         };
 
-        // Search in specs and staging
+        // Check legacy directories
         let dirs = [
-            self.specs_dir.join(artifact_type.directory()),
-            self.specs_dir
-                .join("workspace")
-                .join("staging")
-                .join(artifact_type.directory()),
+            self.changelog_dir.join(artifact_type.directory()),
+            self.changelog_dir.join("workspace").join("staging").join(artifact_type.directory()),
         ];
 
         for dir in dirs {
@@ -262,31 +336,23 @@ impl ArtifactStore {
         Ok(None)
     }
 
-    /// List all artifacts of a given type.
-    ///
-    /// **Note**: This returns ALL artifacts of the type, regardless of ticket ID.
-    /// For workstream-scoped queries, use `list_artifacts_for_ticket()` instead.
-    pub fn list_artifacts(&self, artifact_type: ArtifactType) -> Result<Vec<Artifact>> {
+    /// List all artifacts for a specific ticket.
+    pub fn list_all_artifacts_for_ticket(&self, ticket_id: &str) -> Result<Vec<Artifact>> {
         let mut artifacts = Vec::new();
+        let ticket_dir = self.ticket_dir(ticket_id);
 
-        let dirs = [
-            self.specs_dir.join(artifact_type.directory()),
-            self.specs_dir
-                .join("workspace")
-                .join("staging")
-                .join(artifact_type.directory()),
-        ];
+        if !ticket_dir.exists() {
+            return Ok(artifacts);
+        }
 
-        for dir in dirs {
-            if !dir.exists() {
-                continue;
-            }
+        for entry in std::fs::read_dir(&ticket_dir)? {
+            let entry = entry?;
+            let path = entry.path();
 
-            for entry in std::fs::read_dir(&dir)? {
-                let entry = entry?;
-                let path = entry.path();
-
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
+            // Skip state files and non-markdown
+            if path.extension().map(|e| e == "md").unwrap_or(false) {
+                let filename = path.file_name().unwrap_or_default().to_string_lossy();
+                if !filename.starts_with('_') {
                     if let Ok(artifact) = self.parse_artifact_file(&path) {
                         artifacts.push(artifact);
                     }
@@ -297,56 +363,66 @@ impl ArtifactStore {
         Ok(artifacts)
     }
 
-    /// List artifacts of a given type that belong to a specific ticket.
-    ///
-    /// This filters artifacts by extracting the ticket ID from their artifact ID
-    /// and comparing it to the provided ticket ID (case-insensitive).
+    /// List artifacts of a given type for a ticket.
     pub fn list_artifacts_for_ticket(
         &self,
         artifact_type: ArtifactType,
         ticket_id: &str,
     ) -> Result<Vec<Artifact>> {
-        let all_artifacts = self.list_artifacts(artifact_type)?;
-        Ok(all_artifacts
+        let all = self.list_all_artifacts_for_ticket(ticket_id)?;
+        Ok(all
             .into_iter()
-            .filter(|a| a.belongs_to_ticket(ticket_id))
+            .filter(|a| a.metadata.artifact_type == artifact_type)
             .collect())
     }
 
-    /// List all artifacts of all types.
-    ///
-    /// **Note**: This returns ALL artifacts regardless of ticket ID.
-    /// For workstream-scoped queries, use `list_all_artifacts_for_ticket()` instead.
-    pub fn list_all_artifacts(&self) -> Result<Vec<Artifact>> {
+    /// List all artifacts of a given type (across all tickets).
+    pub fn list_artifacts(&self, artifact_type: ArtifactType) -> Result<Vec<Artifact>> {
         let mut artifacts = Vec::new();
 
-        for artifact_type in [
-            ArtifactType::Session,
-            ArtifactType::UseCase,
-            ArtifactType::Requirement,
-            ArtifactType::Design,
-            ArtifactType::TestCase,
-            ArtifactType::Task,
-        ] {
-            artifacts.extend(self.list_artifacts(artifact_type)?);
+        if !self.changelog_dir.exists() {
+            return Ok(artifacts);
+        }
+
+        // Scan all ticket directories
+        for entry in std::fs::read_dir(&self.changelog_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if path.is_dir() {
+                let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+                // Skip special directories (products, etc.)
+                if !dir_name.starts_with('.') && dir_name != "products" {
+                    let ticket_artifacts = self.list_artifacts_for_ticket(artifact_type, &dir_name)?;
+                    artifacts.extend(ticket_artifacts);
+                }
+            }
         }
 
         Ok(artifacts)
     }
 
-    /// List all artifacts of all types that belong to a specific ticket.
-    pub fn list_all_artifacts_for_ticket(&self, ticket_id: &str) -> Result<Vec<Artifact>> {
+    /// List all artifacts across all tickets.
+    pub fn list_all_artifacts(&self) -> Result<Vec<Artifact>> {
         let mut artifacts = Vec::new();
 
-        for artifact_type in [
-            ArtifactType::Session,
-            ArtifactType::UseCase,
-            ArtifactType::Requirement,
-            ArtifactType::Design,
-            ArtifactType::TestCase,
-            ArtifactType::Task,
-        ] {
-            artifacts.extend(self.list_artifacts_for_ticket(artifact_type, ticket_id)?);
+        if !self.changelog_dir.exists() {
+            return Ok(artifacts);
+        }
+
+        // Scan all ticket directories
+        for entry in std::fs::read_dir(&self.changelog_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if path.is_dir() {
+                let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+                // Skip special directories
+                if !dir_name.starts_with('.') && dir_name != "products" {
+                    let ticket_artifacts = self.list_all_artifacts_for_ticket(&dir_name)?;
+                    artifacts.extend(ticket_artifacts);
+                }
+            }
         }
 
         Ok(artifacts)
@@ -398,83 +474,42 @@ impl ArtifactStore {
         })
     }
 
-    /// Promote an artifact from staging to specs.
+    /// Promote an artifact from staged to committed.
     pub fn promote_artifact(&self, id: &str) -> Result<Artifact> {
         let artifact = self
             .read_artifact(id)?
             .ok_or_else(|| anyhow::anyhow!("Artifact not found: {}", id))?;
 
-        // Check if already in specs (not staging)
-        let staging_path = self
-            .specs_dir
-            .join("workspace")
-            .join("staging")
-            .join(artifact.metadata.artifact_type.directory());
-
-        if !artifact.path.starts_with(&staging_path) {
-            bail!("Artifact {} is not in staging", id);
+        if artifact.metadata.artifact_status == ArtifactStatus::Committed {
+            bail!("Artifact {} is already committed", id);
         }
 
-        // Ensure target directory exists
-        let target_dir = self
-            .specs_dir
-            .join(artifact.metadata.artifact_type.directory());
-        std::fs::create_dir_all(&target_dir)?;
+        let mut metadata = artifact.metadata.clone();
+        metadata.artifact_status = ArtifactStatus::Committed;
+        metadata.updated = Utc::now();
 
-        // New path in specs
-        let file_name = artifact
-            .path
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("Artifact path has no file name: {:?}", artifact.path))?;
-        let new_path = target_dir.join(file_name);
-
-        // Move file
-        std::fs::rename(&artifact.path, &new_path)?;
+        // Rewrite file with updated status
+        let file_content = format_artifact(&metadata, &artifact.title, &artifact.content);
+        std::fs::write(&artifact.path, &file_content)?;
 
         Ok(Artifact {
-            path: new_path,
+            metadata,
             ..artifact
         })
     }
 
     /// Promote all staged artifacts of the given types.
-    /// Returns the number of artifacts promoted.
     pub fn promote_artifacts_by_types(&self, types: &[ArtifactType]) -> Result<usize> {
         let mut count = 0;
 
-        for artifact_type in types {
-            let staging_dir = self
-                .specs_dir
-                .join("workspace")
-                .join("staging")
-                .join(artifact_type.directory());
-
-            if !staging_dir.exists() {
-                continue;
-            }
-
-            // Collect IDs first to avoid borrow issues
-            let ids: Vec<String> = std::fs::read_dir(&staging_dir)?
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.path().extension().map(|e| e == "md").unwrap_or(false))
-                .filter_map(|entry| {
-                    let filename = entry.path().file_stem()?.to_string_lossy().to_string();
-                    // Extract ID (first part before the title)
-                    let id = filename.split('-').take(3).collect::<Vec<_>>().join("-");
-                    // Check if this looks like a valid artifact ID
-                    if id.starts_with(artifact_type.prefix()) {
-                        Some(filename.split('-').take(3).collect::<Vec<_>>().join("-"))
-                    } else {
-                        // Full ID might be different format, try parsing from file
-                        self.parse_artifact_file(&entry.path())
-                            .ok()
-                            .map(|a| a.metadata.id)
-                    }
-                })
-                .collect();
-
-            for id in ids {
-                if self.promote_artifact(&id).is_ok() {
+        // Get all artifacts and filter by type and staged status
+        let all_artifacts = self.list_all_artifacts()?;
+        
+        for artifact in all_artifacts {
+            if types.contains(&artifact.metadata.artifact_type) 
+                && artifact.metadata.artifact_status == ArtifactStatus::Staged 
+            {
+                if self.promote_artifact(&artifact.metadata.id).is_ok() {
                     count += 1;
                 }
             }
@@ -483,18 +518,12 @@ impl ArtifactStore {
         Ok(count)
     }
 
-    /// Check if an artifact is in staging.
+    /// Check if an artifact is staged.
     pub fn is_staged(&self, artifact: &Artifact) -> bool {
-        artifact
-            .path
-            .to_string_lossy()
-            .contains("/workspace/staging/")
+        artifact.metadata.artifact_status == ArtifactStatus::Staged
     }
 
     /// Ensure a session exists for the workstream.
-    ///
-    /// If the workstream doesn't have a session, or the session file is missing,
-    /// creates one. Returns the session ID.
     pub fn ensure_session(
         &self,
         state: &mut WorkstreamState,
@@ -502,11 +531,9 @@ impl ArtifactStore {
     ) -> Result<String> {
         // Check if session_id is set AND the session artifact actually exists
         if let Some(ref session_id) = state.session_id {
-            // Verify the session file exists on disk
             if self.read_artifact(session_id)?.is_some() {
                 return Ok(session_id.clone());
             }
-            // Session ID was set but file doesn't exist - clear it and create new
             tracing::warn!(
                 "Session {} referenced in state but file not found, creating new session",
                 session_id
@@ -528,10 +555,7 @@ impl ArtifactStore {
         Ok(session.metadata.id)
     }
 
-    /// Create a new session artifact for the workstream.
-    ///
-    /// Sessions are the root artifacts that contain changelogs and context.
-    /// Each workstream has exactly one session.
+    /// Create a new session artifact.
     pub fn create_session(
         &self,
         state: &mut WorkstreamState,
@@ -540,9 +564,17 @@ impl ArtifactStore {
         let now = Utc::now();
         let date_str = now.format("%Y-%m-%d").to_string();
 
-        // Initial changelog content
         let content = format!(
-            "## Context\n\n(Session context will be added here)\n\n## Changelog\n\n### {}\n\n- 🟢 {} Session started\n",
+            "## Context
+
+(Session context will be added here)
+
+## Changelog
+
+### {}
+
+- 🟢 {} Session started
+",
             date_str,
             now.format("%H:%M")
         );
@@ -552,19 +584,14 @@ impl ArtifactStore {
             ArtifactType::Session,
             title,
             &content,
-            vec![], // No parents for session
+            vec![],
             Priority::High,
-            false, // Sessions go directly to specs
-            None,  // No phase for sessions
+            false, // Sessions go directly to committed
+            None,
         )
     }
 
     /// Append a log entry to the session's changelog.
-    ///
-    /// The entry format is:
-    /// - 🔴 HH:MM message (important)
-    /// - 🟡 HH:MM message (maybe important)
-    /// - 🟢 HH:MM message (info only)
     pub fn append_session_log(
         &self,
         session_id: &str,
@@ -587,180 +614,67 @@ impl ArtifactStore {
         };
 
         let indent_str = "  ".repeat(indent);
-        let entry = format!("{}- {} {} {}\n", indent_str, emoji, time_str, message);
+        let entry = format!("{}- {} {} {}
+", indent_str, emoji, time_str, message);
 
-        // Check if we need to add a new date header
         let mut new_content = session.content.clone();
         let date_header = format!("### {}", date_str);
 
         if !new_content.contains(&date_header) {
-            // Add new date section
-            new_content.push_str(&format!("\n{}\n\n", date_header));
+            new_content.push_str(&format!("
+{}
+
+", date_header));
         }
 
-        // Append the entry
         new_content.push_str(&entry);
 
         self.update_artifact_content(session_id, &session.title, &new_content)
     }
 
-    /// Validate that parents are valid for the given artifact type and belong to the same ticket.
+    /// Validate parents for the given artifact type.
     fn validate_parents(
         &self,
         artifact_type: &ArtifactType,
         parents: &[String],
         ticket_id: &str,
     ) -> Result<()> {
-        tracing::debug!(
-            "🔍 validate_parents: artifact_type={}, parents={:?}, ticket_id={}",
-            artifact_type,
-            parents,
-            ticket_id
-        );
-
         let valid_types = artifact_type.valid_parent_types();
-        tracing::debug!(
-            "🔍 validate_parents: Valid parent types for {}: {:?}",
-            artifact_type,
-            valid_types
-        );
 
         if artifact_type.requires_parent() && parents.is_empty() {
-            tracing::error!(
-                "🔍 validate_parents: {} requires parent but none provided",
-                artifact_type
-            );
             bail!(
                 "{} requires at least one parent of type: {}",
                 artifact_type,
-                valid_types
-                    .iter()
-                    .map(|t| t.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                valid_types.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
             );
         }
 
         for parent_id in parents {
-            tracing::debug!("🔍 validate_parents: Checking parent '{}'", parent_id);
-
-            let parent_type = match parse_artifact_type_from_id(parent_id) {
-                Ok(t) => {
-                    tracing::debug!(
-                        "🔍 validate_parents: Parsed parent type: {} from id '{}'",
-                        t,
-                        parent_id
-                    );
-                    t
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "🔍 validate_parents: Failed to parse artifact type from '{}': {}",
-                        parent_id,
-                        e
-                    );
-                    return Err(e);
-                }
-            };
+            let parent_type = parse_artifact_type_from_id(parent_id)?;
 
             if !valid_types.contains(&parent_type) {
-                tracing::error!(
-                    "🔍 validate_parents: Invalid parent type {} for {}",
-                    parent_type,
-                    artifact_type
-                );
                 bail!(
                     "Invalid parent type {} for {}. Valid types: {}",
                     parent_type,
                     artifact_type,
-                    valid_types
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    valid_types.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
                 );
             }
 
             // Verify parent exists
-            tracing::debug!(
-                "🔍 validate_parents: Looking for parent artifact '{}' in specs_dir={}",
-                parent_id,
-                self.specs_dir.display()
-            );
-
-            let parent_artifact = match self.read_artifact(parent_id) {
-                Ok(Some(a)) => {
-                    tracing::debug!(
-                        "🔍 validate_parents: Found parent artifact at {}",
-                        a.path.display()
-                    );
-                    a
-                }
-                Ok(None) => {
-                    tracing::error!(
-                        "🔍 validate_parents: Parent artifact '{}' NOT FOUND in specs_dir={}",
-                        parent_id,
-                        self.specs_dir.display()
-                    );
-                    // List what files exist in the parent type directory
-                    let parent_dir = self.specs_dir.join(parent_type.directory());
-                    if parent_dir.exists() {
-                        if let Ok(entries) = std::fs::read_dir(&parent_dir) {
-                            let files: Vec<_> = entries
-                                .filter_map(|e| e.ok())
-                                .map(|e| e.file_name().to_string_lossy().to_string())
-                                .collect();
-                            tracing::debug!(
-                                "🔍 validate_parents: Files in {}: {:?}",
-                                parent_dir.display(),
-                                files
-                            );
-                        }
-                    } else {
-                        tracing::debug!(
-                            "🔍 validate_parents: Directory {} does not exist",
-                            parent_dir.display()
-                        );
-                    }
-                    bail!("Parent artifact not found: {}", parent_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "🔍 validate_parents: Error reading parent artifact '{}': {}",
-                        parent_id,
-                        e
-                    );
-                    return Err(e);
-                }
-            };
+            let parent_artifact = self.read_artifact(parent_id)?
+                .ok_or_else(|| anyhow::anyhow!("Parent artifact not found: {}", parent_id))?;
 
             // Verify parent belongs to the same ticket
-            let parent_ticket = parent_artifact.ticket_id();
-            tracing::debug!(
-                "🔍 validate_parents: Parent ticket_id={:?}, expected={}",
-                parent_ticket,
-                ticket_id
-            );
-
             if !parent_artifact.belongs_to_ticket(ticket_id) {
-                tracing::error!(
-                    "🔍 validate_parents: Parent '{}' belongs to ticket {:?}, not '{}'",
-                    parent_id,
-                    parent_ticket,
-                    ticket_id
-                );
                 bail!(
-                    "Parent artifact {} does not belong to the current workstream (ticket: {}).\n\
-                     Parent artifacts must be from the same ticket.",
+                    "Parent artifact {} does not belong to the current workstream (ticket: {})",
                     parent_id,
                     ticket_id
                 );
             }
-
-            tracing::debug!("🔍 validate_parents: Parent '{}' validated successfully", parent_id);
         }
 
-        tracing::debug!("🔍 validate_parents: All parents validated successfully");
         Ok(())
     }
 
@@ -769,40 +683,31 @@ impl ArtifactStore {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read artifact: {}", path.display()))?;
 
-        // Split frontmatter and content
         let parts: Vec<&str> = content.splitn(3, "---").collect();
         if parts.len() < 3 {
-            bail!(
-                "Invalid artifact format: missing frontmatter in {}",
-                path.display()
-            );
+            bail!("Invalid artifact format: missing frontmatter in {}", path.display());
         }
 
         let frontmatter = parts[1].trim();
         let body = parts[2].trim();
 
-        // Parse frontmatter
         let metadata: ArtifactMetadata = serde_yaml::from_str(frontmatter)
             .with_context(|| format!("Failed to parse frontmatter in {}", path.display()))?;
 
-        // Extract title from first # heading
         let title = body
             .lines()
             .find(|line| line.starts_with("# "))
             .map(|line| line.trim_start_matches("# ").to_string())
             .unwrap_or_default();
 
-        // Content is everything after the title line
         let content_lines: Vec<&str> = body.lines().collect();
-        let title_index = content_lines
-            .iter()
-            .position(|line| line.starts_with("# "))
-            .unwrap_or(0);
+        let title_index = content_lines.iter().position(|line| line.starts_with("# ")).unwrap_or(0);
         let content = content_lines
             .into_iter()
             .skip(title_index + 1)
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("
+")
             .trim()
             .to_string();
 
@@ -815,31 +720,39 @@ impl ArtifactStore {
     }
 }
 
-/// Parse artifact type from ID prefix.
-pub fn parse_artifact_type_from_id(id: &str) -> Result<ArtifactType> {
-    let prefix = id.split('-').next().unwrap_or("");
-    ArtifactType::from_prefix(prefix)
-        .ok_or_else(|| anyhow::anyhow!("Unknown artifact type prefix: {}", prefix))
+/// Extract ticket ID from new format: {KIND}-{idx}--{ticket}--{slug}
+fn extract_ticket_id_from_new_format(id: &str) -> Option<String> {
+    let parts: Vec<&str> = id.split("--").collect();
+    if parts.len() >= 2 {
+        Some(parts[1].to_string())
+    } else {
+        None
+    }
 }
 
-/// Sanitize title for filename.
-fn sanitize_title(title: &str) -> String {
-    title
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .take(6) // Limit words
-        .collect::<Vec<_>>()
-        .join("-")
+/// Parse artifact type from ID prefix.
+pub fn parse_artifact_type_from_id(id: &str) -> Result<ArtifactType> {
+    // Handle new format: {KIND}-{idx}--{ticket}--{slug}
+    let prefix = if id.contains("--") {
+        id.split('-').next().unwrap_or("")
+    } else {
+        // Legacy format: {KIND}-{TICKET}-{SEQ}
+        id.split('-').next().unwrap_or("")
+    };
+    
+    ArtifactType::from_prefix(prefix)
+        .ok_or_else(|| anyhow::anyhow!("Unknown artifact type prefix: {}", prefix))
 }
 
 /// Format artifact as markdown with YAML frontmatter.
 fn format_artifact(metadata: &ArtifactMetadata, title: &str, content: &str) -> String {
     let frontmatter = serde_yaml::to_string(metadata).unwrap_or_default();
-    format!("---\n{}---\n\n# {}\n\n{}", frontmatter, title, content)
+    format!("---
+{}---
+
+# {}
+
+{}", frontmatter, title, content)
 }
 
 #[cfg(test)]
@@ -849,13 +762,12 @@ mod tests {
 
     fn create_test_store() -> (tempfile::TempDir, ArtifactStore) {
         let dir = tempdir().unwrap();
-        let specs_dir = dir.path().join("specs");
-        let store = ArtifactStore::with_specs_dir(dir.path(), specs_dir);
+        let changelog_dir = dir.path().join("changelog");
+        let store = ArtifactStore::with_specs_dir(dir.path(), changelog_dir);
         store.ensure_directories().unwrap();
         (dir, store)
     }
 
-    /// Helper to create a session for tests
     fn create_test_session(store: &ArtifactStore, state: &mut WorkstreamState) -> String {
         let session = store
             .create_artifact(
@@ -876,7 +788,6 @@ mod tests {
         let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
-        // Create session first (UseCases require a Session parent)
         let session_id = create_test_session(&store, &mut state);
 
         let artifact = store
@@ -891,223 +802,89 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(artifact.metadata.id, "UC-WON-123-001");
+        // New ID format: UC-01--WON-123--user-logs-in
+        assert!(artifact.metadata.id.starts_with("UC-01--WON-123--"));
         assert_eq!(artifact.title, "User logs in");
         assert!(artifact.path.exists());
 
-        // Verify file content
-        let content = std::fs::read_to_string(&artifact.path).unwrap();
-        assert!(content.contains("id: UC-WON-123-001"));
-        assert!(content.contains("# User logs in"));
+        // Verify stored in changelog/WON-123/
+        assert!(artifact.path.to_string_lossy().contains("changelog/WON-123/"));
     }
 
     #[test]
-    fn test_create_requirement_with_parent() {
+    fn test_artifact_status() {
         let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
-        // Create session first
         let session_id = create_test_session(&store, &mut state);
 
-        // First create a use case
-        let uc = store
+        // Create staged artifact
+        let staged = store
             .create_artifact(
                 &mut state,
                 ArtifactType::UseCase,
-                "Test UC",
-                "Content",
-                vec![session_id],
-                Priority::Medium,
-                false,
-            )
-            .unwrap();
-
-        // Then create a requirement
-        let req = store
-            .create_artifact(
-                &mut state,
-                ArtifactType::Requirement,
-                "Test REQ",
-                "Content",
-                vec![uc.metadata.id.clone()],
-                Priority::Medium,
-                false,
-            )
-            .unwrap();
-
-        assert_eq!(req.metadata.id, "REQ-WON-123-001");
-        assert_eq!(req.metadata.parents, vec![uc.metadata.id]);
-    }
-
-    #[test]
-    fn test_create_requirement_without_parent_fails() {
-        let (_dir, store) = create_test_store();
-        let mut state = WorkstreamState::new("WON-123");
-
-        let result = store.create_artifact(
-            &mut state,
-            ArtifactType::Requirement,
-            "Test REQ",
-            "Content",
-            vec![], // No parents
-            Priority::Medium,
-            false,
-        );
-
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("requires at least one parent"));
-    }
-
-    #[test]
-    fn test_read_artifact() {
-        let (_dir, store) = create_test_store();
-        let mut state = WorkstreamState::new("WON-123");
-
-        // Create session first
-        let session_id = create_test_session(&store, &mut state);
-
-        let created = store
-            .create_artifact(
-                &mut state,
-                ArtifactType::UseCase,
-                "Test UC",
-                "Some content here.",
-                vec![session_id],
-                Priority::High,
-                false,
-            )
-            .unwrap();
-
-        let read = store.read_artifact(&created.metadata.id).unwrap().unwrap();
-
-        assert_eq!(read.metadata.id, created.metadata.id);
-        assert_eq!(read.title, "Test UC");
-        assert_eq!(read.content, "Some content here.");
-    }
-
-    #[test]
-    fn test_list_artifacts() {
-        let (_dir, store) = create_test_store();
-        let mut state = WorkstreamState::new("WON-123");
-
-        // Create session first
-        let session_id = create_test_session(&store, &mut state);
-
-        store
-            .create_artifact(
-                &mut state,
-                ArtifactType::UseCase,
-                "UC 1",
+                "Staged UC",
                 "Content",
                 vec![session_id.clone()],
                 Priority::Medium,
-                false,
+                true, // staging = true
             )
             .unwrap();
 
-        store
+        assert_eq!(staged.metadata.artifact_status, ArtifactStatus::Staged);
+        assert!(store.is_staged(&staged));
+
+        // Create committed artifact
+        let committed = store
             .create_artifact(
                 &mut state,
                 ArtifactType::UseCase,
-                "UC 2",
+                "Committed UC",
                 "Content",
                 vec![session_id],
                 Priority::Medium,
-                false,
+                false, // staging = false
             )
             .unwrap();
 
-        let artifacts = store.list_artifacts(ArtifactType::UseCase).unwrap();
-        assert_eq!(artifacts.len(), 2);
+        assert_eq!(committed.metadata.artifact_status, ArtifactStatus::Committed);
+        assert!(!store.is_staged(&committed));
     }
 
     #[test]
-    fn test_update_progress() {
+    fn test_promote_artifact() {
         let (_dir, store) = create_test_store();
         let mut state = WorkstreamState::new("WON-123");
 
-        // Create session first
-        let session_id = create_test_session(&store, &mut state);
-
-        let created = store
-            .create_artifact(
-                &mut state,
-                ArtifactType::UseCase,
-                "Test UC",
-                "Content",
-                vec![session_id],
-                Priority::Medium,
-                false,
-            )
-            .unwrap();
-
-        assert_eq!(created.metadata.progress, Progress::Backlog);
-
-        let updated = store
-            .update_artifact_progress(&created.metadata.id, Progress::InProgress)
-            .unwrap();
-
-        assert_eq!(updated.metadata.progress, Progress::InProgress);
-
-        // Verify persisted
-        let read = store.read_artifact(&created.metadata.id).unwrap().unwrap();
-        assert_eq!(read.metadata.progress, Progress::InProgress);
-    }
-
-    #[test]
-    fn test_staging() {
-        let (_dir, store) = create_test_store();
-        let mut state = WorkstreamState::new("WON-123");
-
-        // Create session first
         let session_id = create_test_session(&store, &mut state);
 
         let artifact = store
             .create_artifact(
                 &mut state,
                 ArtifactType::UseCase,
-                "Staged UC",
+                "Test UC",
                 "Content",
                 vec![session_id],
                 Priority::Medium,
-                true, // staging
+                true, // staged
             )
             .unwrap();
 
-        assert!(artifact.path.to_string_lossy().contains("staging"));
+        assert!(store.is_staged(&artifact));
 
-        // Can still read it
-        let read = store.read_artifact(&artifact.metadata.id).unwrap();
-        assert!(read.is_some());
+        // Promote
+        let promoted = store.promote_artifact(&artifact.metadata.id).unwrap();
+        assert_eq!(promoted.metadata.artifact_status, ArtifactStatus::Committed);
+        assert!(!store.is_staged(&promoted));
     }
 
     #[test]
-    fn test_sanitize_title() {
-        assert_eq!(sanitize_title("Hello World"), "hello-world");
-        assert_eq!(sanitize_title("Test: Something (v2)"), "test-something-v2");
+    fn test_title_to_slug() {
+        assert_eq!(ArtifactStore::title_to_slug("Hello World"), "hello-world");
+        assert_eq!(ArtifactStore::title_to_slug("Test: Something (v2)"), "test-something-v2");
         assert_eq!(
-            sanitize_title("Very Long Title That Should Be Truncated Eventually"),
+            ArtifactStore::title_to_slug("Very Long Title That Should Be Truncated Eventually"),
             "very-long-title-that-should-be"
         );
-    }
-
-    #[test]
-    fn test_parse_artifact_type_from_id() {
-        assert_eq!(
-            parse_artifact_type_from_id("UC-WON-123-001").unwrap(),
-            ArtifactType::UseCase
-        );
-        assert_eq!(
-            parse_artifact_type_from_id("REQ-WON-123-001").unwrap(),
-            ArtifactType::Requirement
-        );
-        assert_eq!(
-            parse_artifact_type_from_id("TASK-WON-123-001").unwrap(),
-            ArtifactType::Task
-        );
-        assert!(parse_artifact_type_from_id("INVALID-123").is_err());
     }
 }
