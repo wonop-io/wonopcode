@@ -135,7 +135,7 @@ impl ArtifactStore {
         Ok(max_index + 1)
     }
 
-    /// Generate artifact filename using new convention: {KIND}-{index}--{ticket_id}--{slug}.md
+    /// Generate artifact filename: {KIND}-{index}--{ticket_id}--{slug}.md
     fn generate_filename(&self, artifact_type: &ArtifactType, index: u32, ticket_id: &str, title: &str) -> String {
         let slug = Self::title_to_slug(title);
         format!("{}-{:02}--{}--{}.md", artifact_type.prefix(), index, ticket_id, slug)
