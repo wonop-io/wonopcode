@@ -3741,6 +3741,10 @@ impl Runner {
                         request_id = %request_id,
                         "Enabling 'allow all' mode - all tool executions will be auto-approved"
                     );
+                    // Enable allow-all mode so future permission checks auto-approve
+                    self.permission_manager.set_allow_all(true);
+                    // Notify UI that allow-all mode is now enabled
+                    send_update(&update_tx, AppUpdate::AllowAllChanged { enabled: true });
                     // Apply sandbox rules to allow all operations
                     self.permission_manager.apply_sandbox_rules().await;
                     // Also respond to the current pending request
