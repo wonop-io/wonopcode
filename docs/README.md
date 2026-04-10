@@ -73,6 +73,9 @@ wonopcode
 - [Overview](./architecture/overview.md) - System design
 - [Crate Structure](./architecture/crate-structure.md) - Code organization
 - [Security Model](./architecture/security-model.md) - Permission system
+- [DAG Conversation Notes](./architecture/dag-conversation-notes.md) - Early DAG design notes
+- [DAG Phase 0 Baseline](./architecture/dag-phase-0-baseline.md) - Migration scope, seams, compatibility, and parity matrix
+- [DAG Phase 9 Cutover](./architecture/dag-phase-9-cutover.md) - DAG-first defaults, cutover diagnostics, and legacy retirement notes
 
 ### Contributing
 - [Contributing Guide](./contributing/CONTRIBUTING.md) - How to contribute
