@@ -32,7 +32,7 @@ Wonop Code uses a **Tera template-based system prompt** that is re-rendered befo
 Edit the `DEFAULT_SYSTEM_PROMPT_TEMPLATE` constant in:
 
 ```
-wonop/apps/wonopcode/communityedition/crates/wonopcode-core/src/system_prompt.rs
+wonop/apps/wonopcode/communityedition/libs/wonopcode-core/src/system_prompt.rs
 ```
 
 The template uses [Tera syntax](https://keats.github.io/tera/docs/) (similar to Jinja2).

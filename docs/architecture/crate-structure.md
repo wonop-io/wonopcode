@@ -513,11 +513,11 @@ src/
    [workspace]
    members = [
        # ...
-       "crates/wonopcode-newcrate",
+       "libs/wonopcode-newcrate",
    ]
    
    [workspace.dependencies]
-   wonopcode-newcrate = { path = "crates/wonopcode-newcrate" }
+   wonopcode-newcrate = { path = "libs/wonopcode-newcrate" }
    ```
 
 4. Create `src/lib.rs`:

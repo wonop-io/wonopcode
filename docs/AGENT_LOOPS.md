@@ -391,6 +391,6 @@ Your WASM loop can call these host functions:
 
 ## See Also
 
-- [WIT Interface](../../pro/crates/wonopcode-wasm-orchestrator/wit/wonopcode.wit)
+- [WIT Interface](../../pro/libs/wonopcode-wasm-orchestrator/wit/wonopcode.wit)
 - [Design Documents](../../../../specs/designs/)
 - [Component Specs](../../../../specs/components/)
